@@ -5,8 +5,9 @@ import re
 import tempfile
 import unittest
 
-from release.provenance import application_hash
+from release.provenance import application_hash, candidate_source
 from release.public_audit import audit_paths, SYNTHETIC_CLIENT
+from release.verify_pair import write_report
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,7 +30,8 @@ class PublicReleaseTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/desktop-build.yml').read_text()
         self.assertIn('workflow_dispatch:', workflow)
         self.assertNotIn('contents: write', workflow)
-        self.assertIn("requested != os.environ['WORKFLOW_SHA']", workflow)
+        self.assertIn("requested = candidate_source(", workflow)
+        self.assertIn("branches: [release/v0.1.0-prep]", workflow)
         self.assertEqual(workflow.count('ref: ${{ needs.source.outputs.sha }}'), 4)
         for expected in ('windows-2022', 'macos-15-intel', 'architecture: arm64',
                          'release.verify_pair', 'SHA256SUMS', 'release.public_audit',
@@ -66,3 +68,41 @@ class PublicReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'value suppressed') as error:
                 audit_paths(root, ['note.txt'])
             self.assertNotIn(token.decode(), str(error.exception))
+
+
+class CandidateSourceTests(unittest.TestCase):
+    def test_preparation_push_uses_its_exact_commit(self):
+        sha = 'a' * 40
+        self.assertEqual(candidate_source('push', 'refs/heads/release/v0.1.0-prep', sha, ''), sha)
+
+    def test_manual_dispatch_requires_explicit_matching_commit(self):
+        sha = 'b' * 40
+        self.assertEqual(candidate_source('workflow_dispatch', 'refs/heads/main', sha, sha), sha)
+        for requested in ('', 'b' * 7, 'c' * 40, 'B' * 40, 'z' * 40):
+            with self.subTest(requested=requested), self.assertRaises(ValueError):
+                candidate_source('workflow_dispatch', 'refs/heads/main', sha, requested)
+
+    def test_other_pushes_events_and_revision_overrides_are_blocked(self):
+        for event, ref, requested in (
+            ('push', 'refs/heads/main', ''), ('push', 'refs/tags/v0.1.0', ''),
+            ('pull_request', 'refs/pull/1/merge', ''),
+            ('push', 'refs/heads/release/v0.1.0-prep', 'a' * 40)):
+            with self.subTest(event=event, ref=ref), self.assertRaises(ValueError):
+                candidate_source(event, ref, 'a' * 40, requested)
+
+
+class CandidateEvidenceTests(unittest.TestCase):
+    def test_combined_checksums_and_report_preserve_existing_evidence(self):
+        report = {'artifacts': [{'sha256': 'a' * 64, 'filename': 'candidate.zip'}]}
+        for existing in ('release-pair.json', 'SHA256SUMS'):
+            with self.subTest(existing=existing), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / existing).write_text('existing evidence')
+                with self.assertRaisesRegex(ValueError, 'existing evidence'):
+                    write_report(root / 'release-pair.json', report)
+                self.assertEqual((root / existing).read_text(), 'existing evidence')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_report(root / 'release-pair.json', report)
+            self.assertEqual(json.loads((root / 'release-pair.json').read_text()), report)
+            self.assertEqual((root / 'SHA256SUMS').read_text(), 'a' * 64 + '  candidate.zip\n')

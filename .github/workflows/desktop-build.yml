@@ -1,5 +1,7 @@
 name: Desktop release candidate (no publishing)
 on:
+  push:
+    branches: [release/v0.1.0-prep]
   workflow_dispatch:
     inputs:
       source_sha:
@@ -27,16 +29,16 @@ jobs:
         env:
           REQUESTED_SHA: ${{ inputs.source_sha }}
           WORKFLOW_SHA: ${{ github.sha }}
+          CANDIDATE_EVENT: ${{ github.event_name }}
+          CANDIDATE_REF: ${{ github.ref }}
         run: |
           python - <<'PY'
-          import os, re, subprocess
+          import os
           from pathlib import Path
-          from release.provenance import check_source
-          requested = os.environ['REQUESTED_SHA']
-          if not re.fullmatch('[0-9a-f]{40}', requested):
-              raise SystemExit('Supply an exact lowercase commit SHA')
-          if requested != os.environ['WORKFLOW_SHA']:
-              raise SystemExit('Source SHA must equal this workflow run commit; select its branch/ref when dispatching')
+          from release.provenance import candidate_source, check_source
+          requested = candidate_source(os.environ['CANDIDATE_EVENT'], os.environ['CANDIDATE_REF'],
+                                       os.environ['WORKFLOW_SHA'], os.environ['REQUESTED_SHA'])
+          print('Candidate source:', requested, 'event:', os.environ['CANDIDATE_EVENT'])
           check_source(Path.cwd(), requested)
           from release.public_audit import audit_source
           audit_source(Path.cwd())

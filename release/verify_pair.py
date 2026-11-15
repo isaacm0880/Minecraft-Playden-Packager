@@ -3,7 +3,6 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-from .provenance import write_json
 
 
 def verify(windows: Path, linux: Path, expected: str, macos_arm64: Path | None = None,
@@ -58,6 +57,17 @@ def verify(windows: Path, linux: Path, expected: str, macos_arm64: Path | None =
                                            'Minecraft 26.3 package regression and console acceptance']}
 
 
+
+def write_report(output: Path, report: dict) -> None:
+    checksums = output.parent / 'SHA256SUMS'
+    if output.exists() or checksums.exists():
+        raise ValueError('Use a new report and checksum destination; existing evidence is preserved')
+    with output.open('x', encoding='utf-8') as stream:
+        stream.write(json.dumps(report, indent=2, sort_keys=True) + '\n')
+    with checksums.open('x', encoding='utf-8') as stream:
+        stream.write(''.join(f'{artifact["sha256"]}  {artifact["filename"]}\n' for artifact in report['artifacts']))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--windows', type=Path, required=True)
@@ -70,9 +80,7 @@ def main() -> int:
     if args.output.exists():
         parser.error('Use a new output file')
     report = verify(args.windows, args.linux, args.source_sha, args.macos_arm64, args.macos_x86_64)
-    write_json(args.output, report)
-    (args.output.parent / 'SHA256SUMS').write_text(
-        ''.join(f'{artifact["sha256"]}  {artifact["filename"]}\n' for artifact in report['artifacts']), encoding='utf-8')
+    write_report(args.output, report)
     return 0
 
 

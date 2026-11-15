@@ -10,7 +10,8 @@ queue-aware USB copying and an offline-only CLI.
 Planned downloads: Windows x64 portable ZIP, Linux x86_64 AppImage, macOS Apple Silicon
 ARM64 application ZIP and macOS Intel x86_64 application ZIP. All four must come from
 one approved public source commit and pass provenance, content audits, checksums,
-frozen smoke tests and native acceptance before publication. No binaries are attached.
+frozen smoke tests and native acceptance before publication. Candidates, when available, are attached to the preparation workflow run;
+none are official release assets. The draft PR records their build status.
 
 Known limitations: no authentication or online client acquisition; no direct PS5
 transfer/helpers/log collection. Forge is Broken and blocked; NeoForge/Quilt launch

@@ -1,6 +1,7 @@
 """Fail closed on stale CLI revisions, dirty release sources or missing features."""
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 
@@ -21,6 +22,26 @@ REQUIRED = {
     '.github/workflows/desktop-build.yml': ('workflow_dispatch',),
     'CHANGELOG.md': ('0.1.0',),
 }
+
+
+
+def candidate_source(event: str, ref: str, workflow_sha: str, requested: str) -> str:
+    """Select an exact public commit; never fall back from an invalid manual input."""
+    if event == 'push':
+        if ref != 'refs/heads/release/v0.1.0-prep':
+            raise ValueError('Automatic candidates are restricted to the preparation branch')
+        if requested:
+            raise ValueError('Push candidates use the pushed commit, not a supplied revision')
+        selected = workflow_sha
+    elif event == 'workflow_dispatch':
+        selected = requested
+    else:
+        raise ValueError('Unsupported candidate workflow event')
+    if not re.fullmatch('[0-9a-f]{40}', selected):
+        raise ValueError('Supply an exact lowercase 40-character public commit SHA')
+    if selected != workflow_sha:
+        raise ValueError('Source SHA must equal this workflow run commit; select its branch/ref')
+    return selected
 
 
 def git(root: Path, *args: str) -> str:

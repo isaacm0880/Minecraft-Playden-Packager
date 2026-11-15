@@ -12,16 +12,42 @@ notices. Apply the description, homepage and topics in
 `release/repository.json` through repository settings. Leave visibility unchanged.
 Do not merge, tag or publish without approval.
 
-GitHub requires a manually dispatched workflow to exist on the default branch.
-The initial default branch contains only the placeholder README, so candidate
-build dispatch remains pending an approved merge of this preparation branch.
-See [GitHub workflow dispatch documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
+## Starting candidate builds without merging
 
-After approval and workflow activation, select the intended reviewed branch/ref
-in **Desktop release candidate (no publishing)**. Supply its exact 40-character
-commit as `source_sha`. The workflow refuses a different workflow/source commit,
-a dirty checkout or an application differing from the reviewed source policy.
-Future application updates require explicit review and a policy hash update.
+A push to `release/v0.1.0-prep` runs **Desktop release candidate (no publishing)**.
+Only that branch has the automatic candidate trigger. The source job records the
+exact pushed public commit; every native job checks out that SHA. It does not
+check out another branch, build a pull-request merge commit or select an earlier
+revision. Candidate artifacts stay attached to the workflow run, not a release.
+
+GitHub requires a manually dispatched workflow to exist on the default branch.
+Manual dispatch therefore remains unavailable while `main` contains only the
+placeholder README; the restricted push trigger avoids that dependency without
+merging. See [GitHub workflow dispatch documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
+
+After an approved merge activates manual dispatch, select the intended reviewed
+branch/ref and supply its exact 40-character commit as `source_sha`. Empty,
+malformed or different manual input is rejected, never silently substituted.
+Both triggers require a clean checkout and an application matching the reviewed
+source policy. Future application updates require explicit review and a policy
+hash update. GitHub Actions must be enabled and have available runner capacity.
+
+If Actions is unavailable, a candidate can be built from the same clean commit
+on a native host using its pinned Python and `release/requirements.txt`:
+
+```sh
+python -m pip install -r release/requirements.txt
+python -m pip install --no-deps --no-build-isolation -e .
+python -m release.build_desktop --source-sha EXACT_PUBLIC_COMMIT --output ../new-candidate-output
+```
+
+Use a new output directory every time. Linux additionally requires the exact
+container image from `release/toolchain.json` and `release/linux-system-deps.sh`;
+Windows/macOS need matching native hosts. Do not cross-compile an archive and
+claim it passed a native smoke test. Preserve failed attempts and existing archives.
+After a Linux container build, run the frozen executable under X11 with
+`xvfb-run -a env QT_QPA_PLATFORM=xcb PATH_TO_FROZEN_EXECUTABLE --smoke-test`.
+macOS also requires `python -m release.smoke PATH_TO_FROZEN_EXECUTABLE --native-cocoa`.
 
 ## Candidate checks
 

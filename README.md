@@ -48,7 +48,7 @@ Untested combinations show:
 
 When available, download **v0.1.0** only from this project's
 [Releases page](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases).
-There are no download files to install yet.
+No official release downloads are available yet. Workflow candidates are for review.
 
 | Host platform | Planned download |
 | --- | --- |

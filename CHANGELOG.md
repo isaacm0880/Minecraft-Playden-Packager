@@ -15,3 +15,5 @@ First public release candidate; no binary release is published yet.
 - Offline-only local-client CLI and package validation.
 - Four platform build targets with pinned tooling, provenance, content audits,
   frozen GUI smoke tests and SHA-256 checksums; native acceptance remains pending.
+- Preparation-branch candidate builds use the exact public push commit without
+  requiring a merge; combined checksum reports preserve existing evidence.

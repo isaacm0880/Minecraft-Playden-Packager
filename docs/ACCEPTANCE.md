@@ -3,8 +3,8 @@
 The preparation branch preserves the reviewed GUI application unchanged.
 Automated validation during preparation (Linux host, Python 3.14.8 / PySide6 6.11.3):
 
-- Complete pytest suite: 388 passed, 1 optional upstream integration skipped,
-  310 subtests passed.
+- Complete pytest suite: 392 passed, 1 optional upstream integration skipped,
+  321 subtests passed.
 - Additional GUI regression run using Qt minimal with Windows widget style:
   109 passed, 41 subtests passed. This does not simulate a native Windows system.
 - mypy Linux, Windows and macOS targets: all passed for the application and
@@ -13,8 +13,9 @@ Automated validation during preparation (Linux host, Python 3.14.8 / PySide6 6.1
 - Public source content/privacy audit passed; reviewed application hash matched.
   CLI help exposes offline commands and no experimental authentication options.
 
-No native release archives have been built or published as part of repository preparation.
-Platform targets are distribution plans, not claims of verified binaries.
+No official release has been published. Check the candidate workflow run and
+draft PR for the current artifact availability and exact public source commit.
+Workflow builds and automated smoke tests do not replace platform acceptance.
 
 Before public release, record results against the same candidate source commit:
 
@@ -39,7 +40,7 @@ Before public release, record results against the same candidate source commit:
   Successful packaging alone is not successful PS5 gameplay.
 
 The public description/topics still require applying the prepared metadata.
-The candidate workflow also needs activation through an approved default-branch
-merge before GitHub manual dispatch. Neither step authorizes publication or a
-visibility change. Known-pattern source audits do not detect every possible
+The restricted preparation-branch push trigger can build candidates before a
+merge; manual dispatch still requires the workflow on the default branch.
+Neither trigger authorizes publication, merging or a visibility change. Known-pattern source audits do not detect every possible
 encoded secret; review candidate contents as well as automated reports.
