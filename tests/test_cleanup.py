@@ -161,3 +161,24 @@ def test_disconnection_and_failed_removal_keep_source_and_usb(copied):
     assert receipt.path.exists() and result.destination.exists()
     assert (original / 'world.dat').read_bytes() == b'original world'
     assert not list(receipt.parent.glob('.playden-cleanup-*'))
+
+
+@pytest.mark.parametrize('stage', ['capture', 'request'])
+def test_alias_normalisation_never_bypasses_traversal_rejection(copied, stage):
+    receipt, request, result, original = copied
+    alias = receipt.path.parent / '..' / receipt.path.parent.name / receipt.path.name
+    assert alias.resolve() == receipt.path
+    with pytest.raises(ValueError, match='traversal'):
+        if stage == 'capture':
+            GeneratedOutput.capture(alias, (original,))
+        else:
+            receipt.remove_verified(replace(request, source=alias), result, confirmed=True)
+    assert receipt.path.is_dir()
+    assert result.destination.is_dir()
+    assert (original / 'world.dat').read_bytes() == b'original world'
+
+
+def test_generated_receipt_and_real_transfer_share_canonical_source(copied):
+    receipt, request, result, original = copied
+    assert receipt.path == request.source.resolve(strict=True) == result.source
+    receipt.eligible(request, result)

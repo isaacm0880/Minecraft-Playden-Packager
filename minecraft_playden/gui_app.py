@@ -684,7 +684,7 @@ class MainWindow(QMainWindow):
                 if not self.batch:
                     self.output_view = result.path
                 if result.generated is not None:
-                    self.generated_outputs[result.path] = result.generated
+                    self.generated_outputs[result.generated.path] = result.generated
             else:
                 self.output_view = result.path
                 self.use_build_queue = False
@@ -726,7 +726,7 @@ class MainWindow(QMainWindow):
                 self.refresh_usb_results()
             self.cleanup_transfer = (self.last_transfer, result)
             for record in self.build_records:
-                if record.request.output == result.source:
+                if record.request.output.resolve() == result.source:
                     record.usb = result.destination
                     record.detail = ('USB checksum-verified.' if self.transfer_verified else
                                      'USB checksum verification skipped; local output retained.')
@@ -749,7 +749,7 @@ class MainWindow(QMainWindow):
                 usb_record.cleanup = f'Local generated output removed after verified copy: {result}'
                 self.refresh_usb_results()
             for row, record in enumerate(self.build_records):
-                if record.request.output == result:
+                if record.request.output.resolve() == result:
                     record.removed = True
                     result_item = self.queue_table.item(row, 1)
                     if result_item is not None:
@@ -771,7 +771,7 @@ class MainWindow(QMainWindow):
         if self.last_transfer is None:
             return
         for row, record in enumerate(self.build_records):
-            if record.request.output == self.last_transfer.source:
+            if record.request.output.resolve() == self.last_transfer.source.resolve():
                 record.detail = message
                 item = self.queue_table.item(row, 1)
                 if item is not None:

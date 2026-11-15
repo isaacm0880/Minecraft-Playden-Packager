@@ -1,15 +1,16 @@
 # Release acceptance
 
-The preparation branch preserves the reviewed GUI functionality. The only
-application-file adjustment updates frozen smoke assertions for the current
-progress scale; normal application behavior is unchanged. The source policy
-records this release-only diagnostic change.
+The preparation branch preserves the reviewed GUI features, with a correction for
+Windows filesystem aliases in USB result/cleanup bookkeeping and updated frozen
+smoke assertions for the current progress scale. The source policy records these
+reviewed release fixes. Cleanup still rejects traversal, symlinks and junctions
+before normalising a source path; confirmation and checksum gates remain mandatory.
 Automated validation during preparation (Linux host, Python 3.14.8 / PySide6 6.11.3):
 
-- Complete pytest suite: 395 passed, 1 optional upstream integration skipped,
+- Complete pytest suite: 400 passed, 1 optional upstream integration skipped,
   323 subtests passed.
 - Additional GUI regression run using Qt minimal with Windows widget style:
-  109 passed, 41 subtests passed. This does not simulate a native Windows system.
+  111 passed, 41 subtests passed. This does not simulate a native Windows system.
 - mypy Linux, Windows and macOS targets: all passed for the application and
   release scripts (49 source files per target).
 - GitHub Actions configuration: actionlint 1.7.7 passed.

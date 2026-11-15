@@ -67,6 +67,9 @@ class GeneratedOutput:
         """
         path = path.absolute()
         plain_directory(path)
+        # Expand safe filesystem aliases (e.g. Windows 8.3 names) only after
+        # rejecting traversal, symlinks and junctions in the supplied spelling.
+        path = path.resolve(strict=True)
         receipt = cls(path, path.parent, identity(path.parent), snapshot(path),
                       tuple(root.resolve() for root in protected))
         receipt.check()
@@ -87,7 +90,8 @@ class GeneratedOutput:
                  protected: tuple[Path, ...] = ()) -> None:
         if not request.verify_after_copy or not result.verified or not result.checksums:
             raise ValueError('Cleanup requires successful checksum verification of every USB file.')
-        if request.source.absolute() != self.path or result.source != self.path or result.destination != request.destination:
+        plain_directory(request.source.absolute())
+        if request.source.resolve(strict=True) != self.path or result.source != self.path or result.destination != request.destination:
             raise ValueError('Verified transfer does not match this generated package.')
         drive = request.drive.root.resolve()
         if self.path.is_relative_to(drive) or drive.is_relative_to(self.path):

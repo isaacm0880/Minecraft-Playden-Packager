@@ -285,6 +285,12 @@ class GuiTests(unittest.TestCase):
         confirmation = patch('minecraft_playden.gui_app.MainWindow.confirm_untested', return_value=True)
         confirmation.start()
         self.addCleanup(confirmation.stop)
+        # A queued Qt slot can enter a nested modal loop inside processEvents(),
+        # defeating wait_until_idle's deadline. Unexpected warnings must fail the
+        # test after cleanup, rather than await human input on a native runner.
+        warning_guard = patch('minecraft_playden.gui_app.QMessageBox.warning', return_value=0)
+        self.unexpected_warning = warning_guard.start()
+        self.addCleanup(warning_guard.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.settings = QSettings(str(self.root / 'layout.ini'), QSettings.Format.IniFormat)
@@ -315,6 +321,7 @@ class GuiTests(unittest.TestCase):
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.app.processEvents()
         self.temp.cleanup()
+        self.unexpected_warning.assert_not_called()
 
     def wait_until_idle(self):
         deadline = time.monotonic() + 5
@@ -589,7 +596,9 @@ class GuiTests(unittest.TestCase):
         info = usb.stat()
         drive = DriveTarget(usb, VolumeIdentity('test', 'exfat', info.st_dev, info.st_ino))
         request = TransferRequest(good, drive)
-        result = TransferResult(good, request.destination, 3, 256)
+        # Match TransferRequest._run: the source is canonical, the destination
+        # is the planned path. Windows temp roots may use an 8.3 alias.
+        result = TransferResult(good.resolve(), request.destination, 3, 256)
         thread_ids = []
         def success(transfer, progress, cancellation):
             thread_ids.append(threading.get_ident())
@@ -604,12 +613,66 @@ class GuiTests(unittest.TestCase):
         with patch('minecraft_playden.gui_app.TransferRequest.run', autospec=True, side_effect=success), patch('minecraft_playden.volumes.DriveTarget.check'):
             self.window.retry_usb_button.click()
             self.wait_until_idle()
+        self.assertEqual(len(thread_ids), 1)
         self.assertNotEqual(thread_ids, [threading.get_ident()])
         self.assertEqual(self.window.outcome, 'succeeded')
         self.assertIn('256 B', self.window.status.text())
         self.completion.assert_called_once_with(request.destination, True)
         self.assertFalse(self.window.retry_usb_button.isEnabled())
         self.assertTrue(self.window.copy_usb_button.isEnabled())
+
+    def test_transfer_result_alias_mismatch_finishes_and_retry_accepts_canonical_source(self):
+        # Reproduce Windows short/long temp aliases on every host without relying
+        # on symlink privileges: this spelling differs from its resolved path.
+        (self.root / 'alias').mkdir()
+        source = self.root / 'alias' / '..' / 'validated-package'
+        source.mkdir()
+        self.assertNotEqual(source, source.resolve())
+        self.window.completed_package = ValidatedPackage(source)
+        usb = self.root / 'USB'
+        usb.mkdir()
+        info = usb.stat()
+        drive = DriveTarget(usb, VolumeIdentity('test', 'exfat', info.st_dev, info.st_ino))
+        request = TransferRequest(source, drive)
+        from minecraft_playden.desktop import BuildRecord, LocalBuildRequest
+        record = BuildRecord(LocalBuildRequest(self.result.installations[0], source, self.root / 'cache'),
+                             state='completed', package=self.window.completed_package)
+        self.window.build_records = [record]
+        invalid = TransferResult(source, request.destination, 1, 1)
+        with patch('minecraft_playden.gui_app.TransferRequest.run', return_value=invalid), \
+             patch('minecraft_playden.gui_app.QMessageBox.warning') as warning:
+            self.window.start_transfer(request)
+            self.wait_until_idle()
+        self.assertIn('does not match', warning.call_args.args[2])
+        self.assertEqual(self.window.outcome, 'failed')
+        self.assertIsNone(self.window.worker_thread)
+        self.assertIsNone(self.window.task)
+        self.assertIsNone(self.window.cleanup_transfer)
+        self.assertTrue(self.window.retry_usb_button.isEnabled())
+        self.completion.assert_not_called()
+        valid = TransferResult(source.resolve(), request.destination, 1, 1)
+        with patch('minecraft_playden.gui_app.TransferRequest.run', return_value=valid), \
+             patch('minecraft_playden.volumes.DriveTarget.check'), \
+             patch('minecraft_playden.gui_app.QMessageBox.warning') as warning:
+            self.window.retry_usb_button.click()
+            self.wait_until_idle()
+        warning.assert_not_called()
+        self.assertEqual(self.window.outcome, 'succeeded')
+        self.assertEqual(record.usb, request.destination)
+        self.assertIn('checksum-verified', record.detail)
+        self.assertIsNone(self.window.worker_thread)
+        self.assertIsNone(self.window.task)
+        self.completion.assert_called_once_with(request.destination, True)
+
+    def test_open_shared_queue_parent_resolves_path_aliases(self):
+        (self.root / 'alias').mkdir()
+        parent = self.root / 'alias' / '..' / 'shared'
+        parent.mkdir()
+        self.assertNotEqual(parent, parent.resolve())
+        self.window.output_view = parent
+        with patch('minecraft_playden.gui_app.QDesktopServices.openUrl', return_value=True) as opened:
+            self.window.open_output_folder()
+        self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), parent.resolve())
 
     def test_transfer_progress_formats_sizes_without_changing_exact_values(self):
         event = Progress('transfer-copy', 'Copying', 123456789, 2000000000,
@@ -934,10 +997,10 @@ class GuiTests(unittest.TestCase):
         self.window.queue_dialog.close()
         with patch('minecraft_playden.gui_app.QDesktopServices.openUrl', return_value=True) as opened:
             self.window.open_output_button.click()
-            self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), parent)
+            self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), parent.resolve())
             self.window.queue_table.setCurrentCell(1, 1)
             self.window.open_output_button.click()
-            self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), parent)
+            self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), parent.resolve())
 
     def test_zero_success_queue_does_not_open_an_old_package(self):
         old = self.root / 'previous'

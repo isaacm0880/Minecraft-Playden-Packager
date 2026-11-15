@@ -20,3 +20,6 @@ First public release candidate; no binary release is published yet.
 - Reviewed-source fingerprints use identical filename ordering across native hosts.
 - Frozen startup smoke checks cover idle zero and the current GUI progress scale.
 - Candidate archives include linked usage/compatibility guides and root licence/credits.
+- Windows filesystem aliases retain verified USB results and safe cleanup eligibility.
+- GUI regression fixtures use canonical transfer receipts and folder URLs; unexpected
+  modal warnings fail tests promptly instead of stalling native CI.

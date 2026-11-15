@@ -50,7 +50,10 @@ class ReleaseGuiTests(unittest.TestCase):
         confirmation.start()
         self.addCleanup(confirmation.stop)
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        # Cleanup fixtures use a physical root: macOS /var and Windows
+        # short temp names may alias another spelling. Explicit alias tests
+        # separately cover the GUI/transfer boundary.
+        self.root = Path(self.temp.name).resolve()
         settings = QSettings(str(self.root / 'settings.ini'), QSettings.Format.IniFormat)
         with patch('minecraft_playden.gui_app.QSettings', return_value=settings), patch('minecraft_playden.gui_app.QTimer.singleShot'):
             self.window = MainWindow(self.root / 'cache', [])
@@ -333,7 +336,7 @@ class ReleaseGuiTests(unittest.TestCase):
                 self.assertIsNotNone(self.window.completed_package.generated)
                 with patch('minecraft_playden.gui_app.QDesktopServices.openUrl', return_value=True) as opened:
                     self.window.open_output_button.click()
-                    self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), package)
+                    self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), package.resolve())
                 self.window.cleanup_after_usb.setChecked(option)
                 stack, drive = self.simulated_usb(root / 'USB')
                 request = TransferRequest(package, drive, verify_after_copy=verified)
@@ -346,7 +349,7 @@ class ReleaseGuiTests(unittest.TestCase):
                 self.assertEqual(validate(request.destination), [])
                 self.assertEqual(before, {p.relative_to(root / 'source'): p.read_bytes() for p in (root / 'source').rglob('*') if p.is_file()})
                 if option and verified:
-                    confirm.assert_called_once_with(package, request.destination)
+                    confirm.assert_called_once_with(package.resolve(), request.destination)
                 else:
                     confirm.assert_not_called()
                 self.completion.assert_called_once_with(request.destination, True)
@@ -391,7 +394,7 @@ class ReleaseGuiTests(unittest.TestCase):
         self.assertEqual(self.window.output_view, parent)
         with patch('minecraft_playden.gui_app.QDesktopServices.openUrl', return_value=True) as opened:
             self.window.open_output_button.click()
-            self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), parent)
+            self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), parent.resolve())
 
     def test_cancelled_copy_of_known_output_never_offers_cleanup(self):
         from minecraft_playden.transfer import TransferRequest
