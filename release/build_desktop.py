@@ -99,9 +99,10 @@ def main() -> int:
     env = os.environ.copy()
     env['QT_QPA_PLATFORM'] = 'offscreen'
     # Every artifact is gated on full tests, all platform type targets and whitespace.
-    run([sys.executable, '-m', 'pytest', '-q'], cwd=root, env=env)
+    run([sys.executable, '-m', 'pytest', '-v', '-o', 'faulthandler_timeout=90'],
+        cwd=root, env=env, timeout=600)
     run([sys.executable, '-m', 'pytest', 'tests/test_gui.py', 'tests/test_gui_components.py', '-q'],
-        cwd=root, env={**env, 'QT_QPA_PLATFORM': 'minimal', 'QT_STYLE_OVERRIDE': 'Windows'})
+        cwd=root, env={**env, 'QT_QPA_PLATFORM': 'minimal', 'QT_STYLE_OVERRIDE': 'Windows'}, timeout=180)
     for target in ('linux', 'win32', 'darwin'):
         run([sys.executable, '-m', 'mypy', '--platform', target, 'minecraft_playden', 'release'], cwd=root)
     run(['git', 'diff', '--check'], cwd=root)

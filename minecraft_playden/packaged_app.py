@@ -128,8 +128,10 @@ def main() -> int:
                 window.output.setText('smoke-output')
                 window.table.sortItems(0, Qt.SortOrder.DescendingOrder)
                 assert window.output.text() == 'smoke-output'
+                assert window.progress_bar.value() == 0, 'Idle progress must start at zero'
                 window.task_progress(Progress('smoke', 'Frozen GUI smoke passed', 1, 1))
-                assert window.progress_bar.value() == 1
+                assert window.progress_bar.maximum() == 1000
+                assert window.progress_bar.value() == 999, 'Only a completed build may show 100%'
                 logging.info('FROZEN_SMOKE_OK')
                 code = 0
             except Exception:

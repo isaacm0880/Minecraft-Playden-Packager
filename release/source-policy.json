@@ -1,5 +1,8 @@
 {
   "schema": 1,
   "reviewed_gui_snapshot": "6fbc4d346e52145a130f4d2b0adc34f5f941dd29",
-  "application_tree_sha256": "e3bb44c118bf83c2a1f7c83a44893b6342c38af60029430ddc1ac64dcf6bc7d9"
+  "application_tree_sha256": "e35371a828affed18f0f729b0ea2a3329a87d799fff6ed10f66e64b504ba1507",
+  "release_only_changes": {
+    "minecraft_playden/packaged_app.py": "Frozen smoke assertions updated for the approved GUI progress scale; normal application behavior unchanged."
+  }
 }

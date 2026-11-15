@@ -64,6 +64,18 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(application_hash(self.root), before)
 
 
+    def test_reviewed_hash_uses_portable_case_sensitive_filename_order(self):
+        # Windows Path compares case-insensitively, unlike Linux Path. Mixed-case
+        # resource names must still hash in the same order on all native runners.
+        directory = self.root / 'minecraft_playden/resources'
+        directory.mkdir()
+        (directory / 'README.md').write_text('notice')
+        (directory / 'icons.png').write_bytes(b'synthetic icon')
+        expected = application_hash(self.root)
+        with patch.object(Path, '__lt__', lambda left, right: str(left).casefold() < str(right).casefold()):
+            self.assertEqual(application_hash(self.root), expected)
+
+
 class ArtifactTests(unittest.TestCase):
     def test_private_key_material_is_rejected_without_flagging_tls_delimiter_constants(self):
         from release.audit import SECRET_PATTERNS

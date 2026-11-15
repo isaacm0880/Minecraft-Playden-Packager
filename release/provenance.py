@@ -51,7 +51,9 @@ def git(root: Path, *args: str) -> str:
 def application_hash(root: Path) -> str:
     """Hash the complete reviewed application, independent of private history."""
     result = hashlib.sha256()
-    for path in sorted((root / 'minecraft_playden').rglob('*')):
+    # Path ordering is case-insensitive on Windows; manifest ordering must not be.
+    for path in sorted((root / 'minecraft_playden').rglob('*'),
+                       key=lambda item: item.relative_to(root).as_posix()):
         if '__pycache__' in path.parts or path.suffix in ('.pyc', '.pyo'):
             continue
         if path.is_symlink():
@@ -93,6 +95,7 @@ def check_source(root: Path, expected: str | None = None, preview: bool = False)
     return {'source_commit': sha, 'source_dirty': dirty, 'preview': preview,
             'source_tree_sha256': digest.hexdigest(), 'source_files': manifest,
             'reviewed_gui_snapshot': policy['reviewed_gui_snapshot'],
+            'release_only_changes': policy.get('release_only_changes', {}),
             'source_commit_time': int(git(root, 'show', '-s', '--format=%ct', sha)),
             'source_branch': git(root, 'branch', '--show-current') or 'detached'}
 

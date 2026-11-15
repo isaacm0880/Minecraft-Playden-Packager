@@ -18,7 +18,10 @@ A push to `release/v0.1.0-prep` runs **Desktop release candidate (no publishing)
 Only that branch has the automatic candidate trigger. The source job records the
 exact pushed public commit; every native job checks out that SHA. It does not
 check out another branch, build a pull-request merge commit or select an earlier
-revision. Candidate artifacts stay attached to the workflow run, not a release.
+revision. Candidate artifacts stay attached to the workflow run, not a release. A new
+preparation push cancels obsolete in-flight candidate jobs; previously uploaded
+artifacts and local build attempts remain intact. Tests have time limits and
+Python stack diagnostics so a stalled native GUI check cannot run indefinitely.
 
 GitHub requires a manually dispatched workflow to exist on the default branch.
 Manual dispatch therefore remains unavailable while `main` contains only the

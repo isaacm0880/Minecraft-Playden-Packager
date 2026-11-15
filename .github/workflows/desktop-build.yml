@@ -12,10 +12,11 @@ permissions:
   contents: read
 concurrency:
   group: desktop-release-candidate
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   source:
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       sha: ${{ steps.source.outputs.sha }}
     steps:
@@ -48,6 +49,7 @@ jobs:
   windows:
     needs: source
     runs-on: windows-2022
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,6 +76,7 @@ jobs:
   linux:
     needs: source
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     container:
       image: python:3.11.14-slim-bookworm@sha256:65a93d69fa75478d554f4ad27c85c1e69fa184956261b4301ebaf6dbb0a3543d
     steps:
@@ -117,6 +120,7 @@ jobs:
             python_architecture: x64
             label: macOS-x86_64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -145,6 +149,7 @@ jobs:
   verify-pair:
     needs: [source, windows, linux, macos]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:

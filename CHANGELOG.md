@@ -17,3 +17,5 @@ First public release candidate; no binary release is published yet.
   frozen GUI smoke tests and SHA-256 checksums; native acceptance remains pending.
 - Preparation-branch candidate builds use the exact public push commit without
   requiring a merge; combined checksum reports preserve existing evidence.
+- Reviewed-source fingerprints use identical filename ordering across native hosts.
+- Frozen startup smoke checks cover idle zero and the current GUI progress scale.
