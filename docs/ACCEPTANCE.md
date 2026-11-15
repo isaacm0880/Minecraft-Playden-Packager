@@ -6,7 +6,7 @@ progress scale; normal application behavior is unchanged. The source policy
 records this release-only diagnostic change.
 Automated validation during preparation (Linux host, Python 3.14.8 / PySide6 6.11.3):
 
-- Complete pytest suite: 394 passed, 1 optional upstream integration skipped,
+- Complete pytest suite: 395 passed, 1 optional upstream integration skipped,
   323 subtests passed.
 - Additional GUI regression run using Qt minimal with Windows widget style:
   109 passed, 41 subtests passed. This does not simulate a native Windows system.

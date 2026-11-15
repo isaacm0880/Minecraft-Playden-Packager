@@ -76,6 +76,18 @@ def licenses(root: Path, stage: Path) -> None:
             break
 
 
+
+def bundle_documentation(root: Path, destination: Path, macos: bool = False) -> None:
+    """Retain the installation guide's local links and licence/credit notices."""
+    for name in ('INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md', 'TROUBLESHOOTING.md'):
+        shutil.copyfile(root / 'docs' / name, destination / name)
+    shutil.copyfile(root / 'docs/INSTALLATION.md', destination / 'README.md')
+    for name in ('CHANGELOG.md', 'THIRD_PARTY.md', 'LICENSE'):
+        shutil.copyfile(root / name, destination / name)
+    if macos:
+        shutil.copyfile(root / 'docs/INSTALLATION.md', destination / 'README-MACOS.md')
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True, help='NEW directory, never an existing build')
@@ -131,11 +143,9 @@ def main() -> int:
     executable = (bundle / 'Contents/MacOS/MinecraftPlaydenPackager' if sys.platform == 'darwin'
                   else bundle / ('MinecraftPlaydenPackager' + suffix))
     documentation = bundle / 'Contents/Resources' if sys.platform == 'darwin' else bundle
-    shutil.copyfile(root / 'docs/INSTALLATION.md', documentation / 'README.md')
-    shutil.copyfile(root / 'CHANGELOG.md', documentation / 'CHANGELOG.md')
+    bundle_documentation(root, documentation, macos=sys.platform == 'darwin')
     write_json(documentation / 'BUILD-INFO.json', source)
     if sys.platform == 'darwin':
-        shutil.copyfile(root / 'docs/INSTALLATION.md', documentation / 'README-MACOS.md')
         run(['/usr/bin/codesign', '--force', '--deep', '--sign', '-', bundle])
         run(['/usr/bin/codesign', '--verify', '--deep', '--strict', bundle])
     audit = audit_tree(bundle, executable, source)

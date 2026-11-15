@@ -8,6 +8,7 @@ import unittest
 from release.provenance import application_hash, candidate_source
 from release.public_audit import audit_paths, SYNTHETIC_CLIENT
 from release.verify_pair import write_report
+from release.build_desktop import bundle_documentation
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,6 +17,22 @@ class PublicReleaseTests(unittest.TestCase):
     def test_application_matches_reviewed_snapshot(self):
         policy = json.loads((ROOT / 'release/source-policy.json').read_text())
         self.assertEqual(application_hash(ROOT), policy['application_tree_sha256'])
+
+
+    def test_bundled_guides_keep_relative_links_and_licensing_notices(self):
+        for macos in (False, True):
+            with tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary)
+                bundle_documentation(ROOT, output, macos=macos)
+                for name in ('README.md', 'INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md',
+                             'TROUBLESHOOTING.md', 'CHANGELOG.md', 'THIRD_PARTY.md', 'LICENSE'):
+                    self.assertTrue((output / name).is_file(), name)
+                self.assertEqual((output / 'LICENSE').read_bytes(), (ROOT / 'LICENSE').read_bytes())
+                self.assertEqual((output / 'README-MACOS.md').exists(), macos)
+                for path in output.glob('*.md'):
+                    for target in re.findall(r'\]\(([^)]+)\)', path.read_text()):
+                        if '://' not in target and not target.startswith('#'):
+                            self.assertTrue((output / target.split('#')[0]).exists(), target)
 
     def test_public_document_relative_links_resolve(self):
         documents = list(ROOT.glob('*.md')) + list((ROOT / 'docs').glob('*.md'))

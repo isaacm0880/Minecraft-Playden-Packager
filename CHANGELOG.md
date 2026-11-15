@@ -19,3 +19,4 @@ First public release candidate; no binary release is published yet.
   requiring a merge; combined checksum reports preserve existing evidence.
 - Reviewed-source fingerprints use identical filename ordering across native hosts.
 - Frozen startup smoke checks cover idle zero and the current GUI progress scale.
+- Candidate archives include linked usage/compatibility guides and root licence/credits.
