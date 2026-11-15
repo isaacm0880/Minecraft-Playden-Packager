@@ -1,0 +1,47 @@
+# Python and local tooling
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build outputs and generated Minecraft packages
+build/
+builds/
+dist/
+.release-work/
+.cache/
+Minecraft-Playden-Packages/
+.playden-*/
+.playden-cleanup-*/
+*.AppImage
+*.exe
+*.dmg
+
+# Credentials, account data, worlds and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.p12
+*.keystore
+accounts.json
+launcher_accounts*.json
+launcher_profiles*.json
+saves/
+instances/
+logs/
+*.log
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

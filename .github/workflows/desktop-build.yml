@@ -1,0 +1,174 @@
+name: Desktop release candidate (no publishing)
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact 40-character public commit SHA on the workflow ref selected for this run'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: desktop-release-candidate
+  cancel-in-progress: false
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: source
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.source_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import os, re, subprocess
+          from pathlib import Path
+          from release.provenance import check_source
+          requested = os.environ['REQUESTED_SHA']
+          if not re.fullmatch('[0-9a-f]{40}', requested):
+              raise SystemExit('Supply an exact lowercase commit SHA')
+          if requested != os.environ['WORKFLOW_SHA']:
+              raise SystemExit('Source SHA must equal this workflow run commit; select its branch/ref when dispatching')
+          check_source(Path.cwd(), requested)
+          from release.public_audit import audit_source
+          audit_source(Path.cwd())
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+              stream.write('sha=' + requested + '\n')
+          PY
+  windows:
+    needs: source
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.9'
+          architecture: x64
+      - run: python -m pip install -r release/requirements.txt
+      - run: python -m pip install --no-deps --no-build-isolation -e .
+      - run: python -m release.build_desktop --source-sha "${{ needs.source.outputs.sha }}" --output dist/windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows-x64-${{ needs.source.outputs.sha }}
+          if-no-files-found: error
+          path: |
+            dist/windows/*.zip
+            dist/windows/SHA256SUMS
+            dist/windows/artifact.json
+            dist/windows/build-metadata.json
+            dist/windows/content-audit.json
+  linux:
+    needs: source
+    runs-on: ubuntu-24.04
+    container:
+      image: python:3.11.14-slim-bookworm@sha256:65a93d69fa75478d554f4ad27c85c1e69fa184956261b4301ebaf6dbb0a3543d
+    steps:
+      - name: Install Git before checkout (retain exact commit history)
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Trust only the checked-out container workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: sh release/linux-system-deps.sh
+      - run: python -m pip install -r release/requirements.txt
+      - run: python -m pip install --no-deps --no-build-isolation -e .
+      - run: python -m release.build_desktop --source-sha "${{ needs.source.outputs.sha }}" --output dist/linux
+      - name: Packaged X11 startup in a clean Linux container
+        run: xvfb-run -a env QT_QPA_PLATFORM=xcb dist/linux/frozen/MinecraftPlaydenPackager/MinecraftPlaydenPackager --smoke-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Linux-x86_64-${{ needs.source.outputs.sha }}
+          if-no-files-found: error
+          path: |
+            dist/linux/*.AppImage
+            dist/linux/SHA256SUMS
+            dist/linux/artifact.json
+            dist/linux/build-metadata.json
+            dist/linux/content-audit.json
+  macos:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+            python_architecture: arm64
+            label: macOS-ARM64
+          - runner: macos-15-intel
+            architecture: x86_64
+            python_architecture: x64
+            label: macOS-x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.9'
+          architecture: ${{ matrix.python_architecture }}
+      - run: python -m pip install -r release/requirements.txt
+      - run: python -m pip install --no-deps --no-build-isolation -e .
+      - run: python -m release.build_desktop --source-sha "${{ needs.source.outputs.sha }}" --architecture "${{ matrix.architecture }}" --output dist/macos
+      - name: Native Cocoa packaged GUI smoke
+        run: python -m release.smoke "dist/macos/frozen/Minecraft Playden Packager.app/Contents/MacOS/MinecraftPlaydenPackager" --native-cocoa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}-${{ needs.source.outputs.sha }}
+          if-no-files-found: error
+          path: |
+            dist/macos/*.zip
+            dist/macos/SHA256SUMS
+            dist/macos/artifact.json
+            dist/macos/build-metadata.json
+            dist/macos/content-audit.json
+  verify-pair:
+    needs: [source, windows, linux, macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: Windows-x64-${{ needs.source.outputs.sha }}
+          path: dist/pair/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: Linux-x86_64-${{ needs.source.outputs.sha }}
+          path: dist/pair/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: macOS-ARM64-${{ needs.source.outputs.sha }}
+          path: dist/pair/macos-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: macOS-x86_64-${{ needs.source.outputs.sha }}
+          path: dist/pair/macos-x86_64
+      - run: python -m release.verify_pair --windows dist/pair/windows --linux dist/pair/linux --macos-arm64 dist/pair/macos-arm64 --macos-x86-64 dist/pair/macos-x86_64 --source-sha "${{ needs.source.outputs.sha }}" --output release-pair.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Verified-source-pair-${{ needs.source.outputs.sha }}
+          path: |
+            release-pair.json
+            SHA256SUMS
+          if-no-files-found: error

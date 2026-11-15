@@ -1,0 +1,16 @@
+{
+  "python": {
+    "win32": "3.11.9",
+    "linux": "3.11.14",
+    "darwin": "3.11.9"
+  },
+  "linux_image": "python:3.11.14-slim-bookworm@sha256:65a93d69fa75478d554f4ad27c85c1e69fa184956261b4301ebaf6dbb0a3543d",
+  "appimagetool": {
+    "url": "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage",
+    "sha256": "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+  },
+  "appimage_runtime": {
+    "url": "https://api.github.com/repos/AppImage/type2-runtime/releases/assets/657374641",
+    "sha256": "617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46"
+  }
+}

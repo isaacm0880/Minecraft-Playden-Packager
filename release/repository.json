@@ -1,0 +1,7 @@
+{
+  "repository": "isaacm0880/Minecraft-Playden-Packager",
+  "description": "Package local Minecraft Java instances for Playden on PS5: Vanilla/Fabric GUI, batch builds and verified USB copying.",
+  "homepage": "https://github.com/isaacm0880/Minecraft-Playden-Packager#readme",
+  "topics": ["minecraft", "playden", "ps5", "fabric", "vanilla", "packager", "pyside6", "pyinstaller", "offline", "appimage"],
+  "settings_status": "Prepared; apply description, homepage and topics separately. Do not change visibility."
+}

@@ -1,0 +1,37 @@
+{
+  "files": {
+    "playdencreeper-128.png": "e39c74c4d52b6a07e7703d4af6519af83ac585f0cb6ed8e4fe5b0f8277b71c1e",
+    "playdencreeper-16.png": "6e123d3ac04c9ec09c2b8d12fdb7c94a362e3788c674232bb5bb7de5dda8a17c",
+    "playdencreeper-24.png": "b5c21ac7fe0b11e81ff51a86ce5b62090dec06d6d1d1a6844fe12132f0c14678",
+    "playdencreeper-256.png": "432ee64f58779850624c317a4dd498849eab23a0426fed1b127d569ce9760e13",
+    "playdencreeper-32.png": "197f3286afc66296b690933b948ff86b504eb4f00366be88696a56ee1c0ee081",
+    "playdencreeper-48.png": "aa7cf9dc423088a8c00e9a918a65dfadb6d6ff38a0c8f4a2d20a1903a29c2e2a",
+    "playdencreeper-512.png": "d782ea8f8cc23d27b124189756ca0c3b11834094a2abd6c0127e24dd8f1603cd",
+    "playdencreeper-64.png": "b5b676ea31911155b36e49b0c18a72718a773a2055e7c2bef86f46ab424db910",
+    "playdencreeper.icns": "2e9fc9501f0807aac795775ea8b07a1d416a970b459b72b236d341a6e63a9f9a",
+    "playdencreeper.ico": "b3b17c4e0489e8b4464d42c9903cdeaf59bfb8c379479839f4ba12ccb2db7cbf",
+    "playdencreeper.png": "ee1033d02411db5eafd2e298f8d6b1d68c2c2093a7126690502cec8d2d499380"
+  },
+  "icon_sizes": [
+    16,
+    24,
+    32,
+    48,
+    64,
+    128,
+    256
+  ],
+  "macos_icon_sizes": [
+    16,
+    32,
+    64,
+    128,
+    256,
+    512
+  ],
+  "resize": "keep aspect ratio, transparent padding, smooth downsampling",
+  "source_file": "playdencreeper.png",
+  "source_has_alpha": true,
+  "source_height": 768,
+  "source_width": 768
+}

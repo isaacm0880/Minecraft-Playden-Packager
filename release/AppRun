@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+packager_appdir=${APPDIR:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}
+# Do not let the host's Python or KDE Qt plugin paths redirect the bundled runtime.
+unset PYTHONHOME PYTHONPATH QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH
+export XDG_DATA_DIRS="$packager_appdir/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+exec "$packager_appdir/usr/lib/minecraft-playden-packager/MinecraftPlaydenPackager" "$@"
