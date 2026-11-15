@@ -75,16 +75,23 @@ class TransferTests(unittest.TestCase):
 
     def test_fast_copy_skips_destination_checksum_pass_but_keeps_validation(self):
         from minecraft_playden.transfer import _checksum
+        # Exercise distinct input/canonical spellings on every host, including
+        # Linux, so Windows short temp aliases cannot hide this assumption.
+        (self.root / 'alias').mkdir()
+        source = self.root / 'alias' / '..' / self.source.name
+        self.assertNotEqual(source, source.resolve())
         events, checksummed = [], []
         def checksum(path, *args, **kwargs):
             checksummed.append(path)
             return _checksum(path, *args, **kwargs)
         with patch('minecraft_playden.transfer._checksum', side_effect=checksum):
-            result = TransferRequest(self.source, self.drive, verify_after_copy=False).run(events.append)
+            result = TransferRequest(source, self.drive, verify_after_copy=False).run(events.append)
         self.assertFalse(result.verified)
         self.assertFalse(result.checksums)
         self.assertEqual(self.validator.call_count, 2)
-        self.assertTrue(all(path.is_relative_to(self.source) for path in checksummed))
+        self.assertEqual(len(checksummed), len(self.original))
+        self.assertEqual({path.relative_to(source.resolve()).as_posix() for path in checksummed},
+                         set(self.original))
         self.assertNotIn('transfer-verify', [event.stage for event in events])
         self.assertIn('skipped', events[-1].message)
         self.assertEqual(self.snapshot(result.destination), self.original)

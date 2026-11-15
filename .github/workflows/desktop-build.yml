@@ -67,7 +67,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -c "from pathlib import Path; import tempfile; p=Path(tempfile.gettempdir()); print('Temporary path:', p); print('Resolved path:', p.resolve())"
-          python -m pytest -vv --tb=long tests/test_gui.py::GuiTests::test_queue_summary_and_open_folder_use_common_parent_for_partial_results tests/test_gui.py::GuiTests::test_usb_transfer_worker_reports_bytes_and_can_retry_after_failure tests/test_gui.py::GuiTests::test_transfer_result_alias_mismatch_finishes_and_retry_accepts_canonical_source tests/test_gui.py::GuiTests::test_open_shared_queue_parent_resolves_path_aliases tests/test_cleanup.py
+          python -m pytest -vv --tb=long tests/test_gui.py::GuiTests::test_queue_summary_and_open_folder_use_common_parent_for_partial_results tests/test_gui.py::GuiTests::test_usb_transfer_worker_reports_bytes_and_can_retry_after_failure tests/test_gui.py::GuiTests::test_transfer_result_alias_mismatch_finishes_and_retry_accepts_canonical_source tests/test_gui.py::GuiTests::test_open_shared_queue_parent_resolves_path_aliases tests/test_transfer.py::TransferTests::test_fast_copy_skips_destination_checksum_pass_but_keeps_validation tests/test_cleanup.py
       - run: python -m release.build_desktop --source-sha "${{ needs.source.outputs.sha }}" --output dist/windows
       - uses: actions/upload-artifact@v4
         with:
