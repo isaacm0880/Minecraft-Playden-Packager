@@ -1,0 +1,31 @@
+name: PS5 diagnostic host smoke
+on:
+  pull_request:
+    paths:
+      - 'ps5/diagnostic/**'
+      - '.github/workflows/ps5-diagnostic.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ps5/diagnostic/**'
+      - '.github/workflows/ps5-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile diagnostic logic with host compiler
+        run: |
+          cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -O2 \
+            ps5/diagnostic/main.c -o /tmp/minecraft-playden-diagnostic-host
+      - name: Run and inspect diagnostic output
+        run: |
+          /tmp/minecraft-playden-diagnostic-host | tee /tmp/diagnostic-output.txt
+          grep -Fx 'minecraft-playden-ps5-diagnostic version=0.1 mode=read-only' /tmp/diagnostic-output.txt
+          grep -Fx 'diagnostic_complete=true' /tmp/diagnostic-output.txt
+          grep -q '^path=/data status=' /tmp/diagnostic-output.txt
