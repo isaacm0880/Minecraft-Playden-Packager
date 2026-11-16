@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #ifndef PS5_INTERNAL_IMPORT
-#define PS5_INTERNAL_IMPORT "/data/playden/import"
+#define PS5_INTERNAL_IMPORT "/data/playden-import"
 #endif
 #ifndef PS5_USB_IMPORT
 #define PS5_USB_IMPORT "/mnt/usb0/playden/import"
