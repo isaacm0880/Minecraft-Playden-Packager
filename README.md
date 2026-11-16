@@ -43,7 +43,7 @@ Untested combinations show:
 
 > Unsupported version — not tested on PS5. Packaging will be attempted, but the game or some mods may not work.
 
-[Compatibility and limitations](docs/COMPATIBILITY.md)
+[Compatibility and limitations](docs/COMPATIBILITY.md) - version and mod compatability
 
 ## Download and install
 
