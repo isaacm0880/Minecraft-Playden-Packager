@@ -28,12 +28,12 @@ static volatile sig_atomic_t stopping;
 static const char *roots[] = {"/data/playden-import", "/mnt/usb0/playden/import"};
 static const char *temp_roots[] = {"/data/playden-packager-temp",
                                    "/mnt/usb0/playden-packager-temp"};
-#define RECEIVER_BUILD "v0.4-verify-abi-1"
+#define RECEIVER_BUILD "v0.4-import-access-1"
 #ifdef HOST_TEST
 static char test_root[1024];
 static uint64_t test_free = UINT64_MAX;
 static uint64_t test_write_limit = UINT64_MAX, test_written;
-static int test_stage_device_mismatch, test_rename_errno, test_pause_cleanup;
+static int test_stage_device_mismatch, test_rename_errno, test_pause_cleanup, test_permission_errno;
 #endif
 static void stop_receiver(int sig) {
     (void)sig;
@@ -245,6 +245,100 @@ static int storage_pair(int root, int temporary) {
 #endif
     return 1;
 }
+/* Playden runs as another user and opens imported games in place. Match its
+   import repair policy: writable directories/files, without executable data.
+   The enclosing session stage remains 0700 until atomic publication. */
+static int import_mode(int fd, mode_t mode) {
+#ifdef HOST_TEST
+    if (test_permission_errno) {
+        errno = test_permission_errno;
+        return 0;
+    }
+#endif
+    struct stat info;
+    if (fstat(fd, &info) < 0)
+        return 0;
+    if ((info.st_mode & 07777) == mode)
+        return 1;
+    if (fchmod(fd, mode) < 0)
+        return 0;
+    if (fstat(fd, &info) < 0)
+        return 0;
+    /* FAT-like mounts may expose extra x bits rather than per-file modes. */
+    if ((info.st_mode & mode) != mode || (info.st_mode & 07000 & ~mode)) {
+        errno = EACCES;
+        return 0;
+    }
+    return 1;
+}
+static int package_permissions(int package, Inventory *inventory, Wire *wire, uint64_t total) {
+    for (size_t i = 0; i < inventory->count; ++i) {
+        Item *item = &inventory->items[i];
+        char leaf[256];
+        int parent = parent_fd(package, item->path, leaf);
+        if (parent < 0)
+            return 0;
+        int fd = openat(parent, leaf,
+                        O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC |
+                            (item->kind ? O_RDWR : O_RDONLY | O_DIRECTORY));
+        struct stat info, named;
+        int ok = fd >= 0 && fstat(fd, &info) == 0 &&
+                 (item->kind ? (S_ISREG(info.st_mode) && info.st_nlink == 1 &&
+                                (uint64_t)info.st_size == item->size)
+                             : S_ISDIR(info.st_mode)) &&
+                 import_mode(fd, item->kind ? 0666 : 0777) &&
+                 stat_nofollow_at(parent, leaf, &named, NULL) == 0 && named.st_dev == info.st_dev &&
+                 named.st_ino == info.st_ino;
+        if (ok) {
+            if (item->kind) {
+                double started = metric_clock();
+                ok = fsync(fd) == 0;
+                metric_add(&metrics.fsync_s, started);
+                if (diagnostics_enabled)
+                    ++metrics.fsyncs;
+            } else
+                ok = sync_dir(fd);
+        }
+        int saved = errno;
+        if (fd >= 0)
+            close(fd);
+        close(parent);
+        if (!ok) {
+            errno = saved ? saved : EIO;
+            return 0;
+        }
+        if (i % 128 == 0 && !verification_progress(wire, total, total))
+            return 0;
+    }
+    return import_mode(package, 0777) && sync_dir(package);
+}
+static int import_root_permissions(int destination, int root, const char *path) {
+    if (!root_identity(root, path))
+        return 0;
+    if (destination) {
+        /* Only this known container, never /mnt/usb0 itself or managed games. */
+        char parent_path[2048];
+        snprintf(parent_path, sizeof(parent_path), "%s", path);
+        char *slash = strrchr(parent_path, '/');
+        if (!slash) {
+            errno = EINVAL;
+            return 0;
+        }
+        *slash = 0;
+        int parent = open_absolute(parent_path, 0);
+        struct stat info;
+        int ok = parent >= 0 && fstat(parent, &info) == 0 &&
+                 import_mode(parent, (info.st_mode & 07777) | 0555) && sync_dir(parent);
+        int saved = errno;
+        if (parent >= 0)
+            close(parent);
+        if (!ok) {
+            errno = saved;
+            return 0;
+        }
+    }
+    return import_mode(root, 0777) && sync_dir(root);
+}
 static int publish(int root, int temporary, int stage, const char *stage_name, const char *name,
                    const char *absolute_root, const char *absolute_temporary) {
     if (!root_identity(root, absolute_root) || !root_identity(temporary, absolute_temporary) ||
@@ -292,6 +386,36 @@ static void log_lstat_comparison(const char *root, const char *name) {
     int error = errno;
     printf("receiver_stat comparison=lstat name=%s raw_result=%d errno=%d (%s)\n", name, result,
            error, strerror(error));
+}
+
+/* Optional post-receipt extension, schema 1: 7 uint64 counters followed by
+   12 uint64 microsecond durations. No printf, JSON, names or paths on this route. */
+static int send_metrics(Wire *wire, double connection_started) {
+    uint8_t payload[1 + 19 * 8];
+    payload[0] = 1;
+    uint64_t counters[] = {metrics.published, metrics.bytes,  metrics.data_frames,
+                           metrics.files,     metrics.fsyncs, metrics.send_calls,
+                           metrics.recv_calls};
+    double timings[] = {metric_clock() - connection_started,
+                        metrics.socket_read_s,
+                        metrics.socket_write_s,
+                        metrics.frame_auth_s,
+                        metrics.file_write_s,
+                        metrics.file_hash_s,
+                        metrics.fsync_s,
+                        metrics.verify_s,
+                        metrics.verify_read_s,
+                        metrics.verify_hash_s,
+                        metrics.permissions_s,
+                        metrics.commit_s};
+    for (size_t i = 0; i < 7; ++i)
+        putnum(payload + 1 + i * 8, counters[i], 8);
+    for (size_t i = 0; i < 12; ++i) {
+        if (!(timings[i] >= 0 && timings[i] < (double)UINT64_MAX / 1000000))
+            return 0;
+        putnum(payload + 1 + (7 + i) * 8, (uint64_t)(timings[i] * 1000000), 8);
+    }
+    return frame_send(wire, ACK, payload, sizeof(payload));
 }
 
 static void connection(int client, const uint8_t key[32]) {
@@ -424,7 +548,8 @@ static void connection(int client, const uint8_t key[32]) {
         error = "Receiver out of memory.";
         goto fail;
     }
-    if (!frame_send(&wire, ACK, "ready", 5))
+    const char *ready = diagnostics_enabled ? "ready;metrics=1" : "ready";
+    if (!frame_send(&wire, ACK, ready, strlen(ready)))
         goto cleanup;
     while (!stopping && frame_read(&wire, &type, body, &length)) {
         if (verified && type != COMMIT)
@@ -547,6 +672,16 @@ static void connection(int client, const uint8_t key[32]) {
                 error = "Invalid recipe, required package structure or immutable inventory.";
                 goto fail;
             }
+            double permissions_started = metric_clock();
+            int permissions_ok = package_permissions(package, &inventory, &wire, total);
+            metric_add(&metrics.permissions_s, permissions_started);
+            if (!permissions_ok) {
+                snprintf(diagnostic_error, sizeof(diagnostic_error),
+                         "Cannot prepare Playden import permissions: errno=%d (%s).", errno,
+                         strerror(errno));
+                error = diagnostic_error;
+                goto fail;
+            }
             verified = 1;
             if (!frame_send(&wire, ACK, "verified", 8))
                 goto cleanup;
@@ -555,6 +690,7 @@ static void connection(int client, const uint8_t key[32]) {
                 goto fail;
             double started = metric_clock();
             if (!same_inode(package, stage, "package") || !sync_dir(package) ||
+                !import_root_permissions(destination, root, root_path) ||
                 !publish(root, temporary, stage, stage_name, package_name, root_path,
                          temporary_path)) {
                 int saved_error = errno;
@@ -569,7 +705,13 @@ static void connection(int client, const uint8_t key[32]) {
             metrics.published = 1;
             char receipt[256];
             snprintf(receipt, sizeof(receipt), "%s/%s", roots[destination], package_name);
-            frame_send(&wire, ACK, receipt, strlen(receipt));
+            if (!frame_send(&wire, ACK, receipt, strlen(receipt)))
+                goto cleanup;
+            /* Legacy clients close after the exact original publication receipt.
+               Only a capable client requests this authenticated, bounded record. */
+            if (diagnostics_enabled && frame_read(&wire, &type, body, &length) &&
+                type == GET_METRICS && length == 0)
+                send_metrics(&wire, connection_started);
             goto cleanup;
         } else
             goto fail;
@@ -698,6 +840,12 @@ int main(int argc, char **argv) {
             test_stat_errno = (int)value;
         } else if (!strcmp(argv[i], "--test-stat-dot")) {
             test_stat_dot = 1;
+        } else if (!strcmp(argv[i], "--test-permission-errno") && i + 1 < argc) {
+            char *end;
+            long value = strtol(argv[++i], &end, 10);
+            if (*end || value <= 0 || value > 4095)
+                return 2;
+            test_permission_errno = (int)value;
         } else if (!strcmp(argv[i], "--test-pause-cleanup")) {
             test_pause_cleanup = 1;
         } else if (!strcmp(argv[i], "--test-stage-device-mismatch")) {

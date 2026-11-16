@@ -72,7 +72,7 @@ read -r -p 'PS5 LAN IPv4 address: ' PS5_IP
 The new console output must include:
 
 ```text
-receiver_build=v0.4-verify-abi-1 stat_backend=freebsd-carry
+receiver_build=v0.4-import-access-1 stat_backend=freebsd-carry
 ```
 
 In a second terminal, run the sender with a fresh name and the new pairing token:

@@ -49,6 +49,13 @@ command except DATA, or ERROR (129) containing a bounded UTF-8 error, then close
    available throughout this phase. After VERIFY only COMMIT is accepted.
 5. COMMIT (6), empty payload. ACK contains the exact final absolute import path.
    It is the only publication success receipt.
+6. Optional GET_METRICS (7), empty payload, only after that receipt, only when the
+   BEGIN ACK advertised `ready;metrics=1`. ACK contains the binary schema below.
+   The connection closes after this one response. Closing without requesting
+   metrics retains the original PDLAN/1 behaviour. Diagnostic builds advertise
+   support; other builds retain `ready`. Old clients ignore the BEGIN ACK body;
+   new clients send no extension command to old receivers. No unsolicited stats
+   frames are inserted before the original exact COMMIT receipt.
 
 Limits: 100000 entries, 768 UTF-8 bytes per relative path, 120 bytes per package
 name, 64 GiB per file, 256 GiB total; 16 KiB recipes and 16 MiB inventories.
@@ -91,3 +98,51 @@ DATA frames and socket buffer requests do not alter the wire protocol.
 
 Shutdown commands and automatic shutdown are **not implemented** in PDLAN/1.
 See the [future design proposal](../../docs/PS5_RECEIVER_SHUTDOWN.md).
+
+
+## Publication permissions
+
+Received entries start as 0700 directories / 0600 files behind random private
+0700 staging ancestors. After all hashes, namespace, recipe and inventory checks
+pass, the receiver opens each declared entry relative to held descriptors with
+no-follow flags, refuses links/hard-linked files, and prepares 0777 directories /
+0666 regular files, including the package root and nested contents. Metadata is
+flushed and failures abort publication. Permission preparation sends ordinary
+VERIFY_PROGRESS heartbeats and must succeed before ACK `verified`.
+
+This matches Playden's imported-game access policy for different app/runtime
+users, including games rewriting files beside their program. No executable bits
+are added to regular Windows data files. Staging ancestors remain private; only
+the verified package is renamed into the import namespace. Before COMMIT rename,
+the import root is prepared as 0777. USB0's `playden` container gains read/search
+bits as needed; the mount itself and Playden-managed directories are untouched.
+An existing exact mode is retained without requiring chmod ownership. Mounts
+that expose extra file x bits may retain them after a successful fchmod; missing
+required bits or chmod/stat errors fail closed. POSIX DAC privacy depends on the
+filesystem honouring private directory modes; FAT-like mount masks need physical
+verification. No ownership, group, mount-mask or recursive shared-root changes
+are performed.
+
+## Optional metrics schema 1
+
+All extension messages use the existing session HMAC, direction and sequence
+checks. GET_METRICS is refused before COMMIT and cannot read arbitrary files or
+another connection's counters. The response has exactly **153 bytes**:
+
+- schema:u8 = 1;
+- seven u64 counters, in order: published, bytes, data_frames, files, fsyncs,
+  send_calls, recv_calls;
+- twelve u64 durations in **microseconds**, in order: wall, socket_read,
+  socket_write, frame_auth, file_write, file_hash, fsync, verify, verify_read,
+  verify_hash, permissions, commit.
+
+All integers are unsigned network byte order. The fixed schema contains no
+receiver-provided keys, text, secrets, filenames or paths and needs no stdout or
+floating-point string formatting. The snapshot is taken before sending its own
+reply and before cleanup; timings may overlap. The client checks the exact
+length/schema and matching published/byte/file counters. It converts durations
+to named `_s` values, keeps them in NetworkResult.receiver_metrics and reports
+numeric diagnostics/progress. Failed, unauthenticated, unknown or missing metrics
+are discarded; an already authenticated publication receipt remains successful.
+Optional metrics waits are bounded separately. Metrics are currently available
+for successful transfers, not via a new failure/recovery or shutdown command.

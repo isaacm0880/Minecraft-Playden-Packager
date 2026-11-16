@@ -15,7 +15,7 @@ static int diagnostics_enabled = RECEIVER_DIAGNOSTICS;
 static int socket_buffer = RECEIVER_SOCKET_BUFFER;
 static struct {
     double socket_read_s, socket_write_s, frame_auth_s, file_write_s, file_hash_s;
-    double fsync_s, verify_s, verify_read_s, verify_hash_s, commit_s;
+    double fsync_s, verify_s, verify_read_s, verify_hash_s, permissions_s, commit_s;
     uint64_t bytes, data_frames, files, fsyncs, send_calls, recv_calls;
     int published;
 } metrics;
@@ -37,14 +37,15 @@ static void metric_report(double start) {
         printf("receiver_metrics wall_s=%.6f published=%d bytes=%llu data_frames=%llu files=%llu "
                "fsyncs=%llu send_calls=%llu recv_calls=%llu socket_read_s=%.6f "
                "socket_write_s=%.6f frame_auth_s=%.6f file_write_s=%.6f file_hash_s=%.6f "
-               "fsync_s=%.6f verify_s=%.6f verify_read_s=%.6f verify_hash_s=%.6f commit_s=%.6f\n",
+               "fsync_s=%.6f verify_s=%.6f verify_read_s=%.6f verify_hash_s=%.6f "
+               "permissions_s=%.6f commit_s=%.6f\n",
                metric_clock() - start, metrics.published, (unsigned long long)metrics.bytes,
                (unsigned long long)metrics.data_frames, (unsigned long long)metrics.files,
                (unsigned long long)metrics.fsyncs, (unsigned long long)metrics.send_calls,
                (unsigned long long)metrics.recv_calls, metrics.socket_read_s,
                metrics.socket_write_s, metrics.frame_auth_s, metrics.file_write_s,
                metrics.file_hash_s, metrics.fsync_s, metrics.verify_s, metrics.verify_read_s,
-               metrics.verify_hash_s, metrics.commit_s);
+               metrics.verify_hash_s, metrics.permissions_s, metrics.commit_s);
         fflush(stdout);
     }
 }

@@ -21,6 +21,7 @@ enum {
     END_FILE = 4,
     VERIFY = 5,
     COMMIT = 6,
+    GET_METRICS = 7,
     ACK = 128,
     ERROR_REPLY = 129,
     VERIFY_PROGRESS = 130

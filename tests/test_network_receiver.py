@@ -743,3 +743,82 @@ int main(void) {
     subprocess.run(['cc', '-std=c11', '-D_POSIX_C_SOURCE=200809L', *flags, '-I', str(root / 'ps5/receiver'),
                     str(source), str(root / 'ps5/receiver/vendor/sha-256.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True, timeout=5)
+
+
+@pytest.mark.parametrize('destination,subroot,temporary', [
+    (0, 'internal', 'playden-packager-temp'),
+    (1, 'usb0/playden/import', 'usb0/playden-packager-temp'),
+])
+def test_import_modes_are_prepared_inside_private_staging_and_published_recursively(
+        receiver, destination, subroot, temporary):
+    import stat
+    files = contents()
+    files['extras/nested/readme.txt'] = b'data, not a POSIX executable'
+    files['package.json'] = inventory(files)
+    with receiver() as (sandbox, port, token):
+        with paired(port, token) as session:
+            upload(session, files, destination=destination)
+            stage = next((sandbox / temporary).glob('.pdlan-*'))
+            assert stat.S_IMODE(stage.stat().st_mode) == 0o700
+            assert stat.S_IMODE((stage / 'package/recipe.json').stat().st_mode) == 0o600
+            verify(session)
+            assert stat.S_IMODE(stage.stat().st_mode) == 0o700
+            assert stat.S_IMODE((sandbox / temporary).stat().st_mode) == 0o700
+            assert not (sandbox / subroot / 'Package').exists()
+            session.send(COMMIT)
+            assert session.ack().endswith(b'/Package')
+        published = sandbox / subroot / 'Package'
+        assert stat.S_IMODE((sandbox / subroot).stat().st_mode) == 0o777
+        for path in [published, *published.rglob('*')]:
+            assert stat.S_IMODE(path.stat().st_mode) == (0o777 if path.is_dir() else 0o666), path
+        if destination:
+            assert (sandbox / 'usb0/playden').stat().st_mode & 0o555 == 0o555
+        wait_clean(sandbox)
+
+
+@pytest.mark.parametrize('code', [errno.EPERM, errno.EIO, errno.EOPNOTSUPP])
+def test_permission_failure_discards_stage_and_never_publishes(receiver, code):
+    files = contents()
+    files['package.json'] = inventory(files)
+    with receiver('--test-permission-errno', str(code)) as (sandbox, port, token):
+        with paired(port, token) as session:
+            upload(session, files)
+            with pytest.raises(NetworkTransferError, match=f'permissions: errno={code}'):
+                verify(session)
+        wait_clean(sandbox)
+        assert not (sandbox / 'internal/Package').exists()
+
+
+@pytest.mark.parametrize('when', ['before-begin', 'before-commit'])
+def test_metrics_requests_cannot_bypass_transfer_state_or_publish(receiver, when):
+    from minecraft_playden.network_protocol import GET_METRICS
+    files = contents()
+    files['package.json'] = inventory(files)
+    with receiver('--diagnostics') as (sandbox, port, token):
+        with paired(port, token) as session:
+            if when == 'before-commit':
+                upload(session, files)
+                verify(session)
+            session.send(GET_METRICS)
+            with pytest.raises(NetworkTransferError):
+                session.ack()
+        wait_clean(sandbox)
+        assert not (sandbox / 'internal/Package').exists()
+
+
+def test_usb_container_permissions_preserve_existing_special_bits_and_mount_mode(receiver):
+    files = contents()
+    files['package.json'] = inventory(files)
+    with receiver() as (sandbox, port, token):
+        parent = sandbox / 'usb0/playden'
+        parent.mkdir(mode=0o1770)
+        parent.chmod(0o1770)
+        mount_mode = (sandbox / 'usb0').stat().st_mode
+        with paired(port, token) as session:
+            upload(session, files, destination=1)
+            verify(session)
+            session.send(COMMIT)
+            session.ack()
+        assert parent.stat().st_mode & 0o1000
+        assert parent.stat().st_mode & 0o555 == 0o555
+        assert (sandbox / 'usb0').stat().st_mode == mount_mode
