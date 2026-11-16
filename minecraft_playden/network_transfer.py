@@ -173,6 +173,7 @@ class NetworkRequest:
                 if snapshot(source) != before:
                     raise ValueError('Package changed during upload; package not committed.')
                 token.check()
+                report('network-verify', 'PS5 is verifying staged file hashes…', 0, total)
                 session.send(VERIFY)
                 while True:
                     kind, body = session.receive()

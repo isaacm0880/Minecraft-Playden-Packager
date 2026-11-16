@@ -53,18 +53,12 @@ def main() -> int:
         if args.command == 'transfer-ps5':
             import getpass
             import os
-            import time
             from .network_transfer import NetworkRequest
-            from .progress import Progress
+            from .terminal_progress import TransferProgress
             pairing = os.environ.get(args.token_env) or getpass.getpass('PS5 receiver pairing token: ')
-            last_time, last_stage = 0.0, ''
-            def report(event: Progress) -> None:
-                nonlocal last_time, last_stage
-                now = time.monotonic()
-                if now - last_time > .5 or event.stage != last_stage:
-                    print(event.message, file=sys.stderr)
-                    last_time, last_stage = now, event.stage
-            result = NetworkRequest(args.path, args.host, pairing, args.destination, args.port, args.name).run(report)
+            interactive = sys.stderr.isatty() and sys.stdout.isatty() and 'NO_COLOR' not in os.environ
+            with TransferProgress(interactive=interactive) as report:
+                result = NetworkRequest(args.path, args.host, pairing, args.destination, args.port, args.name).run(report)
             print(f'PS5 package received and verified: {result.destination}. Local output retained.')
             return 0
         if args.command == 'import-instance':

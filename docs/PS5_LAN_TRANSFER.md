@@ -124,3 +124,15 @@ mount detection, notifications and Playden access permissions need physical test
 Historical v0.1.0 release manifests, checksums and source approval remain intact.
 The existing release gate intentionally rejects these new development sources
 until a separate release review. No v0.4 binary release is produced here.
+
+
+## CLI progress
+
+On an interactive terminal, `transfer-ps5` updates one progress bar at most ten
+times per second, with bytes, percentage, smoothed current speed, average speed,
+elapsed time and ETA. Validation, pairing, verification and publication have
+separate stage messages. Unknown speeds/ETAs display `--`; rates reset when a new
+stage starts. Ctrl-C and errors finish the line before the diagnostic appears.
+When stdout or stderr is redirected, or `NO_COLOR` is set, the CLI writes plain
+stage records and at most one intermediate record every 30 seconds to stderr;
+the final receipt remains on stdout. GUI callbacks retain the same byte fields.
