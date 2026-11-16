@@ -8,7 +8,7 @@ from PySide6.QtCore import QByteArray, QSettings, QSignalBlocker, QThread, QTime
 from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QAbstractItemView, QCheckBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
+    QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QComboBox,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStyledItemDelegate,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -202,6 +202,14 @@ class MainWindow(QMainWindow):
         self.save_offline_name(self.username.text())
         self.username.setToolTip('Remembered for this user on this device. Offline display name only; this does not sign in or enable authenticated services.')
         form.addRow('Offline player name', self.username)
+        self.ps5_destination = QComboBox()
+        self.ps5_destination.addItem('Internal storage (default)', 'internal')
+        self.ps5_destination.addItem('USB0 storage', 'usb0')
+        saved_destination = self.settings.value('transfer/destination', 'internal')
+        destination_index = self.ps5_destination.findData(saved_destination)
+        self.ps5_destination.setCurrentIndex(max(0, destination_index))
+        self.ps5_destination.setToolTip('Remembered per user for the upcoming PS5 network transfer.')
+        form.addRow('PS5 transfer destination', self.ps5_destination)
         details_layout.addLayout(form)
         self.cleanup_after_usb = QCheckBox('Remove local generated package after verified USB copy (ask first)')
         self.cleanup_after_usb.setChecked(False)
@@ -300,10 +308,19 @@ class MainWindow(QMainWindow):
         self.output.textEdited.connect(self.output_edited)
         self.cache.textChanged.connect(self.update_build_button)
         self.privacy_cleanup.toggled.connect(self.update_build_button)
+        self.ps5_destination.currentIndexChanged.connect(self.save_ps5_destination)
         self.username.textChanged.connect(self.offline_name_changed)
         self.username.editingFinished.connect(self.normalise_offline_name)
         self.update_build_button()
         QTimer.singleShot(0, self.scan)
+
+    @Slot(int)
+    def save_ps5_destination(self, index: int) -> None:
+        destination = self.ps5_destination.itemData(index)
+        if destination not in ('internal', 'usb0'):
+            return
+        self.settings.setValue('transfer/destination', destination)
+        self.settings.sync()
 
     def save_offline_name(self, name: str) -> None:
         self.settings.setValue('player/offlineName', offline_player_name(name))
