@@ -84,7 +84,7 @@ static void scan_imports(const char *root, const char *label) {
                 lstat(argpath, &argstat) == 0 && S_ISREG(argstat.st_mode) &&
                 argstat.st_size > 0) args_nonempty = 1;
             const char *status = valid && args_nonempty && java ? "valid" : "invalid";
-            printf("package_validation_root=%s package=%s status=%s recipe_check=%s args_check=%s java_check=%s\\n",
+            printf("package_validation_root=%s package=%s status=%s recipe_check=%s args_check=%s java_check=%s\n",
                    label, name, status, reason, args_nonempty ? "nonempty" : "missing-or-empty",
                    java ? "present" : "missing");
         }
