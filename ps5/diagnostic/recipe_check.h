@@ -12,34 +12,41 @@ static int stringval(J *j,size_t *start,size_t *end){
  while(j->p<j->n){unsigned char c=(unsigned char)j->s[j->p++];
   if(c=='"'){*end=j->p-1;return 1;}if(c<32)return 0;
   if(c=='\\'){if(j->p>=j->n)return 0;c=(unsigned char)j->s[j->p++];
-   if(strchr("\"\\/bfnrt",c))continue;if(c!='u'||j->n-j->p<4)return 0;
+   if(strchr("\"\\/bfnrt",c))continue;
+   if(c!='u'||j->n-j->p<4)return 0;
    for(int i=0;i<4;i++)if(!isxdigit((unsigned char)j->s[j->p++]))return 0;
   }
  }return 0;
 }
 static int value(J *j);
 static int object(J *j){
- if(++j->depth>32)return 0;++j->p;skipws(j);
+ if(++j->depth>32)return 0;
+ ++j->p;skipws(j);
  if(j->p<j->n&&j->s[j->p]=='}'){++j->p;--j->depth;return 1;}
  for(;;){size_t a,b;if(!stringval(j,&a,&b))return 0;skipws(j);
   if(j->p>=j->n||j->s[j->p++]!=':')return 0;
-  if(!value(j))return 0;skipws(j);if(j->p>=j->n)return 0;
+  if(!value(j))return 0;
+  skipws(j);if(j->p>=j->n)return 0;
   char c=j->s[j->p++];if(c=='}'){--j->depth;return 1;}if(c!=',')return 0;
  }
 }
 static int array(J *j){
- if(++j->depth>32)return 0;++j->p;skipws(j);
+ if(++j->depth>32)return 0;
+ ++j->p;skipws(j);
  if(j->p<j->n&&j->s[j->p]==']'){++j->p;--j->depth;return 1;}
- for(;;){if(!value(j))return 0;skipws(j);if(j->p>=j->n)return 0;
+ for(;;){if(!value(j))return 0;
+  skipws(j);if(j->p>=j->n)return 0;
   char c=j->s[j->p++];if(c==']'){--j->depth;return 1;}if(c!=',')return 0;}
 }
 static int value(J *j){
  skipws(j);if(j->p>=j->n)return 0;char c=j->s[j->p];
- if(c=='{')return object(j);if(c=='[')return array(j);
+ if(c=='{')return object(j);
+ if(c=='[')return array(j);
  if(c=='"'){size_t a,b;return stringval(j,&a,&b);}
  const char *lit=c=='t'?"true":c=='f'?"false":c=='n'?"null":NULL;
  if(lit){size_t n=strlen(lit);if(j->n-j->p<n||memcmp(j->s+j->p,lit,n))return 0;j->p+=n;return 1;}
- if(c=='-')++j->p;if(j->p>=j->n)return 0;
+ if(c=='-')++j->p;
+ if(j->p>=j->n)return 0;
  if(j->s[j->p]=='0')++j->p;
  else if(j->s[j->p]>='1'&&j->s[j->p]<='9'){do{++j->p;}while(j->p<j->n&&isdigit((unsigned char)j->s[j->p]));}
  else return 0;
@@ -50,7 +57,8 @@ static int value(J *j){
 static int keyval(const char *s,size_t n,const char *key,const char **out,size_t *len){
  J j={s,n,0,0};skipws(&j);if(j.p>=n||s[j.p++]!='{')return 0;skipws(&j);
  while(j.p<n&&s[j.p]!='}'){size_t a,b;if(!stringval(&j,&a,&b))return 0;skipws(&j);
-  if(j.p>=n||s[j.p++]!=':')return 0;skipws(&j);size_t p=j.p;
+  if(j.p>=n||s[j.p++]!=':')return 0;
+  skipws(&j);size_t p=j.p;
   if(!value(&j))return 0;
   if(strlen(key)==b-a&&!memcmp(s+a,key,b-a)){*out=s+p;*len=j.p-p;return 1;}
   skipws(&j);if(j.p>=n||s[j.p++]!=',')break;skipws(&j);
