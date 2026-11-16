@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class PublicReleaseTests(unittest.TestCase):
     def test_application_matches_reviewed_snapshot(self):
-        policy = json.loads((ROOT / 'release/source-policy.json').read_text())
+        policy = json.loads((ROOT / 'release/source-policy.json').read_text(encoding="utf-8"))
         self.assertEqual(application_hash(ROOT), policy['application_tree_sha256'])
 
 
@@ -30,21 +30,21 @@ class PublicReleaseTests(unittest.TestCase):
                 self.assertEqual((output / 'LICENSE').read_bytes(), (ROOT / 'LICENSE').read_bytes())
                 self.assertEqual((output / 'README-MACOS.md').exists(), macos)
                 for path in output.glob('*.md'):
-                    for target in re.findall(r'\]\(([^)]+)\)', path.read_text()):
+                    for target in re.findall(r'\]\(([^)]+)\)', path.read_text(encoding="utf-8")):
                         if '://' not in target and not target.startswith('#'):
                             self.assertTrue((output / target.split('#')[0]).exists(), target)
 
     def test_public_document_relative_links_resolve(self):
         documents = list(ROOT.glob('*.md')) + list((ROOT / 'docs').glob('*.md'))
         for path in documents:
-            for target in re.findall(r'\]\(([^)]+)\)', path.read_text()):
+            for target in re.findall(r'\]\(([^)]+)\)', path.read_text(encoding="utf-8")):
                 if '://' in target or target.startswith('#'):
                     continue
                 with self.subTest(document=path.name, target=target):
                     self.assertTrue((path.parent / target.split('#')[0]).exists())
 
     def test_manual_candidate_uses_same_commit_for_every_target(self):
-        workflow = (ROOT / '.github/workflows/desktop-build.yml').read_text()
+        workflow = (ROOT / '.github/workflows/desktop-build.yml').read_text(encoding="utf-8")
         self.assertIn('workflow_dispatch:', workflow)
         self.assertNotIn('contents: write', workflow)
         self.assertIn("requested = candidate_source(", workflow)
@@ -117,9 +117,9 @@ class CandidateEvidenceTests(unittest.TestCase):
                 (root / existing).write_text('existing evidence')
                 with self.assertRaisesRegex(ValueError, 'existing evidence'):
                     write_report(root / 'release-pair.json', report)
-                self.assertEqual((root / existing).read_text(), 'existing evidence')
+                self.assertEqual((root / existing).read_text(encoding="utf-8"), 'existing evidence')
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             write_report(root / 'release-pair.json', report)
-            self.assertEqual(json.loads((root / 'release-pair.json').read_text()), report)
-            self.assertEqual((root / 'SHA256SUMS').read_text(), 'a' * 64 + '  candidate.zip\n')
+            self.assertEqual(json.loads((root / 'release-pair.json').read_text(encoding="utf-8")), report)
+            self.assertEqual((root / 'SHA256SUMS').read_text(encoding="utf-8"), 'a' * 64 + '  candidate.zip\n')
