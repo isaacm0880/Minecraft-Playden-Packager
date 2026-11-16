@@ -2,7 +2,7 @@
 
 The diagnostic ELF now scans only these two **Playden import** roots:
 
-- Internal: `/data/playden/import/<package>`
+- Internal: `/data/playden-import/<package>`
 - USB: `/mnt/usb0/playden/import/<package>`
 
 It lists immediate child directories and checks for regular files at
@@ -15,7 +15,8 @@ Symlinked package directories are not traversed.
 **Hard boundary:** This diagnostic never writes to Playden-managed game
 locations. In particular, **internal managed storage** `/data/playden-games/<game>` and
 **USB managed storage** `/mnt/usb0/playden/games/<game>` are never output
-targets. Future packager copy operations must write **only** to the designated
+targets. `/data/playden/games` holds Wine prefixes and is also off-limits
+for direct writes by the packager. Future packager copy operations must write **only** to the designated
 import roots. From an import location, **Playden** performs the import and
 lets the user choose internal or USB managed storage. The packager must not
 perform that managed-storage copy itself.
