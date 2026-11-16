@@ -1,5 +1,6 @@
 """Qt-to-engine release regressions using deterministic local instances and HTTP payloads."""
 import copy
+import faulthandler
 import contextlib
 import hashlib
 import importlib.util
@@ -72,7 +73,12 @@ class ReleaseGuiTests(unittest.TestCase):
         while self.window.busy() and time.monotonic() < until:
             self.app.processEvents()
             time.sleep(0.001)
-        self.assertFalse(self.window.busy(), 'GUI worker did not finish')
+        if self.window.busy():
+            faulthandler.dump_traceback()
+        self.assertFalse(self.window.busy(),
+                         f'GUI worker did not finish: {self.window.operation}, {self.window.outcome}; '
+                         f'{self.window.status.text()}; USB row {self.window.usb_current}; '
+                         f'{[record.state for record in self.window.usb_records]}')
 
     def tearDown(self):
         self.window.cancellation.cancel()
@@ -316,6 +322,17 @@ class ReleaseGuiTests(unittest.TestCase):
         stack.enter_context(patch('minecraft_playden.volumes._mounted_identity', return_value=identity))
         stack.enter_context(patch('minecraft_playden.transfer.flush_volume', side_effect=lambda drive: drive.check()))
         stack.enter_context(patch('minecraft_playden.transfer.allocation_unit', return_value=4096))
+        # This fixture models a USB drive using ordinary temporary files. Keep
+        # real copies, validation, hashing and atomic/no-replace publication, but
+        # simulate durability too: per-file fsync and Windows WRITE_THROUGH can
+        # otherwise spend the GUI deadline flushing the runner's physical disk.
+        stack.enter_context(patch('minecraft_playden.transfer.flush_file'))
+        stack.enter_context(patch('minecraft_playden.transfer.flush_directory'))
+        if os.name == 'nt':
+            from minecraft_playden.volumes import _move_windows
+            stack.enter_context(patch('minecraft_playden.volumes._move_windows',
+                                      side_effect=lambda source, target, flags:
+                                      _move_windows(source, target, flags & ~0x8)))
         return stack, DriveTarget.capture(root)
 
     def test_real_verified_usb_cleanup_opt_in_confirmation_and_skipped_verification(self):
@@ -590,19 +607,60 @@ class ReleaseGuiTests(unittest.TestCase):
 
     def test_skipped_checksum_queue_keeps_all_local_outputs_and_mandatory_validation(self):
         from minecraft_playden.validator import validate as real_validate
+        from minecraft_playden.volumes import _move_windows
+        outputs = self.build_real_usb_queue()
+        before = [{path.relative_to(output): path.read_bytes() for path in output.rglob('*') if path.is_file()}
+                  for output in outputs]
+        self.window.cleanup_after_usb.setChecked(True)
+        def move_without_durability(source, target, flags):
+            self.assertFalse(flags & 0x8, 'Simulated USB must not request host write-through')
+            return _move_windows(source, target, flags)
+        # A GUI regression should not depend on the host disk's flush latency.
+        # Fail if the simulated drive accidentally reaches physical durability
+        # APIs, while still exercising the native rename/no-overwrite behavior.
+        with patch('minecraft_playden.volumes.os.fsync', side_effect=AssertionError('Unexpected host fsync')), \
+                patch('minecraft_playden.volumes._move_windows', side_effect=move_without_durability):
+            stack, drive = self.simulated_usb(self.root / 'USB')
+            with stack, self.usb_picker(drive, skip=True), patch.object(self.window, 'confirm_cleanup') as confirm, patch.object(self.window, 'show_usb_completion'), patch('minecraft_playden.transfer.validate', wraps=real_validate) as validated:
+                self.window.copy_to_usb()
+                self.wait()
+                self.assertEqual(validated.call_count, 6)
+                confirm.assert_not_called()
+        self.assertTrue(all(record.state == 'unverified' for record in self.window.usb_records))
+        self.assertTrue(all(record.result is not None and not record.result.checksums for record in self.window.usb_records))
+        self.assertTrue(all(path.exists() for path in outputs))
+        for output, expected, record in zip(outputs, before, self.window.usb_records):
+            self.assertEqual({path.relative_to(output): path.read_bytes() for path in output.rglob('*') if path.is_file()}, expected)
+            destination = record.result.destination
+            self.assertEqual({path.relative_to(destination): path.read_bytes() for path in destination.rglob('*') if path.is_file()}, expected)
+        self.assertIsNone(self.window.task)
+        self.assertIn('3 unverified', self.window.status.text())
+        self.assertTrue(self.window.copy_usb_button.isEnabled())
+
+    def test_skipped_checksum_queue_rejects_corrupt_copy_and_keeps_local_outputs(self):
+        from minecraft_playden.validator import validate as real_validate
         outputs = self.build_real_usb_queue()
         self.window.cleanup_after_usb.setChecked(True)
         stack, drive = self.simulated_usb(self.root / 'USB')
-        with stack, self.usb_picker(drive, skip=True), patch.object(self.window, 'confirm_cleanup') as confirm, patch.object(self.window, 'show_usb_completion'), patch('minecraft_playden.transfer.validate', wraps=real_validate) as validated:
+        def validate_copy(path, **kwargs):
+            if path not in outputs:
+                # Corrupt a copied file without changing its size, immediately
+                # before mandatory package validation. Skipping the optional
+                # full copy-checksum pass must not allow publication or cleanup.
+                args = path / 'playden.args'
+                args.write_bytes(b'x' * args.stat().st_size)
+            return real_validate(path, **kwargs)
+        with stack, self.usb_picker(drive, skip=True), patch.object(self.window, 'confirm_cleanup') as confirm, patch.object(self.window, 'show_usb_completion'), patch('minecraft_playden.transfer.validate', side_effect=validate_copy) as validated:
             self.window.copy_to_usb()
             self.wait()
             self.assertEqual(validated.call_count, 6)
             confirm.assert_not_called()
-        self.assertTrue(all(record.state == 'unverified' for record in self.window.usb_records))
-        self.assertTrue(all(record.result is not None and not record.result.checksums for record in self.window.usb_records))
-        self.assertTrue(all(path.exists() for path in outputs))
-        self.assertIn('3 unverified', self.window.status.text())
-        self.assertTrue(self.window.copy_usb_button.isEnabled())
+        self.assertEqual([record.state for record in self.window.usb_records], ['failed'] * 3)
+        self.assertTrue(all(record.result is None for record in self.window.usb_records))
+        self.assertTrue(all('Transferred package validation failed' in record.detail for record in self.window.usb_records))
+        self.assertTrue(all(path.exists() and not validate(path) for path in outputs))
+        self.assertTrue(all(not record.request.destination.exists() for record in self.window.usb_records))
+        self.assertTrue(self.window.retry_usb_button.isEnabled())
 
     def test_single_build_copy_retains_single_completion_behavior(self):
         outputs = self.build_real_usb_queue(1)
