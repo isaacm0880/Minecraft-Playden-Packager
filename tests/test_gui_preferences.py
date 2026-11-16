@@ -56,18 +56,22 @@ def test_first_run_and_repeated_launches_remember_changes_immediately(preference
     create, read_settings = preferences
     first = create()
     assert first.username.text() == 'Player'
+    assert first.ps5_destination.currentData() == 'internal'
     assert first.usb_candidates() == []
     assert not first.copy_usb_button.isEnabled()
     assert not first.retry_usb_button.isEnabled()
     first.username.setText('Zoë Preview Player')
     assert read_settings().value('player/offlineName') == 'Zoë Preview Player'
+    first.ps5_destination.setCurrentIndex(1)
+    assert read_settings().value('transfer/destination') == 'usb0'
     first.close()
     second = create()
     assert second.username.text() == 'Zoë Preview Player'
+    assert second.ps5_destination.currentData() == 'usb0'
     second.username.setText('Second Player')
     second.close()
     assert create().username.text() == 'Second Player'
-    assert set(read_settings().allKeys()) == {'player/offlineName', 'layout/instanceSplitter'}
+    assert set(read_settings().allKeys()) == {'player/offlineName', 'layout/instanceSplitter', 'transfer/destination'}
 
 
 @pytest.mark.parametrize('saved', ['', '   ', 17, ['bad'], '\x00\n', '  A\tB  '])
@@ -147,3 +151,10 @@ with patch('minecraft_playden.gui_app.QSettings', side_effect=lambda *args: QSet
     settings.sync()
     assert settings.value('player/offlineName') == 'Next Process Player'
     assert create().username.text() == 'Next Process Player'
+
+@pytest.mark.parametrize('invalid', ['external', '', 123, None])
+def test_invalid_destination_falls_back_to_internal(preferences, invalid):
+    create, read_settings = preferences
+    read_settings().setValue('transfer/destination', invalid)
+    read_settings().sync()
+    assert create().ps5_destination.currentData() == 'internal'
