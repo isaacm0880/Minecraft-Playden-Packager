@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from release.provenance import application_hash, candidate_source, check_source
 from release.public_audit import audit_paths, SYNTHETIC_CLIENT
@@ -17,7 +18,9 @@ class PublicReleaseTests(unittest.TestCase):
     def test_unreleased_features_cannot_reuse_historical_release_approval(self):
         policy = json.loads((ROOT / 'release/source-policy.json').read_text(encoding="utf-8"))
         self.assertNotEqual(application_hash(ROOT), policy['application_tree_sha256'])
-        with self.assertRaisesRegex(ValueError, 'explicit source review is required'):
+        # Exercise the source approval gate independently of Git ancestry: CI
+        # intentionally uses shallow checkouts, while ancestry has separate tests.
+        with patch('release.provenance.git', return_value='a' * 40), patch('release.provenance.subprocess.run'), self.assertRaisesRegex(ValueError, 'explicit source review is required'):
             check_source(ROOT, preview=True)
 
 
