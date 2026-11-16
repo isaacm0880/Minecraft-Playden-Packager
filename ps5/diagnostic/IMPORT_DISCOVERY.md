@@ -13,9 +13,12 @@ Missing roots and incomplete packages are reported without failing the payload.
 Symlinked package directories are not traversed.
 
 **Hard boundary:** This diagnostic never writes to Playden-managed game
-locations. In particular, `/mnt/usb0/playden/games` and internal game
-storage are not output targets. Future copy operations must write **only**
-to the designated import roots; Playden itself must perform the import.
+locations. In particular, **internal managed storage** `/data/playden-games/<game>` and
+**USB managed storage** `/mnt/usb0/playden/games/<game>` are never output
+targets. Future packager copy operations must write **only** to the designated
+import roots. From an import location, **Playden** performs the import and
+lets the user choose internal or USB managed storage. The packager must not
+perform that managed-storage copy itself.
 
 ## Test
 
