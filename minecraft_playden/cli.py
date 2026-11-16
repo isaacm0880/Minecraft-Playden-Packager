@@ -40,8 +40,33 @@ def main() -> int:
     local_import.add_argument('--exclude-saves', action='store_true', help='Omit world saves; worlds are included by default')
     check = commands.add_parser('validate')
     check.add_argument('path', type=Path)
+    transfer = commands.add_parser('transfer-ps5', help='Send a validated package to a paired PS5 LAN receiver')
+    transfer.add_argument('path', type=Path)
+    transfer.add_argument('--host', required=True, help='Private PS5 IPv4 address')
+    transfer.add_argument('--destination', choices=['internal', 'usb0'], default='internal')
+    transfer.add_argument('--port', type=int, default=9025)
+    transfer.add_argument('--name', help='New package folder name; existing remote names are never overwritten')
+    transfer.add_argument('--token-env', default='PLAYDEN_PS5_TOKEN',
+                          help='Environment variable holding the pairing token; otherwise prompt without echo')
     args = parser.parse_args()
     try:
+        if args.command == 'transfer-ps5':
+            import getpass
+            import os
+            import time
+            from .network_transfer import NetworkRequest
+            from .progress import Progress
+            pairing = os.environ.get(args.token_env) or getpass.getpass('PS5 receiver pairing token: ')
+            last_time, last_stage = 0.0, ''
+            def report(event: Progress) -> None:
+                nonlocal last_time, last_stage
+                now = time.monotonic()
+                if now - last_time > .5 or event.stage != last_stage:
+                    print(event.message, file=sys.stderr)
+                    last_time, last_stage = now, event.stage
+            result = NetworkRequest(args.path, args.host, pairing, args.destination, args.port, args.name).run(report)
+            print(f'PS5 package received and verified: {result.destination}. Local output retained.')
+            return 0
         if args.command == 'import-instance':
             from .instance_content import import_instance
             import_instance(args.instance, args.output, args.version, args.exclude_saves)
@@ -86,7 +111,8 @@ def main() -> int:
                 print(f'Package validated: {args.output}\n' + INSTRUCTIONS)
         return 0
     except KeyboardInterrupt:
-        print('Build cancelled; no package published.', file=sys.stderr)
+        print('LAN transfer interrupted; local files retained. If publication started, inspect the PS5 import folder.'
+              if args.command == 'transfer-ps5' else 'Build cancelled; no package published.', file=sys.stderr)
         return 130
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f'Error: {exc}', file=sys.stderr)

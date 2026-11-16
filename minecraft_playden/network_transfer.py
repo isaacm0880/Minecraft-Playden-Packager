@@ -7,6 +7,7 @@ import stat
 import time
 from dataclasses import dataclass, field
 import struct
+from typing import BinaryIO
 
 from .cleanup import linked, plain_directory, snapshot
 from .operations import CancellationToken
@@ -17,6 +18,24 @@ from .network_protocol import (
     MAX_ENTRIES, MAX_FILE, MAX_FRAME, MAX_TOTAL, PORT, ROOTS,
     NetworkTransferError, Session, lan_address, pairing_key, safe_relative,
 )
+
+
+def _open_local_file(source: Path, relative: str, expected: tuple[int, int, int, int, int]) -> BinaryIO:
+    path = source / relative
+    plain_directory(path.parent)
+    if linked(path.lstat()):
+        raise ValueError('Source became a link; package not transferred.')
+    flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    handle = os.fdopen(os.open(path, flags), 'rb')
+    try:
+        info = os.fstat(handle.fileno())
+        actual = (info.st_mode, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+        if not stat.S_ISREG(info.st_mode) or actual != expected:
+            raise ValueError('Source changed before opening; package not transferred.')
+        return handle
+    except BaseException:
+        handle.close()
+        raise
 
 
 @dataclass(frozen=True)
@@ -74,8 +93,8 @@ class NetworkRequest:
                 raise ValueError('Package exceeds receiver size limits.')
             digest = hashlib.sha256()
             if kind:
-                with (source / relative).open('rb') as stream:
-                    while block := stream.read(MAX_FRAME):
+                with _open_local_file(source, relative, info) as local:
+                    while block := local.read(MAX_FRAME):
                         token.check()
                         digest.update(block)
                 files += 1
@@ -86,8 +105,8 @@ class NetworkRequest:
         report('network-connect', f'Pairing with PS5 at {host}:{self.port}…')
         committed = False
         try:
-            with socket.create_connection((host, self.port), timeout=3) as stream:
-                session = Session(stream, token)
+            with socket.create_connection((host, self.port), timeout=3) as connection:
+                session = Session(connection, token)
                 session.authenticate(key)
                 session.send(BEGIN, BEGIN_INFO.pack(int(self.destination == 'usb0'), len(encoded_name),
                                                    len(entries), total) + encoded_name)
@@ -101,14 +120,7 @@ class NetworkRequest:
                     if not kind:
                         continue
                     digest = hashlib.sha256()
-                    path = source / relative
-                    # Recheck the whole ancestor chain before opening each file.
-                    plain_directory(path.parent)
-                    flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0)
-                    fd = os.open(path, flags)
-                    with os.fdopen(fd, 'rb') as handle:
-                        if linked(path.lstat()) or not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-                            raise ValueError('Source became a link or non-regular file.')
+                    with _open_local_file(source, relative, before[relative]) as handle:
                         sent = 0
                         while block := handle.read(MAX_FRAME):
                             token.check()

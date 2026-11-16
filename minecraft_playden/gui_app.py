@@ -28,6 +28,8 @@ from .cleanup import GeneratedOutput
 from .usb_queue import UsbRecord, TransferCandidate, transfer_candidates, plan_transfers, usb_summary
 from .volumes import DriveTarget
 from .transfer import TransferRequest, TransferResult, InsufficientSpace
+from .network_transfer import NetworkRequest, NetworkResult, run_network_queue
+from .network_protocol import ROOTS, lan_address, pairing_key
 
 
 class PathDelegate(QStyledItemDelegate):
@@ -87,6 +89,7 @@ class MainWindow(QMainWindow):
         self.completed_package: ValidatedPackage | None = None
         self.last_transfer: TransferRequest | None = None
         self.transfer_verified = True
+        self.network_results: tuple[NetworkResult, ...] = ()
         self.space_dialog: SpaceDialog | None = None
         self.transfer_retry_available = False
         self.pending_dialog: tuple[Path, bool] | None = None
@@ -208,8 +211,20 @@ class MainWindow(QMainWindow):
         saved_destination = self.settings.value('transfer/destination', 'internal')
         destination_index = self.ps5_destination.findData(saved_destination)
         self.ps5_destination.setCurrentIndex(max(0, destination_index))
-        self.ps5_destination.setToolTip('Remembered per user for the upcoming PS5 network transfer.')
+        self.ps5_destination.setToolTip('LAN destination remembered per user. USB0 never falls back to internal storage.')
         form.addRow('PS5 transfer destination', self.ps5_destination)
+        self.ps5_host = QLineEdit()
+        try:
+            self.ps5_host.setText(lan_address(str(self.settings.value('transfer/host', ''))))
+        except ValueError:
+            pass
+        self.ps5_host.setPlaceholderText('192.168.1.50')
+        form.addRow('PS5 IPv4 address', self.ps5_host)
+        self.ps5_token = QLineEdit()
+        self.ps5_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ps5_token.setPlaceholderText('Pairing token displayed by the receiver')
+        self.ps5_token.setToolTip('Session token. Kept in memory only; never saved in settings or logs.')
+        form.addRow('PS5 pairing token', self.ps5_token)
         details_layout.addLayout(form)
         self.cleanup_after_usb = QCheckBox('Remove local generated package after verified USB copy (ask first)')
         self.cleanup_after_usb.setChecked(False)
@@ -246,9 +261,10 @@ class MainWindow(QMainWindow):
         actions = QHBoxLayout()
         self.open_output_button = QPushButton('Open Output Folder')
         self.copy_usb_button = QPushButton('Copy to USB')
+        self.copy_ps5_button = QPushButton('Send to PS5 (LAN)')
         self.retry_usb_button = QPushButton('Retry USB Transfer')
         self.cancel_button = QPushButton('Cancel Operation')
-        for button in (self.open_output_button, self.copy_usb_button, self.retry_usb_button, self.cancel_button):
+        for button in (self.open_output_button, self.copy_usb_button, self.copy_ps5_button, self.retry_usb_button, self.cancel_button):
             actions.addWidget(button)
         layout.addLayout(actions)
         self.completed_label = QLabel('No validated package built in this session yet.')
@@ -301,6 +317,7 @@ class MainWindow(QMainWindow):
         self.build_button.clicked.connect(self.start_build)
         self.open_output_button.clicked.connect(self.open_output_folder)
         self.copy_usb_button.clicked.connect(self.copy_to_usb)
+        self.copy_ps5_button.clicked.connect(self.copy_to_ps5)
         self.retry_usb_button.clicked.connect(self.retry_transfer)
         self.cancel_button.clicked.connect(self.cancel_operation)
         self.table.itemSelectionChanged.connect(self.selection_changed)
@@ -309,6 +326,8 @@ class MainWindow(QMainWindow):
         self.cache.textChanged.connect(self.update_build_button)
         self.privacy_cleanup.toggled.connect(self.update_build_button)
         self.ps5_destination.currentIndexChanged.connect(self.save_ps5_destination)
+        self.ps5_host.textChanged.connect(self.save_ps5_host)
+        self.ps5_token.textChanged.connect(self.update_build_button)
         self.username.textChanged.connect(self.offline_name_changed)
         self.username.editingFinished.connect(self.normalise_offline_name)
         self.update_build_button()
@@ -321,6 +340,19 @@ class MainWindow(QMainWindow):
             return
         self.settings.setValue('transfer/destination', destination)
         self.settings.sync()
+
+    @Slot(str)
+    def save_ps5_host(self, host: str) -> None:
+        if not host.strip():
+            self.settings.remove('transfer/host')
+        else:
+            try:
+                self.settings.setValue('transfer/host', lan_address(host.strip()))
+            except ValueError:
+                self.update_build_button()
+                return
+        self.settings.sync()
+        self.update_build_button()
 
     def save_offline_name(self, name: str) -> None:
         self.settings.setValue('player/offlineName', offline_player_name(name))
@@ -405,10 +437,19 @@ class MainWindow(QMainWindow):
         self.open_output_button.setEnabled(not self.busy() and open_path is not None and open_path.is_dir())
         transferable = any(not candidate.skip_reason for candidate in self.usb_candidates())
         self.copy_usb_button.setEnabled(not self.busy() and transferable)
+        network_ready = False
+        try:
+            lan_address(self.ps5_host.text().strip())
+            pairing_key(self.ps5_token.text())
+            network_ready = True
+        except ValueError:
+            pass
+        self.copy_ps5_button.setEnabled(not self.busy() and transferable and network_ready)
+        self.copy_ps5_button.setToolTip('Start the PS5 receiver, enter its LAN address and pairing token, then send validated packages. Local files are retained.')
         if self.queue_dialog is not None and self.queue_dialog.copy_button is not None:
             self.queue_dialog.copy_button.setEnabled(not self.busy() and transferable)
         self.retry_usb_button.setEnabled(not self.busy() and self.last_transfer is not None and self.transfer_retry_available)
-        self.cancel_button.setEnabled(self.busy() and self.operation in ('build', 'transfer', 'validate', 'cleanup') and not self.cancellation.cancelled)
+        self.cancel_button.setEnabled(self.busy() and self.operation in ('build', 'transfer', 'network', 'validate', 'cleanup') and not self.cancellation.cancelled)
 
     def build_request(self) -> tuple[LocalBuildRequest | None, str]:
         requests, reason = self.build_requests()
@@ -465,7 +506,8 @@ class MainWindow(QMainWindow):
 
     def operation_controls(self) -> tuple[QWidget, ...]:
         return (self.scan_button, self.folder_button, self.validate_button, self.output_button,
-                self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.username, self.cleanup_after_usb)
+                self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.username,
+                self.cleanup_after_usb, self.ps5_destination, self.ps5_host, self.ps5_token)
 
     def start_task(self, operation: str, work: Callable[[ProgressCallback], object]) -> None:
         if self.busy():
@@ -635,7 +677,16 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def task_result(self, result: object) -> None:
-        if self.operation == 'scan':
+        if self.operation == 'network':
+            if not isinstance(result, tuple) or not result or not all(isinstance(item, NetworkResult) for item in result):
+                self.task_error('Receiver did not confirm publication; local outputs retained.')
+                return
+            self.network_results = result
+            self.outcome = 'succeeded'
+            summary = f'PS5 LAN: {len(result)} package(s) received and verified. Local outputs retained.\n' + '\n'.join(item.destination for item in result)
+            self.status.setText(summary)
+            self.log.appendPlainText(summary)
+        elif self.operation == 'scan':
             assert isinstance(result, DiscoveryResult)
             previous = self.selected_installation()
             preferred = self._preferred_path or (previous.instance if previous else None)
@@ -813,6 +864,7 @@ class MainWindow(QMainWindow):
             self.refresh_usb_results()
         self.pending_dialog = None
         self.status.setText({'scan': 'Scan failed.', 'validate': 'Package validation failed.',
+                             'network': 'PS5 LAN transfer failed. Local outputs retained; see the log for completed packages and errors.',
                              'transfer': 'USB transfer failed. Retry is available; no success was reported.',
                              'cleanup': 'Local cleanup failed; the verified USB copy was not deleted.'}.get(self.operation, 'Build failed. No completed output was published.'))
         self.log.appendPlainText(message)
@@ -994,6 +1046,29 @@ class MainWindow(QMainWindow):
         if self.usb_batch_active and current is not None:
             prefix += f' — current: {current.candidate.name}'
         self.usb_aggregate.setText(prefix + '\n' + usb_summary(self.usb_records).split('\n', 1)[0])
+
+    @Slot()
+    def copy_to_ps5(self) -> None:
+        if self.busy():
+            return
+        candidates = [candidate for candidate in self.usb_candidates() if not candidate.skip_reason]
+        if not candidates:
+            return
+        try:
+            host = lan_address(self.ps5_host.text().strip())
+            pairing_key(self.ps5_token.text())
+            destination = self.ps5_destination.currentData()
+            if destination not in ROOTS:
+                raise ValueError('Choose internal or USB0 storage.')
+        except ValueError as exc:
+            QMessageBox.warning(self, 'PS5 connection settings', str(exc))
+            return
+        requests = tuple(NetworkRequest(item.source, host, self.ps5_token.text(), destination) for item in candidates)
+        self.network_results = ()
+        self.cancellation = CancellationToken()
+        self.last_stage = ''
+        self.status.setText(f'Preparing {len(requests)} package(s) for PS5 LAN transfer…')
+        self.start_task('network', lambda progress: run_network_queue(requests, progress, self.cancellation))
 
     @Slot()
     def copy_to_usb(self) -> None:
@@ -1182,7 +1257,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def cancel_operation(self) -> None:
-        if self.busy() and self.operation in ('build', 'transfer', 'validate', 'cleanup'):
+        if self.busy() and self.operation in ('build', 'transfer', 'network', 'validate', 'cleanup'):
             self.cancellation.cancel()
             self.cancel_button.setEnabled(False)
             self.status.setText('Cancellation requested. Waiting for current I/O to stop safely…')
@@ -1211,6 +1286,7 @@ class MainWindow(QMainWindow):
             self.transfer_retry_available = True
         self.pending_dialog = None
         self.status.setText({'transfer': 'USB transfer cancelled.', 'validate': 'Package validation cancelled.',
+                             'network': 'PS5 LAN transfer cancelled. Earlier confirmed packages remain on PS5; local outputs retained.',
                              'cleanup': 'Local cleanup cancelled; verified USB copy retained.'}.get(self.operation, 'Build cancelled. No completed output was published.'))
         self.log.appendPlainText(message)
 
