@@ -29,3 +29,6 @@ jobs:
           grep -Fx 'minecraft-playden-ps5-diagnostic version=0.1 mode=read-only' /tmp/diagnostic-output.txt
           grep -Fx 'diagnostic_complete=true' /tmp/diagnostic-output.txt
           grep -q '^path=/data status=' /tmp/diagnostic-output.txt
+
+      - name: Test import discovery with isolated fixture directories
+        run: bash ps5/diagnostic/test_host.sh
