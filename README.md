@@ -125,4 +125,4 @@ Minecraft, Java and other downloaded components keep their own licences. Do not
 redistribute populated game packages without permission. This independent project
 is not affiliated with Mojang, Microsoft or Sony.
 
-> **AI disclosure:** GameScope was built with the assistance of AI.
+> **AI disclosure:** built with the assistance of AI.
