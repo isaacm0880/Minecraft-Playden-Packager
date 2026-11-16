@@ -29,6 +29,7 @@ static const char *roots[] = {"/data/playden-import", "/mnt/usb0/playden/import"
 #ifdef HOST_TEST
 static char test_root[1024];
 static uint64_t test_free = UINT64_MAX;
+static uint64_t test_write_limit = UINT64_MAX, test_written;
 #endif
 static void stop_receiver(int sig) {
     (void)sig;
@@ -144,6 +145,8 @@ static int enough_space(int fd, uint64_t bytes, uint32_t entries) {
     uint64_t unit = fs.f_frsize ? fs.f_frsize : fs.f_bsize;
     if (unit < 4096)
         unit = 4096;
+    if (unit > (UINT64_MAX - bytes - 16 * 1024 * 1024) / ((uint64_t)entries + 8))
+        return 0;
     uint64_t required = bytes + unit * ((uint64_t)entries + 8) + 16 * 1024 * 1024;
     uint64_t free_bytes = fs.f_bavail > UINT64_MAX / unit ? UINT64_MAX : fs.f_bavail * unit;
 #ifdef HOST_TEST
@@ -161,6 +164,13 @@ static int sync_dir(int fd) {
     return errno == EINVAL || errno == EOPNOTSUPP;
 }
 static int write_all(int fd, const uint8_t *data, size_t n) {
+#ifdef HOST_TEST
+    if (n > test_write_limit - test_written) {
+        errno = ENOSPC;
+        return 0;
+    }
+    test_written += n;
+#endif
     while (n) {
         ssize_t got = write(fd, data, n);
         if (got < 0 && errno == EINTR)
@@ -366,7 +376,8 @@ static void connection(int client, const uint8_t key[32]) {
         } else if (type == VERIFY) {
             if (file >= 0 || length || inventory.count != expected_entries || completed != total)
                 goto fail;
-            if (!verify_staging(package, &inventory, &wire, total) ||
+            if (!same_inode(package, stage, "package") ||
+                !verify_staging(package, &inventory, &wire, total) ||
                 !strict_recipe(package, package_path) || !inventory_hashes(package, &inventory)) {
                 error = "Invalid recipe, required package structure or immutable inventory.";
                 goto fail;
@@ -377,7 +388,8 @@ static void connection(int client, const uint8_t key[32]) {
         } else if (type == COMMIT) {
             if (!verified || file >= 0 || length)
                 goto fail;
-            if (!sync_dir(package) || !publish(root, stage, package_name, root_path)) {
+            if (!same_inode(package, stage, "package") || !sync_dir(package) ||
+                !publish(root, stage, package_name, root_path)) {
                 error = "Publication failed or its durability is uncertain; inspect the import "
                         "folder before retrying.";
                 goto fail;
@@ -443,6 +455,12 @@ int main(int argc, char **argv) {
                 return 2;
         } else if (!strcmp(argv[i], "--once"))
             once = 1;
+        else if (!strcmp(argv[i], "--test-write-limit") && i + 1 < argc) {
+            char *end;
+            test_write_limit = strtoull(argv[++i], &end, 10);
+            if (*end)
+                return 2;
+        }
 #endif
         else {
             fprintf(stderr, "Invalid receiver option.\n");

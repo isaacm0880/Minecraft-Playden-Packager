@@ -158,12 +158,12 @@ def test_manual_scan_cli_uses_verified_context_without_a_second_run_id(tmp_path,
 
 
 def test_selected_v010_pair_pins_binary_source_and_original_checksums():
-    from release.provenance import application_hash
     manifest = json.loads((ROOT / 'release/v0.1.0-candidate.json').read_text())
     assert manifest['source_commit'] == '70daa32e92c2fe7cac47737c640ca19c2838bbd4'
     assert manifest['binary_platforms'] == ['win32-x86_64', 'linux-x86_64']
     assert len(manifest['artifacts']) == 2
-    assert manifest['application_tree_sha256'] == application_hash(ROOT)
+    # The v0.1.0 binary receipt is historical, not an approval of newer sources.
+    assert manifest['application_tree_sha256'] == '0b2f7500e9b1558b767ed89a22e8ee1619fd979053777d0514a723cb58acdc78'
     for item in manifest['artifacts']:
         assert item['source_commit'] == manifest['source_commit']
         assert item['content_audit_passed'] and item['frozen_smoke_passed'] and not item['preview']

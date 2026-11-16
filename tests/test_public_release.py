@@ -5,7 +5,7 @@ import re
 import tempfile
 import unittest
 
-from release.provenance import application_hash, candidate_source
+from release.provenance import application_hash, candidate_source, check_source
 from release.public_audit import audit_paths, SYNTHETIC_CLIENT
 from release.verify_pair import write_report
 from release.build_desktop import bundle_documentation
@@ -14,9 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PublicReleaseTests(unittest.TestCase):
-    def test_application_matches_reviewed_snapshot(self):
+    def test_unreleased_features_cannot_reuse_historical_release_approval(self):
         policy = json.loads((ROOT / 'release/source-policy.json').read_text(encoding="utf-8"))
-        self.assertEqual(application_hash(ROOT), policy['application_tree_sha256'])
+        self.assertNotEqual(application_hash(ROOT), policy['application_tree_sha256'])
+        with self.assertRaisesRegex(ValueError, 'explicit source review is required'):
+            check_source(ROOT, preview=True)
 
 
     def test_bundled_guides_keep_relative_links_and_licensing_notices(self):

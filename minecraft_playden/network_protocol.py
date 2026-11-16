@@ -61,7 +61,7 @@ def safe_relative(name: str, *, package: bool = False) -> bytes:
         raise ValueError('Choose a plain package name, without a path or leading dot.')
     for part in parts:
         stem = part.split('.')[0].upper()
-        if (part in ('', '.', '..') or part.endswith((' ', '.'))
+        if (part in ('', '.', '..') or len(part.encode('utf-8')) > 255 or part.endswith((' ', '.'))
                 or any(c in '<>:"\\|?*' or ord(c) < 32 or ord(c) == 127 for c in part)
                 or stem in {'CON', 'PRN', 'AUX', 'NUL'}
                 or stem in {f'{prefix}{n}' for prefix in ('COM', 'LPT') for n in range(1, 10)}):

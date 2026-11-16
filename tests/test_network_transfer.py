@@ -2,6 +2,9 @@
 import io
 import json
 import socket
+import hashlib
+import hmac
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -10,7 +13,10 @@ from minecraft_playden.cli import main
 from minecraft_playden.desktop import LocalBuildRequest
 from minecraft_playden.discovery import discover
 from minecraft_playden.network_transfer import NetworkRequest, NetworkResult
-from minecraft_playden.network_protocol import COMMIT, NetworkTransferError, Session
+from minecraft_playden.network_protocol import (
+    ACK, BEGIN, BEGIN_INFO, COMMIT, DATA, END_FILE, ENTRY, ENTRY_INFO,
+    HEADER, MAGIC, MAX_FRAME, VERIFY, NetworkTransferError, Session,
+)
 from minecraft_playden.operations import CancellationToken, OperationCancelled
 from minecraft_playden.validator import validate
 from test_fabric_launch import installed, archive, save
@@ -46,6 +52,80 @@ def built_package(tmp_path):
 
 def snapshot(path):
     return {p.relative_to(path).as_posix(): p.read_bytes() for p in path.rglob('*') if p.is_file()}
+
+
+def test_client_streams_complete_package_on_every_host(built_package):
+    # A Python reference peer exercises real sockets and local file handles on
+    # Windows too; the POSIX/PS5 C receiver is tested independently below.
+    key, nonce = bytes(range(32)), bytes(range(32, 64))
+    errors, received = [], {}
+    listener = socket.socket()
+    listener.bind(('127.0.0.1', 0))
+    listener.listen(1)
+    listener.settimeout(5)
+    def peer():
+        try:
+            connection, _ = listener.accept()
+            with connection:
+                connection.settimeout(5)
+                def read(n):
+                    data = b''
+                    while len(data) < n:
+                        block = connection.recv(n - len(data))
+                        assert block, 'Client disconnected'
+                        data += block
+                    return data
+                connection.sendall(MAGIC + nonce)
+                client, proof = read(32), read(32)
+                assert proof == hmac.digest(key, b'client' + nonce + client, 'sha256')
+                connection.sendall(hmac.digest(key, b'server' + nonce + client, 'sha256'))
+                session_key = hmac.digest(key, b'session' + nonce + client, 'sha256')
+                sent = sequence = 0
+                active, data, expected = '', b'', b''
+                while True:
+                    header = read(HEADER.size)
+                    kind, size, counter = HEADER.unpack(header)
+                    assert counter == sequence and size <= MAX_FRAME
+                    sequence += 1
+                    body, proof = read(size), read(32)
+                    assert proof == hmac.digest(session_key, b'C' + header + body, 'sha256')
+                    response = b'ok'
+                    if kind == BEGIN:
+                        dest, name_size, count, total = BEGIN_INFO.unpack(body[:15])
+                        assert dest == 0 and body[15:].decode() == built_package.name
+                    elif kind == ENTRY:
+                        file_kind, path_size, file_size = ENTRY_INFO.unpack(body[:11])
+                        active, expected, data = body[43:].decode(), body[11:43], b''
+                        assert len(body[43:]) == path_size
+                    elif kind == DATA:
+                        data += body
+                        continue
+                    elif kind == END_FILE:
+                        assert len(data) == file_size and hashlib.sha256(data).digest() == expected
+                        received[active] = data
+                    elif kind == VERIFY:
+                        response = b'verified'
+                    elif kind == COMMIT:
+                        response = ('/data/playden-import/' + built_package.name).encode()
+                    else:
+                        raise AssertionError('Unexpected command')
+                    header = HEADER.pack(ACK, len(response), sent)
+                    sent += 1
+                    connection.sendall(header + response + hmac.digest(session_key, b'S' + header + response, 'sha256'))
+                    if kind == COMMIT:
+                        break
+        except BaseException as exc:
+            errors.append(exc)
+    thread = threading.Thread(target=peer)
+    thread.start()
+    try:
+        result = NetworkRequest(built_package, '127.0.0.1', key.hex(), port=listener.getsockname()[1]).run()
+    finally:
+        listener.close()
+        thread.join(6)
+    assert not thread.is_alive() and not errors, errors
+    assert received == snapshot(built_package)
+    assert result.files == len(received)
 
 
 @pytest.mark.parametrize('destination,root', [('internal', 'internal'), ('usb0', 'usb0/playden/import')])

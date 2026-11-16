@@ -28,7 +28,10 @@ def receiver_binary(tmp_path_factory):
         pytest.skip('Receiver host integration requires a POSIX C compiler; Python protocol tests run everywhere')
     binary = tmp_path_factory.mktemp('receiver-build') / 'receiver'
     root = Path(__file__).resolve().parents[1]
-    subprocess.run(['cc', '-std=c11', '-DHOST_TEST', '-Wall', '-Wextra', '-Werror', '-O2',
+    flags = ['-O2']
+    if os.environ.get('PLAYDEN_RECEIVER_SANITIZE') == '1':
+        flags = ['-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer']
+    subprocess.run(['cc', '-std=c11', '-DHOST_TEST', '-Wall', '-Wextra', '-Werror', *flags,
                     str(root / 'ps5/receiver/main.c'), str(root / 'ps5/receiver/vendor/sha-256.c'),
                     '-o', str(binary)], check=True, capture_output=True)
     return binary
@@ -57,11 +60,13 @@ def receiver(receiver_binary, tmp_path):
         finally:
             process.terminate()
             try:
-                process.communicate(timeout=3)
+                output, error = process.communicate(timeout=3)
             except subprocess.TimeoutExpired:
                 process.kill()
-                process.communicate(timeout=3)
+                output, error = process.communicate(timeout=3)
             reader.join(1)
+            assert 'ERROR: AddressSanitizer' not in error and 'runtime error:' not in error, error
+            assert process.returncode == 0, 'Receiver exited abnormally: ' + error
     return start
 
 
@@ -267,6 +272,29 @@ def test_storage_preflight_and_usb_unavailable_never_fall_back(receiver):
         with pytest.raises(NetworkTransferError, match='no internal fallback'):
             begin(session, 1, 100, destination=1)
         assert not (sandbox / 'internal').exists()
+
+
+def test_actual_write_space_failure_discards_staging(receiver):
+    with receiver('--test-write-limit', '0') as (sandbox, port, token), paired(port, token) as session:
+        begin(session, 1, 10)
+        session.send(ENTRY, ENTRY_INFO.pack(1, 4, 10) + hashlib.sha256(b'0123456789').digest() + b'file')
+        session.ack()
+        session.send(DATA, b'0123456789')
+        with pytest.raises(NetworkTransferError, match='Insufficient storage'):
+            session.ack()
+    wait_clean(sandbox)
+    assert not (sandbox / 'internal/Package').exists()
+
+
+def test_disconnect_after_verification_still_does_not_publish(receiver):
+    files = contents()
+    files['package.json'] = inventory(files)
+    with receiver() as (sandbox, port, token):
+        with paired(port, token) as session:
+            upload(session, files)
+            verify(session)
+        wait_clean(sandbox)
+        assert not (sandbox / 'internal/Package').exists()
 
 
 def test_disconnect_discards_private_staging_and_publishes_nothing(receiver):
