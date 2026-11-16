@@ -13,6 +13,7 @@ from minecraft_playden.network_transfer import NetworkRequest, NetworkResult
 from minecraft_playden.progress import Progress
 from minecraft_playden.usb_queue import TransferCandidate
 from test_gui_preferences import preferences
+from test_network_receiver import receiver, receiver_binary
 
 
 def wait(window):
@@ -115,3 +116,28 @@ def test_partial_queue_stops_on_error_and_reports_previously_confirmed_packages(
     assert '1/2 packages confirmed' in window.log.toPlainText()
     assert 'Insufficient storage' in window.log.toPlainText()
     assert package.exists() and second.exists()
+
+
+def test_gui_uses_the_same_recorded_instance_name_and_receives_metrics(ready, tmp_path, request):
+    # Opt into the actual loopback receiver fixture lazily; Windows still runs
+    # the other Qt lifecycle tests without requiring a POSIX payload process.
+    receiver = request.getfixturevalue('receiver')
+    from lan_fixtures import build_package
+    from test_network_transfer import set_instance_name
+    window, _, create, read = ready
+    package = build_package(tmp_path / 'real-export')
+    set_instance_name(package, 'Shared GUI Instance Name')
+    window.completed_package = ValidatedPackage(package)
+    window.update_build_button()
+    with receiver('--diagnostics') as (sandbox, port, token):
+        window.ps5_host.setText('127.0.0.1')
+        window.ps5_token.setText(token)
+        with patch('minecraft_playden.gui_app.NetworkRequest', side_effect=lambda source, host, pairing, destination:
+                   NetworkRequest(source, host, pairing, destination, port)):
+            window.copy_to_ps5()
+            wait(window)
+        assert window.outcome == 'succeeded', window.log.toPlainText()
+        assert window.network_results[0].destination.endswith('/Shared GUI Instance Name')
+        assert window.network_results[0].receiver_metrics['published'] == 1
+        assert 'Receiver:' in window.log.toPlainText()
+        assert (sandbox / 'internal/Shared GUI Instance Name/recipe.json').is_file()

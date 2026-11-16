@@ -318,3 +318,104 @@ def test_invalid_verification_progress_reports_counters_and_never_commits(receiv
         wait_clean(sandbox)
         assert not (sandbox / 'internal' / built_package.name).exists()
     assert snapshot(built_package) == before
+
+
+def set_instance_name(package, name):
+    path = package / 'metadata/instance-name.json'
+    path.write_text(json.dumps({'schema': 1, 'name': name}), encoding='utf-8')
+    inventory = json.loads((package / 'package.json').read_text())
+    inventory['files']['metadata/instance-name.json'] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (package / 'package.json').write_text(json.dumps(inventory))
+
+
+@pytest.mark.parametrize('override,expected', [(None, 'My Fabric World'), ('Custom Name', 'Custom Name')])
+def test_default_instance_name_survives_output_rename_and_override_is_optional(receiver, built_package, override, expected):
+    set_instance_name(built_package, 'My Fabric World')
+    renamed = built_package.with_name('Generic Export Folder')
+    built_package.rename(renamed)
+    before = snapshot(renamed)
+    with receiver() as (sandbox, port, token):
+        result = NetworkRequest(renamed, '127.0.0.1', token, port=port, package_name=override).run()
+        assert result.destination == '/data/playden-import/' + expected
+        assert snapshot(sandbox / 'internal' / expected) == before
+        with pytest.raises(NetworkTransferError, match='already exists'):
+            NetworkRequest(renamed, '127.0.0.1', token, port=port, package_name=override).run()
+    assert snapshot(renamed) == before
+
+
+@pytest.mark.parametrize('name', ['', '../escape', 'CON', '.hidden', 'x' * 121, 123])
+@pytest.mark.parametrize('override', [False, True])
+def test_invalid_instance_names_or_overrides_fail_before_network(built_package, name, override):
+    if not override:
+        set_instance_name(built_package, name)
+    with patch('socket.socket') as socket_factory, pytest.raises(ValueError):
+        NetworkRequest(built_package, '127.0.0.1', 'ab' * 32,
+                       package_name=name if override else None).run()
+    socket_factory.assert_not_called()
+
+
+def test_legacy_package_name_falls_back_to_folder(receiver, built_package):
+    path = built_package / 'metadata/instance-name.json'
+    path.unlink()
+    document = json.loads((built_package / 'package.json').read_text())
+    del document['files']['metadata/instance-name.json']
+    (built_package / 'package.json').write_text(json.dumps(document))
+    with receiver() as (sandbox, port, token):
+        result = NetworkRequest(built_package, '127.0.0.1', token, port=port).run()
+        assert result.destination.endswith('/' + built_package.name)
+
+
+def test_cli_uses_recorded_instance_name_without_name_argument(receiver, built_package, monkeypatch, capsys):
+    set_instance_name(built_package, 'CLI Instance')
+    with receiver() as (sandbox, port, token):
+        monkeypatch.setenv('PLAYDEN_PS5_TOKEN', token)
+        monkeypatch.setattr('sys.argv', ['packager', 'transfer-ps5', str(built_package), '--host', '127.0.0.1', '--port', str(port)])
+        assert main() == 0
+        assert (sandbox / 'internal/CLI Instance').is_dir()
+    assert '/data/playden-import/CLI Instance' in capsys.readouterr().out
+
+
+def test_receiver_metrics_arrive_on_authenticated_connection(receiver, built_package):
+    logs = []
+    with receiver('--diagnostics') as (sandbox, port, token):
+        result = NetworkRequest(built_package, '127.0.0.1', token, port=port).run(diagnostics=logs.append)
+        values = result.receiver_metrics
+        assert values is not None and values['published'] == 1
+        assert values['bytes'] == result.bytes_copied and values['files'] == result.files
+        assert values['permissions_s'] >= 0 and values['verify_s'] >= 0
+        assert logs[0]['receiver_bytes'] == result.bytes_copied
+        assert token not in json.dumps(values) and str(built_package) not in json.dumps(values)
+
+
+@pytest.mark.parametrize('fault', ['disconnect', 'length', 'schema', 'counters', 'authentication'])
+def test_lost_or_invalid_optional_metrics_never_revoke_confirmed_publication(receiver, built_package, fault):
+    import struct
+    from minecraft_playden.network_protocol import GET_METRICS
+    original_send, original_ack = Session.send, Session.ack
+    metrics_requested = False
+    def send(session, kind, body=b''):
+        nonlocal metrics_requested
+        original_send(session, kind, body)
+        metrics_requested |= kind == GET_METRICS
+    def ack(session):
+        if metrics_requested:
+            if fault in ('disconnect', 'authentication'):
+                raise NetworkTransferError(f'synthetic {fault}')
+            if fault == 'length':
+                return b'invalid'
+            return struct.pack('!B19Q', 2 if fault == 'schema' else 1, *([0] * 19))
+        return original_ack(session)
+    with receiver('--diagnostics') as (sandbox, port, token):
+        with patch.object(Session, 'send', send), patch.object(Session, 'ack', ack):
+            result = NetworkRequest(built_package, '127.0.0.1', token, port=port).run()
+        assert metrics_requested and result.receiver_metrics is None
+        assert (sandbox / 'internal' / built_package.name / 'recipe.json').is_file()
+
+
+def test_custom_name_can_override_invalid_recorded_instance_name(receiver, built_package):
+    set_instance_name(built_package, '../not-a-package-name')
+    before = snapshot(built_package)
+    with receiver() as (sandbox, port, token):
+        result = NetworkRequest(built_package, '127.0.0.1', token, port=port, package_name='Valid Override').run()
+        assert result.destination == '/data/playden-import/Valid Override'
+    assert snapshot(built_package) == before

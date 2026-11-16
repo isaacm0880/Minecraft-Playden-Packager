@@ -200,7 +200,7 @@ The sender prompts for the fresh pairing token without echo. Remote benchmarking
 publishes new `LAN-Bench-large-*`/`LAN-Bench-small-*` packages; it does not remove
 remote packages, resume, overwrite, launch files or deploy/unload a payload. Keep
 storage use in mind when repeating; inspect imports manually afterward. Capture
-filtered receiver metrics separately (remote JSONL has sender timings only).
+filtered receiver metrics separately (remote JSONL also includes authenticated receiver metrics when supported).
 
 Record PS5 model/firmware/loader, internal or USB filesystem/device, PC OS/CPU,
 router/AP, band/channel, signal strength, shared airtime/other traffic, negotiated
@@ -317,3 +317,47 @@ banner private. A closed or backpressured loader/stdout pipe can still lose or
 block output even when unbuffered; a process killed before reaching the report
 cannot emit it. Inspect loader exit/crash status separately. This change adds no
 PS5 log files, automatic shutdown, deployment or new write destinations.
+
+
+## Import permissions and metrics delivery update
+
+The physical owner subsequently confirmed a successful transfer and apparent
+Minecraft launch after recursively applying 0777 permissions. The previous
+0700/0600 package modes were private to the payload user. Review of Playden's
+`src/stores/local/drop_folder_access.h` shows its imported-game policy opens
+folders to 0777 and files to 0666 while retaining pre-existing executable bits.
+The receiver now prepares that policy without adding file executable bits,
+through descriptors inside its private stage. The `permissions_s` timer measures
+this preparation separately. `fsyncs`/`fsync_s` now also include flushing changed
+file permission metadata; permission time overlaps that flush time. Older raw
+benchmark records remain unchanged and predate this policy.
+
+The owner still did not receive receiver metrics in the deployment log despite
+successful transfers with diagnostics enabled. Successful host pipe tests establish
+that our stdout is unbuffered and explicitly flushed, but cannot establish how
+the physical ELF loader retains/forwards the payload's descriptors. The SDK's
+[deployer](https://github.com/ps5-payload-dev/sdk/blob/v0.45/host/bin/prospero-deploy)
+forwards its deployment socket through socat; that is a different connection from
+PDLAN's authenticated transfer socket. No physical stdout trace or loader exit
+status is available to prove a specific forwarding failure. No speculative log
+files or automatic redeployment were added.
+
+Diagnostic receivers now advertise optional metrics in the BEGIN ACK. A new
+sender requests a fixed-size, authenticated binary snapshot **after** validating
+the exact COMMIT receipt. This bypasses deployment-log forwarding and printf
+formatting entirely. The record has no paths, names, tokens or dynamic keys.
+It includes transfer counters and twelve timings (including permissions), encoded
+as unsigned microseconds. The CLI prints it as a separate `receiver_metrics`
+JSON line with `--diagnostics`; sender diagnostics also include prefixed receiver
+values. GUI progress logs a short numeric summary; NetworkResult retains the
+record. The benchmark prefers that authenticated snapshot for both local and
+remote runs, falling back to stdout only for older host receivers.
+
+Old clients receive the same COMMIT path and close normally. New clients never
+send the optional command to a receiver that does not advertise it. Unknown
+versions/lengths, mismatched counters, failed authentication or connection loss
+make only the optional record unavailable: a valid publication receipt remains
+successful. The extension neither enables remote shutdown nor changes pairing,
+file validation, ports or no-overwrite rules. Physical delivery of the binary
+snapshot and Playden access with regular-file mode 0666 require manual verification
+with receiver build `v0.4-import-access-1`.

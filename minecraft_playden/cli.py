@@ -45,7 +45,7 @@ def main() -> int:
     transfer.add_argument('--host', required=True, help='Private PS5 IPv4 address')
     transfer.add_argument('--destination', choices=['internal', 'usb0'], default='internal')
     transfer.add_argument('--port', type=int, default=9025)
-    transfer.add_argument('--name', help='New package folder name; existing remote names are never overwritten')
+    transfer.add_argument('--name', help='Optional package name override; defaults to the recorded instance name, or package folder name for older packages')
     transfer.add_argument('--token-env', default='PLAYDEN_PS5_TOKEN',
                           help='Environment variable holding the pairing token; otherwise prompt without echo')
     transfer.add_argument('--diagnostics', action='store_true', help='Print numeric timing counters to stderr (no token or file paths)')
@@ -70,6 +70,8 @@ def main() -> int:
             finally:
                 if args.diagnostics:
                     print('sender_metrics ' + json.dumps(metrics, sort_keys=True), file=sys.stderr)
+            if args.diagnostics and result.receiver_metrics is not None:
+                print('receiver_metrics ' + json.dumps(result.receiver_metrics, sort_keys=True), file=sys.stderr)
             print(f'PS5 package received and verified: {result.destination}. Local output retained.')
             return 0
         if args.command == 'import-instance':
@@ -112,7 +114,11 @@ def main() -> int:
                         print(f'{version["id"]}\t{version["type"]}')
             else:
                 source = ClientSource(args.source, args.version, args.instance, args.client_jar, args.adapter, libraries_root=args.libraries_root)
-                build(args.output, downloader, source, args.username, launch_profile=args.launch_profile, exclude_saves=args.exclude_saves)
+                from .discovery import discover
+                installations = discover([args.instance], include_defaults=False).installations if args.instance else ()
+                instance_name = installations[0].name if len(installations) == 1 else args.output.name
+                build(args.output, downloader, source, args.username, launch_profile=args.launch_profile,
+                      exclude_saves=args.exclude_saves, instance_name=instance_name)
                 print(f'Package validated: {args.output}\n' + INSTRUCTIONS)
         return 0
     except KeyboardInterrupt:

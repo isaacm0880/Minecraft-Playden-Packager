@@ -23,7 +23,7 @@ Note: Online play limited to offline mode servers, authentication is not yet imp
 def build(output: Path, downloader: Downloader, source: ClientSource, username: str = 'Player',
           progress: ProgressCallback | None = None, launch_profile: str = profiles.DEFAULT_PROFILE,
           cancellation: CancellationToken | None = None, exclude_saves: bool = False,
-          privacy_cleanup: bool = False) -> None:
+          privacy_cleanup: bool = False, instance_name: str | None = None) -> None:
     def check_cancelled() -> None:
         if cancellation is not None:
             cancellation.check()
@@ -122,6 +122,8 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
         report('arguments', 'Generating portable Playden launch arguments...')
         arguments.write(root, effective if fabric_data is not None else metadata, classpath, username, launch_profile)
         recipe.write(root, f'Minecraft {version}')
+        if instance_name is not None:
+            save('metadata/instance-name.json', {'schema': 1, 'name': instance_name})
         (root / 'PLAYDEN.txt').write_text(f'Game title: Minecraft {version}\n\n' + INSTRUCTIONS, encoding='utf-8')
         report('hashing', 'Hashing immutable package files...')
         paths = [p for p in root.rglob('*') if p.is_file() and not p.is_relative_to(root / 'instances')]
@@ -129,7 +131,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
         for number, path in enumerate(paths, 1):
             files[path.relative_to(root).as_posix()] = digest(path, 'sha256', cancellation)
             report('hashing', 'Hashing immutable package files...', number, len(paths))
-        save('package.json', {'schema': 2, 'launch_profile': launch_profile, 'source': source.mode, 'version': version, 'username': username, 'classpath': classpath, 'files': files, **({'loader': {'name': 'Fabric', 'version': source.fabric.loader}} if source.fabric else {})})
+        save('package.json', {'schema': 2, 'launch_profile': launch_profile, 'source': source.mode, 'version': version, 'username': username, 'classpath': classpath, 'files': files,  **({'loader': {'name': 'Fabric', 'version': source.fabric.loader}} if source.fabric else {})})
         report('validation', 'Validating package inventory and launch configuration...')
         errors = validate(root, cancellation=cancellation, progress=progress)
         if errors:

@@ -112,7 +112,8 @@ class LocalBuildRequest:
         source = ClientSource('local', version=self.installation.version, instance=self.installation.instance, client_jar=self.installation.client, libraries_root=self.installation.libraries_root, launcher_root=self.installation.launcher_root)
         build(self.output, Downloader(self.cache, cancellation), source, self.username,
               progress=progress, cancellation=cancellation, exclude_saves=self.exclude_saves,
-              launch_profile=self.launch_profile, privacy_cleanup=self.privacy_cleanup)
+              launch_profile=self.launch_profile, privacy_cleanup=self.privacy_cleanup,
+              instance_name=self.installation.name)
         protected = tuple(path for path in (self.installation.instance, self.installation.launcher_root,
                                              self.installation.libraries_root,
                                              self.installation.client.parent if self.installation.client else None)

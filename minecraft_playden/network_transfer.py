@@ -1,5 +1,6 @@
 """Read-only package streaming to the paired PS5 import receiver."""
 import hashlib
+import json
 import os
 from pathlib import Path
 import socket
@@ -13,10 +14,10 @@ from typing import BinaryIO
 from .cleanup import linked, plain_directory, snapshot
 from .operations import CancellationToken
 from .progress import Progress, ProgressCallback
-from .network_metrics import NetworkMetrics, MetricsCallback
+from .network_metrics import NetworkMetrics, MetricsCallback, decode_receiver_metrics
 from .validator import validate
 from .network_protocol import (
-    ACK, BEGIN, BEGIN_INFO, COMMIT, DATA, END_FILE, ENTRY, ENTRY_INFO, VERIFY, VERIFY_PROGRESS,
+    ACK, BEGIN, BEGIN_INFO, COMMIT, DATA, END_FILE, ENTRY, ENTRY_INFO, GET_METRICS, VERIFY, VERIFY_PROGRESS,
     MAX_ENTRIES, MAX_FILE, MAX_FRAME, MAX_TOTAL, PORT, ROOTS,
     NetworkTransferError, Session, configure_socket, lan_address, pairing_key, safe_relative,
 )
@@ -79,6 +80,7 @@ class NetworkResult:
     destination: str
     files: int
     bytes_copied: int
+    receiver_metrics: dict[str, int | float] | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -120,8 +122,6 @@ class NetworkRequest:
         source = self.source.absolute()
         plain_directory(source)
         source = source.resolve(strict=True)
-        name = self.package_name if self.package_name is not None else source.name
-        encoded_name = safe_relative(name, package=True)
         token.check()
         def report(stage: str, message: str, done: int = 0, total: int | None = None, path: str = '') -> None:
             if progress is not None:
@@ -136,6 +136,28 @@ class NetworkRequest:
             raise ValueError('Package validation failed: ' + '\n'.join(errors))
         if not (source / 'recipe.json').is_file():
             raise ValueError('PS5 transfer requires a launch package with recipe.json.')
+        if self.package_name is None:
+            # The display title survives a renamed output directory. Older
+            # packages predate this metadata and keep their folder-name default.
+            name_path = 'metadata/instance-name.json'
+            if name_path in before:
+                if before[name_path][3] > 4096:
+                    raise ValueError('Instance name metadata is too large; use --name to override it.')
+                try:
+                    with _open_local_file(source, name_path, before[name_path]) as manifest:
+                        metadata = json.load(manifest)
+                except (ValueError, RecursionError) as exc:
+                    raise ValueError('Invalid instance name metadata; use --name to override it.') from exc
+                if not isinstance(metadata, dict) or type(metadata.get('schema')) is not int or metadata['schema'] != 1:
+                    raise ValueError('Invalid instance name metadata; use --name to override it.')
+                name = metadata.get('name')
+            else:
+                name = source.name
+        else:
+            name = self.package_name
+        if not isinstance(name, str):
+            raise ValueError('Package instance name must be a string; use --name to override it.')
+        encoded_name = safe_relative(name, package=True)
         entries: list[tuple[str, int, int, bytes]] = []
         hashing_started = metrics.tick()
         total = files = 0
@@ -174,7 +196,8 @@ class NetworkRequest:
                 metrics.elapsed('pairing_s', pairing_started)
                 session.send(BEGIN, BEGIN_INFO.pack(int(self.destination == 'usb0'), len(encoded_name),
                                                    len(entries), total) + encoded_name)
-                session.ack()
+                receiver_capabilities = session.ack()
+                metrics.add('receiver_metrics_supported', int(receiver_capabilities == b'ready;metrics=1'))
                 copied, started = 0, time.monotonic()
                 last_report, last_bytes, rate = started, 0, 0.
                 report('network-send', 'Sending to PS5…', 0, total)
@@ -254,8 +277,24 @@ class NetworkRequest:
                 if remote != expected_path:
                     raise NetworkTransferError('Receiver returned an unexpected publication receipt.')
                 metrics.elapsed('commit_s', commit_started)
+                receiver_metrics = None
+                if receiver_capabilities == b'ready;metrics=1':
+                    # The authenticated publication receipt is already confirmed.
+                    # Missing optional diagnostics cannot revoke that success.
+                    session.timeout = min(session.timeout, 2.)
+                    try:
+                        session.send(GET_METRICS)
+                        receiver_metrics = decode_receiver_metrics(session.ack(), total, files)
+                        for metric_name, value in receiver_metrics.items():
+                            metrics.add('receiver_' + metric_name, value)
+                        report('network-metrics', f"Receiver: verification {receiver_metrics['verify_s']:.3f}s, "
+                               f"permissions {receiver_metrics['permissions_s']:.3f}s, "
+                               f"flushes {int(receiver_metrics['fsyncs'])}", total, total)
+                    except (OSError, ValueError):
+                        metrics.add('receiver_metrics_unavailable')
+                        report('network-metrics', 'Publication confirmed; optional receiver metrics unavailable.', total, total)
                 report('network-complete', f'Package received and verified: {remote}', total, total)
-                return NetworkResult(source, remote, files, total)
+                return NetworkResult(source, remote, files, total, receiver_metrics)
         except OSError as exc:
             state = ('Publication receipt was lost; check the PS5 import folder before retrying under a new name.'
                      if committed else 'Transfer not confirmed; local output retained. Check the receiver, pairing token and LAN.')

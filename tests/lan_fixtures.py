@@ -1,5 +1,6 @@
 """Offline exporter fixture shared by tests and the development LAN benchmark."""
 import io
+from dataclasses import replace
 import json
 from unittest.mock import patch
 from minecraft_playden.desktop import LocalBuildRequest
@@ -29,7 +30,7 @@ def build_package(tmp_path):
     source = discover([instance], include_defaults=False).installations[0]
     output = tmp_path / 'Minecraft Package'
     with patch('urllib.request.urlopen', side_effect=request), patch('minecraft_playden.runtime.install', side_effect=runtime):
-        LocalBuildRequest(source, output, tmp_path / 'cache').run()
+        LocalBuildRequest(replace(source, name=output.name), output, tmp_path / 'cache').run()
     assert validate(output) == []
     return output
 

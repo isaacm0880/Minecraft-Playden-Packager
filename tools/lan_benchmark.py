@@ -135,9 +135,9 @@ def run(args) -> None:
                                             f'LAN-Bench-{label}-{uuid.uuid4().hex[:12]}',
                                             args.socket_buffer, args.chunk_size).run(progress, diagnostics=metrics.update)
                     elapsed, cpu_elapsed = time.perf_counter() - started, time.process_time() - cpu
-                receiver_metrics = {}
+                receiver_metrics = result.receiver_metrics or {}
                 for line in receiver_lines:
-                    if line.startswith('receiver_metrics '):
+                    if not result.receiver_metrics and line.startswith('receiver_metrics '):
                         receiver_metrics = {key: float(value) for key, value in
                                             (item.split('=') for item in line.split()[1:])}
                 record = {'dataset': label, 'dataset_sha256': digest, 'repeat': repeat,

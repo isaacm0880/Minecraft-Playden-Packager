@@ -57,9 +57,9 @@ It changes on every payload start. The sender prompts for it without echo:
 read -r -p 'Existing built package directory: ' PACKAGE_DIR
 python -m minecraft_playden validate "$PACKAGE_DIR"
 python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" \
-  --destination internal --name LAN-Test-Internal
+  --destination internal
 python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" \
-  --destination usb0 --name LAN-Test-USB0
+  --destination usb0
 ```
 
 If using a second terminal, set `PS5_IP` there too. For scripted sends the token
@@ -69,8 +69,7 @@ argument and is never saved in QSettings. The GUI is available with
 click **Send to PS5 (LAN)**. Close/reopen to check that USB0 persists and the token
 does not. The existing local USB-copy feature continues to work independently.
 
-After transfer, inspect `/data/playden-import/LAN-Test-Internal/` and
-`/mnt/usb0/playden/import/LAN-Test-USB0/`, then manually select the corresponding
+After transfer, inspect the exact package paths printed in the success receipts, then manually select the corresponding
 folder in Playden's **Play from Import Folder** flow. Do not move files into or
 modify Playden-managed game directories. Launch compatibility is separate from
 file-transfer validation and remains unverified.
@@ -152,7 +151,7 @@ umask 077
 "$PS5_PAYLOAD_SDK/bin/prospero-deploy" -h "$PS5_IP" -p "$PS5_LOADER_PORT" ps5/receiver/minecraft_playden_receiver.elf | tee /tmp/playden-receiver-private.log
 ```
 
-Check `receiver_build=v0.4-verify-abi-1 stat_backend=freebsd-carry`. The full
+Check `receiver_build=v0.4-import-access-1 stat_backend=freebsd-carry`. The full
 log includes a pairing token; keep it private. In a second Fish terminal:
 
 ```fish
@@ -160,9 +159,8 @@ cd /path/to/Minecraft-Playden-Packager
 read -P 'PS5 LAN IPv4 address: ' PS5_IP
 read -P 'Existing validated package directory: ' PACKAGE_DIR
 .venv/bin/python -m minecraft_playden validate "$PACKAGE_DIR"
-set TEST_SUFFIX (date +%Y%m%d-%H%M%S)
-.venv/bin/python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" --destination internal --name "LAN-Internal-$TEST_SUFFIX" --diagnostics
-.venv/bin/python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" --destination usb0 --name "LAN-USB0-$TEST_SUFFIX" --diagnostics
+.venv/bin/python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" --destination internal --diagnostics
+.venv/bin/python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" --destination usb0 --diagnostics
 ```
 
 Each send prompts privately for the fresh token. Inspect the exact named import
@@ -195,3 +193,43 @@ The current sender includes the rejected numeric counters in its error. Keep
 mandatory verification enabled; a rejected frame never authorizes publication.
 `receiver_metrics` is flushed before staging deletion; `receiver_cleanup` confirms
 whether cleanup completed. Check `diagnostics=1` in the startup build line.
+
+
+## Instance names and import access
+
+`--name` is optional. Both GUI and CLI now read the recorded instance display
+name from the hashed `metadata/instance-name.json` (schema 1, string `name`) in
+new builds. GUI builds preserve the selected installation's name; CLI builds
+resolve the local installation name when available, otherwise the chosen output
+folder name. Transfer reads this metadata without changing local files. Renaming
+an export folder keeps the recorded default. Older packages without the metadata
+use their package folder name, matching the existing standalone GUI default.
+The recipe's generic Minecraft version title is not used as an instance name.
+
+The same 120-byte portable single-folder validation applies to defaults and
+`--name`. Invalid recorded names are refused; choose an explicit valid override.
+An existing remote name is always refused, including an empty directory. A
+custom `--name My-New-Instance` selects a different name without changing the
+local package or enabling overwrite. No dates or LAN test prefixes are generated.
+
+Playden's imported-game repair policy uses 0777 directories and 0666 files so
+its different runtime user can update saves, configs and files beside a program.
+The receiver now prepares that policy before atomic publication, including all
+nested contents and the import root, while keeping enclosing staging directories
+0700. It avoids adding executable bits to regular files and does not chown,
+change mount settings, follow symlinks or change managed game directories.
+Permission errors abort and clean staging. Re-check internal and USB0 discovery,
+launch, saving, config changes and filesystem-reported modes manually on PS5;
+only recursive 0777 was confirmed by the prior physical report, so the narrower
+regular-file 0666 policy still needs that check. Some USB filesystems expose a
+mount-wide mode rather than independent private/per-file modes.
+
+With a diagnostic receiver build and `transfer-ps5 ... --diagnostics`, the sender
+now prints a `receiver_metrics` JSON line received over the existing paired LAN
+connection. The GUI logs a receiver verification/permissions/flush summary and
+retains the full numeric record in its transfer result. This does not rely on
+ELF-loader log forwarding. Old receivers still transfer normally without this
+optional record. Metrics loss after a valid receipt is reported as optional
+diagnostics unavailability, not as a failed package transfer. See the
+[authenticated wire extension](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/ps5/receiver/PROTOCOL.md#optional-metrics-schema-1)
+and [performance investigation](PS5_LAN_PERFORMANCE.md).
