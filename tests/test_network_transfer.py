@@ -30,7 +30,8 @@ def snapshot(path):
     return {p.relative_to(path).as_posix(): p.read_bytes() for p in path.rglob('*') if p.is_file()}
 
 
-def test_client_streams_complete_package_on_every_host(built_package):
+@pytest.mark.parametrize('pipeline', [False, True])
+def test_client_streams_complete_package_on_every_host(built_package, pipeline):
     # A Python reference peer exercises real sockets and local file handles on
     # Windows too; the POSIX/PS5 C receiver is tested independently below.
     key, nonce = bytes(range(32)), bytes(range(32, 64))
@@ -95,7 +96,8 @@ def test_client_streams_complete_package_on_every_host(built_package):
     thread = threading.Thread(target=peer)
     thread.start()
     try:
-        result = NetworkRequest(built_package, '127.0.0.1', key.hex(), port=listener.getsockname()[1]).run()
+        result = NetworkRequest(built_package, '127.0.0.1', key.hex(), port=listener.getsockname()[1],
+                                pipeline_files=pipeline).run()
     finally:
         listener.close()
         thread.join(6)
@@ -419,3 +421,84 @@ def test_custom_name_can_override_invalid_recorded_instance_name(receiver, built
         result = NetworkRequest(built_package, '127.0.0.1', token, port=port, package_name='Valid Override').run()
         assert result.destination == '/data/playden-import/Valid Override'
     assert snapshot(built_package) == before
+
+
+@pytest.mark.parametrize('buffered', [False, True])
+@pytest.mark.parametrize('pipeline', [False, True])
+def test_profile_accounts_for_wall_time_and_preserves_all_published_bytes(receiver, built_package, buffered, pipeline):
+    from minecraft_playden.network_metrics import PROFILE_PHASES
+    original = snapshot(built_package)
+    options = ['--diagnostics'] + ([] if buffered else ['--unbuffered-frames'])
+    with receiver(*options) as (sandbox, port, token):
+        result = NetworkRequest(built_package, '127.0.0.1', token, port=port, pipeline_files=pipeline).run()
+        profile = result.receiver_metrics
+        assert profile['profile_version'] == 2 and profile['buffered_reads'] == int(buffered)
+        assert abs(sum(profile[name] for name in PROFILE_PHASES) + profile['unattributed_s'] - profile['wall_s']) < .001
+        assert profile['entry_acks'] == profile['entry_frames']
+        assert profile['end_acks'] == result.files
+        assert profile['clock_probe_valid'] == 1 and profile['clock_calls'] > profile['frames']
+        assert profile['parent_walk_calls'] >= 3 * result.files
+        assert profile['dir_open_calls'] > 0 and profile['write_calls'] > 0
+        assert snapshot(sandbox / 'internal' / built_package.name) == original
+    assert snapshot(built_package) == original
+
+
+@pytest.mark.parametrize('fault', ['cancel', 'space', 'permission'])
+def test_pipelined_failure_or_cancellation_never_publishes(receiver, built_package, fault):
+    import errno
+    token = CancellationToken()
+    options = (['--test-write-limit', '0'] if fault == 'space' else
+               ['--test-permission-errno', str(errno.EPERM)] if fault == 'permission' else [])
+    def progress(event):
+        if fault == 'cancel' and event.stage == 'network-verify': token.cancel()
+    before = snapshot(built_package)
+    with receiver(*options) as (sandbox, port, pairing):
+        with pytest.raises((NetworkTransferError, OperationCancelled)):
+            NetworkRequest(built_package, '127.0.0.1', pairing, port=port, pipeline_files=True).run(progress, token)
+        wait_clean(sandbox)
+        assert not (sandbox / 'internal' / built_package.name).exists()
+    assert snapshot(built_package) == before
+
+
+def test_profile_extension_failure_retains_valid_schema_one_metrics(receiver, built_package):
+    from minecraft_playden.network_protocol import GET_PROFILE
+    original = Session.send
+    def send(session, kind, body=b''):
+        if kind == GET_PROFILE:
+            raise NetworkTransferError('Original receiver closes after schema 1')
+        return original(session, kind, body)
+    with receiver('--diagnostics') as (sandbox, port, token), patch.object(Session, 'send', send):
+        result = NetworkRequest(built_package, '127.0.0.1', token, port=port).run()
+        assert result.receiver_metrics['bytes'] == result.bytes_copied
+        assert 'profile_version' not in result.receiver_metrics
+        assert (sandbox / 'internal' / built_package.name).is_dir()
+
+
+@pytest.mark.parametrize('fault', ['length', 'schema', 'counter', 'ledger', 'authentication'])
+def test_invalid_profile_is_discarded_without_losing_schema_one_metrics(receiver, built_package, fault):
+    from minecraft_playden.network_protocol import GET_PROFILE
+    import struct
+    original_send, original_ack = Session.send, Session.ack
+    last = None
+    def send(session, kind, body=b''):
+        nonlocal last
+        last = kind
+        return original_send(session, kind, body)
+    def ack(session):
+        body = original_ack(session)
+        if last == GET_PROFILE:
+            if fault == 'authentication':
+                raise NetworkTransferError('Receiver message authentication failed')
+            if fault == 'length': return body[:-1]
+            if fault == 'schema': return b'\x03' + body[1:]
+            values = list(struct.unpack('!B61Q', body))
+            if fault == 'counter': values[2] += 1  # bytes, after published
+            if fault == 'ledger': values[8] += 2000000  # wall microseconds
+            return struct.pack('!B61Q', *values)
+        return body
+    with receiver('--diagnostics') as (sandbox, port, token):
+        with patch.object(Session, 'send', send), patch.object(Session, 'ack', ack):
+            result = NetworkRequest(built_package, '127.0.0.1', token, port=port).run()
+        assert result.receiver_metrics['published'] == 1
+        assert 'profile_version' not in result.receiver_metrics
+        assert (sandbox / 'internal' / built_package.name).is_dir()

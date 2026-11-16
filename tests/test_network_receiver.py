@@ -822,3 +822,89 @@ def test_usb_container_permissions_preserve_existing_special_bits_and_mount_mode
         assert parent.stat().st_mode & 0o1000
         assert parent.stat().st_mode & 0o555 == 0o555
         assert (sandbox / 'usb0').stat().st_mode == mount_mode
+
+
+@pytest.mark.parametrize('fault', ['valid', 'mac', 'sequence', 'truncated', 'oversized'])
+@pytest.mark.parametrize('fragment', [False, True])
+def test_buffered_frame_reader_handles_split_and_coalesced_authenticated_frames(receiver_binary, tmp_path, fault, fragment):
+    source = tmp_path / 'frame-reader.c'
+    source.write_text(r'''
+#define _POSIX_C_SOURCE 200809L
+#include <sys/socket.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <assert.h>
+static size_t limit;
+static ssize_t limited_recv(int fd, void *body, size_t n, int flags) {
+    return recv(fd, body, limit && n > limit ? limit : n, flags);
+}
+#define recv limited_recv
+#include "wire.h"
+int main(int argc, char **argv) {
+    assert(argc == 5);
+    Wire wire = {.fd = atoi(argv[1])};
+    buffered_reads = atoi(argv[2]); limit = (size_t)atoi(argv[3]);
+    diagnostics_enabled = 1;
+    for (int i = 0; i < 32; ++i) wire.key[i] = (uint8_t)i;
+    uint8_t body[FRAME_MAX], type; size_t size;
+    int count = 0;
+    while (count < 3 && frame_read(&wire, &type, body, &size)) ++count;
+    assert(count == atoi(argv[4]));
+    printf("%llu\n", (unsigned long long)metrics.recv_calls);
+    free(wire.rx);
+    return 0;
+}
+''')
+    root = Path(__file__).resolve().parents[1]
+    binary = tmp_path / 'frame-reader'
+    flags = ['-O2']
+    if os.environ.get('PLAYDEN_RECEIVER_SANITIZE') == '1':
+        flags = ['-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer']
+    subprocess.run(['cc', '-std=c11', *flags, '-I', str(root / 'ps5/receiver'), str(source),
+                    str(root / 'ps5/receiver/vendor/sha-256.c'), '-o', str(binary)], check=True)
+    frames = []
+    for sequence, (kind, body) in enumerate([(DATA, b'abc'), (DATA, bytes(range(256)) * 256), (END_FILE, b'')]):
+        header = HEADER.pack(kind, len(body), sequence)
+        frames.append(header + body + hmac.digest(bytes(range(32)), b'C' + header + body, 'sha256'))
+    expected = 3 if fault == 'valid' else 1
+    if fault == 'mac':
+        frames[1] = frames[1][:-1] + bytes([frames[1][-1] ^ 1])
+    elif fault == 'sequence':
+        frames[1] = HEADER.pack(DATA, MAX_FRAME, 7) + frames[1][HEADER.size:]
+    elif fault == 'truncated':
+        frames = [frames[0], frames[1][:1000]]
+    elif fault == 'oversized':
+        frames = [HEADER.pack(DATA, MAX_FRAME + 1, 0)]
+        expected = 0
+    calls = []
+    for buffered in (0, 1):
+        # Independent sockets ensure each reader sees the identical queued stream.
+        parent, child = socket.socketpair()
+        with parent, child:
+            parent.sendall(b''.join(frames))
+            parent.shutdown(socket.SHUT_WR)
+            run = subprocess.run([str(binary), str(child.fileno()), str(buffered), '97' if fragment else '0', str(expected)],
+                                 pass_fds=(child.fileno(),), capture_output=True, text=True, check=True, timeout=10)
+            calls.append(int(run.stdout))
+    if fault == 'valid' and not fragment:
+        assert calls[1] < calls[0]
+
+
+def test_legacy_schema_one_client_can_close_without_requesting_profile(receiver):
+    from minecraft_playden.network_protocol import GET_METRICS
+    from minecraft_playden.network_metrics import decode_receiver_metrics
+    files = contents()
+    files['package.json'] = inventory(files)
+    with receiver('--diagnostics') as (sandbox, port, token):
+        with paired(port, token) as session:
+            upload(session, files)
+            verify(session)
+            session.send(COMMIT)
+            assert session.ack() == b'/data/playden-import/Package'
+            session.send(GET_METRICS)
+            body = session.ack()
+            assert len(body) == 153 and body[0] == 1
+            assert decode_receiver_metrics(body, sum(map(len, files.values())), len(files))['published'] == 1
+        wait_clean(sandbox)
+        with paired(port, token) as session:
+            assert begin(session, 1, 0, name='Next-Transfer') == b'ready;metrics=1'

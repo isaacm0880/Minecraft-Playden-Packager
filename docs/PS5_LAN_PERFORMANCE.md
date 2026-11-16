@@ -361,3 +361,207 @@ successful. The extension neither enables remote shutdown nor changes pairing,
 file validation, ports or no-overwrite rules. Physical delivery of the binary
 snapshot and Playden access with regular-file mode 0666 require manual verification
 with receiver build `v0.4-import-access-1`.
+
+## Wired 378-second transfer: accounting and bounded receive buffering
+
+The owner supplied a successful wired transfer of 937,944,806 bytes / 5,678 files
+in 378 seconds, with receiver wall 375.92 s, sender socket read 334.17 s,
+receiver socket read 12.22 s, file writes 65.10 s, fsync 11.89 s / 11,884 calls,
+permissions 12.85 s, verification 12.46 s, 115,152 receives, 12,891 sends and
+18,745 DATA frames. Its end-to-end binary-unit average is 2.37 MiB/s.
+
+### What this confirms, and what it does not
+
+- Sender socket reads wait for responses. That includes receiver parsing, HMAC,
+  filesystem work, flushes and scheduling before each ACK, as well as the network.
+  334 seconds in that timer is not a latency measurement. The receiver spent only
+  12.22 seconds inside the instrumented recv calls.
+- File writes consumed 65.10 seconds, a substantial confirmed cost. Fsync consumed
+  11.89 seconds; removing all flushes could not explain hundreds of seconds, and
+  would compromise durability. Permissions includes its metadata fsyncs;
+  verification includes its read/hash/tree work. Summing those overlapping fields
+  and subtracting from wall time is not an accounting ledger.
+- Existing schema-1 `frame_auth_s`, `file_hash_s` and `socket_write_s` were not in
+  the supplied excerpt. Their full values are needed before assigning the gap.
+  They have not been assumed zero. Previously unmeasured path opens/closes,
+  allocation/path validation, file creation, final hash/close, dispatch and timer
+  overhead can also contribute. CPU versus scheduler/IO stalls remains a physical
+  profiling question: these counters measure elapsed time, not CPU samples.
+
+New builds provide an **exclusive coarse phase ledger** covering the whole
+receiver interval: pairing, setup, incoming frames, ENTRY handling, DATA handling,
+END_FILE handling, verification/permissions, commit/receipt and metrics queries.
+Their sum plus `unattributed_s` matches the snapshot wall time to microsecond
+rounding. Setup includes initial BEGIN and filesystem/stat logging. Dispatch and
+instrumentation are charged to the surrounding phase rather than disappearing.
+A zero residual means time has an enclosing phase; it does not identify CPU work
+or imply that fine sub-timers explain every instruction in that phase.
+
+Fine elapsed timers further identify:
+
+| Fields | Scope; overlaps the coarse phases |
+| --- | --- |
+| `frame_read_s` | Whole authenticated frame read, including copies and timer bookkeeping; includes BEGIN/metrics frames in their respective phases |
+| `frame_socket_read_s`, `frame_receive_auth_s` | Actual recv time and receive-side HMAC, separated from reply HMAC |
+| `frame_parse_s` | Envelope length/sequence parsing; ENTRY payload parsing is separate |
+| `reply_s` | Complete reply assembly/HMAC/send, including ACKs and verification heartbeats |
+| `entry_parse_s`, `entry_create_s` | ENTRY checks/lookup/allocation and file/directory creation/parent close |
+| `parent_walk_s` | Descriptor-relative parent traversal across upload, verification and permissions |
+| `file_close_s`, `hash_finalize_s` | Upload-time file close and final SHA-256 operation |
+| `hash_walk_s`, `namespace_s`, `recipe_s`, `inventory_s` | Readback walk, namespace enumeration and structured validation |
+
+`entry_acks` and `end_acks` count semantic acknowledgements. `frames`,
+`entry_frames`, `end_frames`, `reply_frames`, `write_calls`, `parent_walk_calls`
+and `dir_open_calls` distinguish protocol and filesystem operation counts.
+`clock_calls`, `clock_probe_ns` and `clock_probe_valid` expose timer use and a
+256-sample calibration of the complete timer path, including errno preservation.
+`clock_overhead_estimate_s` multiplies those quantities. It is an estimate affected
+by scheduling/cache state, **not an extra phase to sum or subtract as proven cost**.
+The probe runs before connections; an unavailable probe is explicitly flagged.
+A diagnostics-disabled comparison is provided to assess observer overhead.
+
+### Why receives outnumber DATA frames
+
+DATA is only one frame type. Every file also has ENTRY and END_FILE frames, plus
+directory entries and control commands. The original reader performed separate
+exact reads of header (13 bytes), nonempty payload and HMAC (32 bytes); TCP short
+reads required further recv calls. A short stream read does not prove packet loss.
+
+For the original schema-1 exchange, with D directory entries, the supplied DATA
+and file counts imply a minimum of **84,635 + 3D** receives (including one pairing
+read), even if every exact read completes in one call. The excess is short reads
+or retry attempts. The shipped permission pass makes `fsyncs = 2*files + D + 7`
+for internal, or `+8` for USB0. If that build and destination apply, the supplied
+flush count implies D=521 (internal), giving about 86,198 minimum reads; roughly
+29,000 more calls then come from partial/retried reads. This is a conditional
+source consistency check, not a recovered packet trace. Schema 2 measures D from
+`entry_frames - files` and reports `frame_recv_calls`, `recv_wire_bytes` and
+`recv_short_calls` directly. Compare receives to **all** frames, not only DATA.
+
+The default reader now uses a **bounded 65,581-byte heap buffer**, sufficient for
+one maximum authenticated frame. recv requests available bytes into this buffer;
+it does not wait for the buffer to fill. Header, payload and tag can consume the
+same refill, including coalesced following frames. Each frame's sequence and full
+HMAC still pass before any command is acted on or any byte written. Claimed frame
+lengths never control allocation. Fragmentation, truncation, bad tags/sequences
+and oversize headers are regression-tested. Memory is released on cleanup.
+`rx_cache_hits` counts logical read requests that start with already buffered
+bytes; it is not an exact count of avoided syscalls. Short reads in buffered mode
+use a larger requested size, so their ratio is not directly comparable to the
+old exact-part reader. Socket buffer defaults and 64 KiB DATA limits are unchanged.
+
+### Bounded file pipelining and deferred alternatives
+
+CLI `--pipeline-files` is an **opt-in experiment**. The sender queues one regular
+file's ENTRY/DATA/END_FILE before draining its two original ACKs, then admits the
+next entry. Directories retain their original ACK gate. At most two small replies
+are outstanding: this is not an unbounded multi-file window. Receiver state,
+per-frame HMAC, hash comparison, per-file fsync, source identity checks, readback,
+permissions and COMMIT publication are unchanged. Cancellation still closes an
+uncommitted transfer and cleans its stage; failures never authorize COMMIT.
+It uses the existing wire commands and works with sequential receivers.
+Sender `entry_wait_s`/`end_wait_s` help separate response-wait stages; they still
+include server work and are not pure RTT timers. The GUI retains sequential
+sending; all clients benefit from the receiver buffer.
+
+No descriptor cache, worker threads, global sysctl tuning, flush removal or larger
+DATA protocol limit was introduced. Repeated parent walks are now measured before
+attempting a cache that would need descriptor-identity and no-symlink revalidation.
+Data is already written in up-to-64-KiB calls without per-DATA ACKs. A larger
+file-write batch could reduce syscall overhead, but the 65-second write timer
+alone cannot establish whether cost is per call, per byte or storage scheduling.
+`write_calls` and phase timings are available for that next hardware experiment.
+A write pipeline would also need bounded authenticated buffers and mandatory
+END_FILE flush/error handling; it is deferred until the physical profile supports
+it. Working permissions and per-file durability were preserved.
+
+### Host before/after results
+
+2026-11-16, Linux 7.3.1, Ryzen 5 5600X, Python 3.11.16, GCC 16.2.1 `-O2`, TCP
+loopback. One prepared dataset was reused and fingerprinted: large adds 32 MiB
+(31 total files); small adds 5,648 x 4 KiB (5,678 total files). Source was on tmpfs.
+Configurations ran sequentially without parallel test suites, five repetitions
+for tmpfs receiver storage and three for SATA-backed Btrfs. Results are medians;
+these short host runs are not PS5 throughput claims.
+
+| Receiver / sender configuration | Large wall s / MiB/s | Small wall s / MiB/s | Small recv calls |
+| --- | ---: | ---: | ---: |
+| Original a36ccc0, tmpfs | 0.3924 / 81.57 | 2.1002 / 10.51 | 45,578 |
+| New profile, exact-part reader, tmpfs | 0.3920 / 81.67 | 2.0808 / 10.61 | 45,580 |
+| New default buffered reader, tmpfs | 0.3942 / 81.21 | 2.0695 / 10.67 | 17,035 |
+| Buffered + opt-in file pipeline, tmpfs | 0.3931 / 81.43 | 1.7568 / 12.57 | 17,033 |
+| Original a36ccc0, Btrfs | 0.5119 / 62.54 | 14.1329 / 1.56 | 45,578 |
+| New profile, exact-part reader, Btrfs | 0.5107 / 62.68 | 14.0656 / 1.57 | 45,580 |
+| New default buffered reader, Btrfs | 0.5101 / 62.76 | 14.0905 / 1.57 | 17,073 |
+| Buffered + opt-in file pipeline, Btrfs | 0.5124 / 62.48 | 13.8175 / 1.60 | 17,056 |
+
+Buffering cut receive calls about 63% for many small files and about 66% for bulk.
+Bulk throughput did not improve on this host. The opt-in pipeline reduced the
+buffered tmpfs small-file median about 15%; the disk-backed improvement was about
+2% and is too small to generalize. Btrfs runs show how flush/storage costs can
+dominate the same protocol. Default buffered diagnostics-off medians were 0.3851 s
+large and 1.9646 s small, versus 0.3942/2.0695 with diagnostics. Observer cost and
+run variance matter; those deltas do not establish PS5 timer overhead. Schema-2
+queries add one post-receipt exchange; original schema-1 peers still work.
+
+Raw repetitions, phase/sub-timings, counters and dataset fingerprints are in
+[the profiling JSONL record](benchmarks/lan-profile-loopback-2026-11-16.jsonl).
+No PS5 physical before/after run was performed by automation. The dominant cause
+of the supplied 375.92-second receiver interval remains unconfirmed until the
+extended profile (and omitted original fields) is collected on that hardware.
+
+### Reproducing the profile comparisons (Fish)
+
+Run from the repository with its development virtualenv installed. Choose a fresh
+dataset directory; preparation refuses to replace an existing one. These host
+commands compile the real C receiver and use owned temporary roots on loopback:
+
+```fish
+.venv/bin/python tools/lan_benchmark.py prepare /tmp/playden-profile-fixtures --small-count 5648
+.venv/bin/python tools/lan_benchmark.py loopback /tmp/playden-profile-fixtures --repeat 5 --unbuffered-frames --output /tmp/playden-exact.jsonl
+.venv/bin/python tools/lan_benchmark.py loopback /tmp/playden-profile-fixtures --repeat 5 --output /tmp/playden-buffered.jsonl
+.venv/bin/python tools/lan_benchmark.py loopback /tmp/playden-profile-fixtures --repeat 5 --pipeline-files --output /tmp/playden-pipeline.jsonl
+.venv/bin/python tools/lan_benchmark.py loopback /tmp/playden-profile-fixtures --repeat 5 --no-receiver-diagnostics --output /tmp/playden-no-diagnostics.jsonl
+```
+
+Use `--scratch-dir /path/to/existing/disk-directory` for a disk-backed receiver
+comparison; its owned temporary directory is removed after each command. Keep
+the source dataset, destination filesystem, chunk/socket settings and repeat
+counts fixed, run configurations sequentially, and compare medians plus spread.
+Use `a36ccc0` in a separate checkout for the original baseline. An exact-part run
+on the new build isolates buffering while retaining the same expanded timers.
+
+For **manual PS5 testing only**, follow the
+[Fish build/deployment instructions](PS5_LAN_TRANSFER.md#physical-testing--fish).
+For a matched reader comparison, build the same source with these flags in turn
+and explicitly stop/unload the old listener before each manual redeployment:
+
+```fish
+set -gx PS5_PAYLOAD_SDK /opt/ps5-payload-sdk/ps5-payload-sdk
+make -B -C ps5/receiver PS5_PAYLOAD_SDK="$PS5_PAYLOAD_SDK" DIAGNOSTICS=1 BUFFERED_READS=0
+# Manually deploy and collect the exact-part baseline before the next build.
+make -B -C ps5/receiver PS5_PAYLOAD_SDK="$PS5_PAYLOAD_SDK" DIAGNOSTICS=1 BUFFERED_READS=1
+```
+
+Confirm `receiver_build=v0.4-profile-1` and `receiver_buffered_reads` in the
+authenticated sender metrics. In a second Fish terminal, this explicitly remote
+benchmark prompts for a pairing token and publishes uniquely named test packages:
+
+```fish
+read -P 'PS5 LAN IPv4 address: ' PS5_IP
+.venv/bin/python tools/lan_benchmark.py remote /tmp/playden-profile-fixtures --host "$PS5_IP" --destination internal --repeat 3 --output /tmp/playden-ps5-buffered.jsonl
+.venv/bin/python tools/lan_benchmark.py remote /tmp/playden-profile-fixtures --host "$PS5_IP" --destination internal --repeat 3 --pipeline-files --output /tmp/playden-ps5-pipeline.jsonl
+```
+
+Repeat the sequential command with the exact-part receiver first and a different
+output filename. Repeat on USB0 only when intentionally testing that storage.
+Allow space for every fresh package; this tool never deletes published imports.
+For the original real package, use `transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP"
+--diagnostics` and optional `--pipeline-files`, choosing a fresh `--name` override
+for each intentional duplicate benchmark. Normal GUI/CLI instance naming is
+unchanged. Collect the full numeric `sender_metrics` JSON, not just selected
+fields. The authenticated `receiver_phase_*` values first localise the gap; then
+compare nested timers and operation counts inside the dominant phase. A valid
+clock probe may round to zero on a coarse clock; that does not prove zero observer
+cost. Keep cancellation, collision, permissions and Playden detection checks in
+the manual acceptance pass; do not disable verification or flushes for timing.

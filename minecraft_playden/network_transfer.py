@@ -14,10 +14,10 @@ from typing import BinaryIO
 from .cleanup import linked, plain_directory, snapshot
 from .operations import CancellationToken
 from .progress import Progress, ProgressCallback
-from .network_metrics import NetworkMetrics, MetricsCallback, decode_receiver_metrics
+from .network_metrics import NetworkMetrics, MetricsCallback, decode_receiver_metrics, decode_receiver_profile
 from .validator import validate
 from .network_protocol import (
-    ACK, BEGIN, BEGIN_INFO, COMMIT, DATA, END_FILE, ENTRY, ENTRY_INFO, GET_METRICS, VERIFY, VERIFY_PROGRESS,
+    ACK, BEGIN, BEGIN_INFO, COMMIT, DATA, END_FILE, ENTRY, ENTRY_INFO, GET_METRICS, GET_PROFILE, VERIFY, VERIFY_PROGRESS,
     MAX_ENTRIES, MAX_FILE, MAX_FRAME, MAX_TOTAL, PORT, ROOTS,
     NetworkTransferError, Session, configure_socket, lan_address, pairing_key, safe_relative,
 )
@@ -93,6 +93,7 @@ class NetworkRequest:
     package_name: str | None = None
     socket_buffer: int | None = None
     chunk_size: int = MAX_FRAME
+    pipeline_files: bool = False
 
     def run(self, progress: ProgressCallback | None = None,
             cancellation: CancellationToken | None = None, *,
@@ -206,7 +207,10 @@ class NetworkRequest:
                     token.check()
                     encoded = safe_relative(relative)
                     session.send(ENTRY, ENTRY_INFO.pack(kind, len(encoded), size) + expected + encoded)
-                    session.ack()
+                    if not kind or not self.pipeline_files:
+                        ack_started = metrics.tick()
+                        session.ack()
+                        metrics.elapsed('entry_wait_s', ack_started)
                     if not kind:
                         continue
                     digest = hashlib.sha256()
@@ -239,7 +243,16 @@ class NetworkRequest:
                             raise ValueError('Source changed while uploading; package not committed.')
                     metrics.add('files')
                     session.send(END_FILE)
+                    if self.pipeline_files:
+                        # At most two small ACKs are outstanding for one file;
+                        # drain both before admitting another entry. Every DATA
+                        # frame is still authenticated before receiver writes.
+                        ack_started = metrics.tick()
+                        session.ack()
+                        metrics.elapsed('entry_wait_s', ack_started)
+                    ack_started = metrics.tick()
                     session.ack()
+                    metrics.elapsed('end_wait_s', ack_started)
                 report('network-send', 'All file data sent; waiting for verification…', copied, total)
                 metrics.elapsed('transfer_s', transfer_started)
                 if snapshot(source) != before:
@@ -285,6 +298,12 @@ class NetworkRequest:
                     try:
                         session.send(GET_METRICS)
                         receiver_metrics = decode_receiver_metrics(session.ack(), total, files)
+                        try:
+                            session.send(GET_PROFILE)
+                            receiver_metrics = decode_receiver_profile(session.ack(), total, files)
+                        except (OSError, ValueError):
+                            # Original diagnostic receivers close after schema 1.
+                            metrics.add('receiver_profile_unavailable')
                         for metric_name, value in receiver_metrics.items():
                             metrics.add('receiver_' + metric_name, value)
                         report('network-metrics', f"Receiver: verification {receiver_metrics['verify_s']:.3f}s, "

@@ -329,6 +329,7 @@ static int count_tree(int root, unsigned depth, size_t *count, Wire *wire, uint6
 /* Verify bytes read back from staging, not merely the incoming network stream. */
 static int verify_staging(int root, Inventory *inventory, Wire *wire, uint64_t total) {
     uint8_t block[65536], digest[32];
+    double walk_started = metric_clock();
     uint64_t verified = 0, last_report = 0;
     for (size_t i = 0; i < inventory->count; i++) {
         Item *item = &inventory->items[i];
@@ -404,8 +405,12 @@ static int verify_staging(int root, Inventory *inventory, Wire *wire, uint64_t t
             last_report = verified;
         }
     }
+    metric_add(&metrics.hash_walk_s, walk_started);
     size_t count = 0;
-    return verified == total && count_tree(root, 0, &count, wire, total) &&
-           count == inventory->count;
+    double namespace_started = metric_clock();
+    int ok =
+        verified == total && count_tree(root, 0, &count, wire, total) && count == inventory->count;
+    metric_add(&metrics.namespace_s, namespace_started);
+    return ok;
 }
 #endif

@@ -146,3 +146,41 @@ numeric diagnostics/progress. Failed, unauthenticated, unknown or missing metric
 are discarded; an already authenticated publication receipt remains successful.
 Optional metrics waits are bounded separately. Metrics are currently available
 for successful transfers, not via a new failure/recovery or shutdown command.
+
+## Optional detailed profile (GET_PROFILE = 8)
+
+Schema 1 and its `ready;metrics=1` advertisement remain byte-for-byte compatible.
+After receiving schema 1, a new client may request GET_PROFILE (8, empty payload).
+A new receiver accepts at most one such request and replies with an authenticated
+ACK containing schema 2. Old clients close after schema 1; old receivers close
+there too. A new client retains valid schema-1 metrics if the optional profile
+query encounters EOF, an unsupported reply, invalid counters or failed MAC.
+Neither telemetry failure revokes the already verified publication receipt.
+GET_PROFILE is not accepted before COMMIT or as a substitute for GET_METRICS.
+No shutdown command is added.
+
+Schema 2 is exactly **489 bytes**: version:u8=2, followed by 61 unsigned network
+byte-order u64 values. The first 19 words are the schema-1 fields in unchanged
+order. Next are 17 integers:
+
+`frames, entry_frames, end_frames, reply_frames, entry_acks, end_acks,
+recv_wire_bytes, recv_short_calls, frame_recv_calls, rx_cache_hits,
+parent_walk_calls, dir_open_calls, clock_calls, write_calls, clock_probe_ns,
+clock_probe_valid, buffered_reads`.
+
+The last 25 values are microsecond durations:
+
+`frame_read, frame_parse, frame_socket_read, frame_receive_auth, reply,
+entry_parse, entry_create, parent_walk, file_close, hash_finalize, hash_walk,
+namespace, recipe, inventory, phase_pairing, phase_setup, phase_frames,
+phase_entries, phase_data, phase_end_files, phase_verify, phase_commit,
+phase_metrics, unattributed, clock_overhead_estimate`.
+
+The `_s` names in Python use seconds after decoding. The nine exclusive phases
+plus unattributed must match snapshot wall time within rounding; other timers
+overlap them. Counters and publication totals are validated before acceptance.
+The snapshot excludes its own serialization/send and cleanup. It includes the
+schema-1 reply and the incoming profile query. No dynamic field names, paths,
+pairing material or payload contents are transmitted. See the
+[profiling investigation](../../docs/PS5_LAN_PERFORMANCE.md#wired-378-second-transfer-accounting-and-bounded-receive-buffering)
+for definitions and before/after results.

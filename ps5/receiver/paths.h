@@ -158,6 +158,8 @@ static int open_dirs(int base, const char *path, int create) {
             close(fd);
             return -1;
         }
+        if (diagnostics_enabled)
+            ++metrics.dir_open_calls;
         int next = openat(fd, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
         int saved_error = errno;
         close(fd);
@@ -183,7 +185,7 @@ static int open_absolute(const char *path, int create) {
         errno = saved_error;
     return fd;
 }
-static int parent_fd(int root, const char *path, char leaf[256]) {
+static int parent_fd_walk(int root, const char *path, char leaf[256]) {
     char parent[PATH_MAX_WIRE + 1];
     strcpy(parent, path);
     char *slash = strrchr(parent, '/');
@@ -196,6 +198,14 @@ static int parent_fd(int root, const char *path, char leaf[256]) {
         return open_dirs(root, parent, 0);
     }
     return dup(root);
+}
+static int parent_fd(int root, const char *path, char leaf[256]) {
+    double started = metric_clock();
+    int fd = parent_fd_walk(root, path, leaf);
+    metric_add(&metrics.parent_walk_s, started);
+    if (diagnostics_enabled)
+        ++metrics.parent_walk_calls;
+    return fd;
 }
 static int read_file(int root, const char *path, size_t max, char **out, size_t *length) {
     char leaf[256];

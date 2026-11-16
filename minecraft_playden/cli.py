@@ -51,6 +51,7 @@ def main() -> int:
     transfer.add_argument('--diagnostics', action='store_true', help='Print numeric timing counters to stderr (no token or file paths)')
     transfer.add_argument('--socket-buffer', type=int, help='Experimental socket buffer bytes, 4096..4194304; OS default if omitted')
     transfer.add_argument('--chunk-size', type=int, default=65536, help='Experimental DATA size, 4096..65536 (default 65536)')
+    transfer.add_argument('--pipeline-files', action='store_true', help='Experimental: overlap each file ENTRY acknowledgement with DATA; at most two pending ACKs')
     args = parser.parse_args()
     try:
         if args.command == 'transfer-ps5':
@@ -65,7 +66,7 @@ def main() -> int:
             try:
                 with TransferProgress(interactive=interactive) as report:
                     result = NetworkRequest(args.path, args.host, pairing, args.destination, args.port, args.name,
-                                            args.socket_buffer, args.chunk_size).run(
+                                            args.socket_buffer, args.chunk_size, args.pipeline_files).run(
                         report, diagnostics=metrics.update if args.diagnostics else None)
             finally:
                 if args.diagnostics:

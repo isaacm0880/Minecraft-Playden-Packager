@@ -151,7 +151,7 @@ umask 077
 "$PS5_PAYLOAD_SDK/bin/prospero-deploy" -h "$PS5_IP" -p "$PS5_LOADER_PORT" ps5/receiver/minecraft_playden_receiver.elf | tee /tmp/playden-receiver-private.log
 ```
 
-Check `receiver_build=v0.4-import-access-1 stat_backend=freebsd-carry`. The full
+Check `receiver_build=v0.4-profile-1 stat_backend=freebsd-carry`. The full
 log includes a pairing token; keep it private. In a second Fish terminal:
 
 ```fish
@@ -233,3 +233,13 @@ optional record. Metrics loss after a valid receipt is reported as optional
 diagnostics unavailability, not as a failed package transfer. See the
 [authenticated wire extension](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/ps5/receiver/PROTOCOL.md#optional-metrics-schema-1)
 and [performance investigation](PS5_LAN_PERFORMANCE.md).
+
+
+The current diagnostic receiver also offers an optional detailed profile after
+its original metrics reply. New senders request it automatically; older peers
+retain the original metrics/receipt behaviour. Look for `profile_version: 2` and
+`phase_*_s` fields in the CLI's authenticated `receiver_metrics` JSON. The receiver
+now buffers bounded incoming bytes by default; frame authentication and package
+validation still precede writes/publication. `--pipeline-files` is an optional
+CLI experiment with at most two file ACKs pending; it is off by default and does
+not change GUI sending. See the performance guide for controlled manual trials.

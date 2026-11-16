@@ -65,10 +65,12 @@ def prepare(output: Path, large_mib: int, small_count: int) -> None:
 
 
 @contextlib.contextmanager
-def loopback(binary: Path, sandbox: Path, buffer: int | None, diagnostics: bool):
+def loopback(binary: Path, sandbox: Path, buffer: int | None, diagnostics: bool, unbuffered: bool = False):
     options = ['--socket-buffer', str(buffer)] if buffer else []
     if diagnostics:
         options.append('--diagnostics')
+    if unbuffered:
+        options.append('--unbuffered-frames')
     process = subprocess.Popen([str(binary), '--test-root', str(sandbox), '--bind', '127.0.0.1',
                                 '--port', '0', '--once', *options], stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True)
@@ -123,7 +125,7 @@ def run(args) -> None:
                 sandbox = scratch / f'{label}-{repeat}'
                 sandbox.mkdir()
                 (sandbox / 'usb0').mkdir()
-                context = (loopback(binary.resolve(), sandbox, args.socket_buffer, not args.legacy_receiver)
+                context = (loopback(binary.resolve(), sandbox, args.socket_buffer, not args.legacy_receiver and not args.no_receiver_diagnostics, args.unbuffered_frames)
                            if args.mode == 'loopback' else contextlib.nullcontext((args.port, token, [])))
                 with context as (port, pairing, receiver_lines):
                     metrics = {}
@@ -133,7 +135,7 @@ def run(args) -> None:
                         phases.setdefault(event.stage, time.perf_counter() - started)
                     result = NetworkRequest(package, host, pairing, args.destination, port,
                                             f'LAN-Bench-{label}-{uuid.uuid4().hex[:12]}',
-                                            args.socket_buffer, args.chunk_size).run(progress, diagnostics=metrics.update)
+                                            args.socket_buffer, args.chunk_size, args.pipeline_files).run(progress, diagnostics=metrics.update)
                     elapsed, cpu_elapsed = time.perf_counter() - started, time.process_time() - cpu
                 receiver_metrics = result.receiver_metrics or {}
                 for line in receiver_lines:
@@ -144,6 +146,10 @@ def run(args) -> None:
                           'mode': args.mode, 'scratch_mode': 'explicit' if getattr(args, 'scratch_dir', None) else 'system_temp',
                           'destination': args.destination, 'python': platform.python_version(),
                           'os': platform.system(), 'chunk_size': args.chunk_size, 'socket_buffer': args.socket_buffer,
+                          'pipeline_files': args.pipeline_files,
+                          'unbuffered_frames': getattr(args, 'unbuffered_frames', False),
+                          'receiver_diagnostics': (not args.no_receiver_diagnostics and not args.legacy_receiver
+                                                   if args.mode == 'loopback' else None),
                           'bytes': result.bytes_copied, 'files': result.files, 'wall_s': elapsed,
                           'sender_cpu_s': cpu_elapsed, 'mib_s': result.bytes_copied / elapsed / 1048576,
                           'phase_start_s': phases, 'sender': metrics, 'receiver': receiver_metrics}
@@ -170,10 +176,13 @@ def main() -> None:
         sub.add_argument('--destination', choices=['internal', 'usb0'], default='internal')
         sub.add_argument('--socket-buffer', type=int)
         sub.add_argument('--chunk-size', type=int, default=MAX_FRAME)
+        sub.add_argument('--pipeline-files', action='store_true')
         if mode == 'remote':
             sub.add_argument('--host', required=True)
             sub.add_argument('--port', type=int, default=9025)
         else:
+            sub.add_argument('--no-receiver-diagnostics', action='store_true', help='Compare receiver instrumentation overhead on host')
+            sub.add_argument('--unbuffered-frames', action='store_true', help='Compare the original exact-part reader with the same instrumented receiver')
             sub.add_argument('--scratch-dir', type=Path, help='Existing filesystem directory for owned host staging (default system temp)')
             sub.add_argument('--receiver-binary', type=Path)
             sub.add_argument('--legacy-receiver', action='store_true', help='Receiver lacks --diagnostics (comparison only)')

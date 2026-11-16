@@ -28,7 +28,7 @@ static volatile sig_atomic_t stopping;
 static const char *roots[] = {"/data/playden-import", "/mnt/usb0/playden/import"};
 static const char *temp_roots[] = {"/data/playden-packager-temp",
                                    "/mnt/usb0/playden-packager-temp"};
-#define RECEIVER_BUILD "v0.4-import-access-1"
+#define RECEIVER_BUILD "v0.4-profile-1"
 #ifdef HOST_TEST
 static char test_root[1024];
 static uint64_t test_free = UINT64_MAX;
@@ -203,6 +203,8 @@ static int write_all(int fd, const uint8_t *data, size_t n) {
     test_written += n;
 #endif
     while (n) {
+        if (diagnostics_enabled)
+            ++metrics.write_calls;
         ssize_t got = write(fd, data, n);
         if (got < 0 && errno == EINTR)
             continue;
@@ -390,13 +392,13 @@ static void log_lstat_comparison(const char *root, const char *name) {
 
 /* Optional post-receipt extension, schema 1: 7 uint64 counters followed by
    12 uint64 microsecond durations. No printf, JSON, names or paths on this route. */
-static int send_metrics(Wire *wire, double connection_started) {
-    uint8_t payload[1 + 19 * 8];
-    payload[0] = 1;
+static int encode_metrics(uint8_t *payload, uint8_t schema, double connection_started,
+                          double snapshot) {
+    payload[0] = schema;
     uint64_t counters[] = {metrics.published, metrics.bytes,  metrics.data_frames,
                            metrics.files,     metrics.fsyncs, metrics.send_calls,
                            metrics.recv_calls};
-    double timings[] = {metric_clock() - connection_started,
+    double timings[] = {snapshot - connection_started,
                         metrics.socket_read_s,
                         metrics.socket_write_s,
                         metrics.frame_auth_s,
@@ -415,17 +417,92 @@ static int send_metrics(Wire *wire, double connection_started) {
             return 0;
         putnum(payload + 1 + (7 + i) * 8, (uint64_t)(timings[i] * 1000000), 8);
     }
+    return 1;
+}
+
+static int send_metrics(Wire *wire, double connection_started) {
+    uint8_t payload[153];
+    return encode_metrics(payload, 1, connection_started, metric_clock()) &&
+           frame_send(wire, ACK, payload, sizeof(payload));
+}
+/* Schema 2 is requested only after the unchanged schema-1 reply. Older peers
+   close there; loss of this optional profile never revokes the receipt or v1. */
+static int send_profile(Wire *wire, double connection_started) {
+    metric_phase(-1);
+    double snapshot = phase_started, accounted = 0;
+    for (size_t i = 0; i < PH_COUNT; ++i)
+        accounted += metrics.phase_s[i];
+    double unattributed = snapshot - connection_started - accounted;
+    if (unattributed < 0)
+        unattributed = 0;
+    uint8_t payload[1 + 61 * 8];
+    if (!encode_metrics(payload, 2, connection_started, snapshot))
+        return 0;
+    uint64_t counts[] = {metrics.frames,
+                         metrics.entry_frames,
+                         metrics.end_frames,
+                         metrics.reply_frames,
+                         metrics.entry_acks,
+                         metrics.end_acks,
+                         metrics.recv_wire_bytes,
+                         metrics.recv_short_calls,
+                         metrics.frame_recv_calls,
+                         metrics.rx_cache_hits,
+                         metrics.parent_walk_calls,
+                         metrics.dir_open_calls,
+                         metrics.clock_calls,
+                         metrics.write_calls,
+                         clock_probe_ns,
+                         clock_probe_valid,
+                         buffered_reads};
+    double times[] = {metrics.frame_read_s,
+                      metrics.frame_parse_s,
+                      metrics.frame_socket_read_s,
+                      metrics.frame_receive_auth_s,
+                      metrics.reply_s,
+                      metrics.entry_parse_s,
+                      metrics.entry_create_s,
+                      metrics.parent_walk_s,
+                      metrics.file_close_s,
+                      metrics.hash_finalize_s,
+                      metrics.hash_walk_s,
+                      metrics.namespace_s,
+                      metrics.recipe_s,
+                      metrics.inventory_s,
+                      metrics.phase_s[PH_PAIR],
+                      metrics.phase_s[PH_SETUP],
+                      metrics.phase_s[PH_FRAME],
+                      metrics.phase_s[PH_ENTRY],
+                      metrics.phase_s[PH_DATA],
+                      metrics.phase_s[PH_END],
+                      metrics.phase_s[PH_VERIFY],
+                      metrics.phase_s[PH_COMMIT],
+                      metrics.phase_s[PH_METRICS],
+                      unattributed,
+                      (double)metrics.clock_calls * (double)clock_probe_ns / 1e9};
+    _Static_assert(sizeof(counts) / sizeof(counts[0]) == 17, "profile counter schema");
+    _Static_assert(sizeof(times) / sizeof(times[0]) == 25, "profile timer schema");
+    for (size_t i = 0; i < 17; ++i)
+        putnum(payload + 153 + i * 8, counts[i], 8);
+    for (size_t i = 0; i < 25; ++i) {
+        if (!(times[i] >= 0 && times[i] < (double)UINT64_MAX / 1000000))
+            return 0;
+        putnum(payload + 153 + (17 + i) * 8, (uint64_t)(times[i] * 1000000), 8);
+    }
     return frame_send(wire, ACK, payload, sizeof(payload));
 }
 
 static void connection(int client, const uint8_t key[32]) {
     memset(&metrics, 0, sizeof(metrics));
     double connection_started = metric_clock();
+    phase_current = PH_PAIR;
+    phase_started = connection_started;
     Wire wire = {.fd = client, .sent = 0, .received = 0};
     if (!handshake(&wire, key)) {
         sleep(1);
         return;
     }
+    metric_phase(PH_SETUP);
     uint8_t *body = malloc(FRAME_MAX);
     int root = -1, temporary = -1, stage = -1, package = -1, file = -1;
     Inventory inventory = {0};
@@ -551,10 +628,15 @@ static void connection(int client, const uint8_t key[32]) {
     const char *ready = diagnostics_enabled ? "ready;metrics=1" : "ready";
     if (!frame_send(&wire, ACK, ready, strlen(ready)))
         goto cleanup;
-    while (!stopping && frame_read(&wire, &type, body, &length)) {
+    while (!stopping) {
+        metric_phase(PH_FRAME);
+        if (!frame_read(&wire, &type, body, &length))
+            break;
         if (verified && type != COMMIT)
             goto fail;
         if (type == ENTRY) {
+            metric_phase(PH_ENTRY);
+            double entry_started = metric_clock();
             if (file >= 0 || inventory.count >= expected_entries || length < 43)
                 goto fail;
             int kind = body[0];
@@ -583,12 +665,14 @@ static void connection(int client, const uint8_t key[32]) {
             }
             ++inventory.count;
             planned += size;
+            metric_add(&metrics.entry_parse_s, entry_started);
             char leaf[256];
             int parent = parent_fd(package, path, leaf);
             if (parent < 0) {
                 error = "Entry parent is missing, linked or unsafe.";
                 goto fail;
             }
+            double create_started = metric_clock();
             if (kind) {
                 file = openat(parent, leaf, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
                               0600);
@@ -609,9 +693,13 @@ static void connection(int client, const uint8_t key[32]) {
                     goto fail;
                 }
             }
+            metric_add(&metrics.entry_create_s, create_started);
+            if (diagnostics_enabled)
+                ++metrics.entry_acks;
             if (!frame_send(&wire, ACK, "entry", 5))
                 goto cleanup;
         } else if (type == DATA) {
+            metric_phase(PH_DATA);
             if (file < 0 || !length || length > remaining)
                 goto fail;
             double started = metric_clock();
@@ -631,9 +719,12 @@ static void connection(int client, const uint8_t key[32]) {
             }
             remaining -= length;
         } else if (type == END_FILE) {
+            metric_phase(PH_END);
             if (file < 0 || length || remaining)
                 goto fail;
+            double hash_started = metric_clock();
             sha_256_close(&file_hash);
+            metric_add(&metrics.hash_finalize_s, hash_started);
             if (!same(actual_hash, active->hash, 32)) {
                 error = "File SHA-256 mismatch; staging discarded.";
                 goto fail;
@@ -649,7 +740,10 @@ static void connection(int client, const uint8_t key[32]) {
                 error = "File flush failed; package was not published.";
                 goto fail;
             }
-            if (close(file) < 0) {
+            double close_started = metric_clock();
+            int close_result = close(file);
+            metric_add(&metrics.file_close_s, close_started);
+            if (close_result < 0) {
                 file = -1;
                 error = "File close failed; package was not published.";
                 goto fail;
@@ -657,16 +751,27 @@ static void connection(int client, const uint8_t key[32]) {
             file = -1;
             completed += active->size;
             active = NULL;
+            if (diagnostics_enabled)
+                ++metrics.end_acks;
             if (!frame_send(&wire, ACK, "stored", 6))
                 goto cleanup;
         } else if (type == VERIFY) {
+            metric_phase(PH_VERIFY);
             if (file >= 0 || length || inventory.count != expected_entries || completed != total)
                 goto fail;
             double started = metric_clock();
             int valid = same_inode(package, stage, "package") &&
-                        verify_staging(package, &inventory, &wire, total) &&
-                        strict_recipe(package, package_path) &&
-                        inventory_hashes(package, &inventory);
+                        verify_staging(package, &inventory, &wire, total);
+            if (valid) {
+                double recipe_started = metric_clock();
+                valid = strict_recipe(package, package_path);
+                metric_add(&metrics.recipe_s, recipe_started);
+            }
+            if (valid) {
+                double inventory_started = metric_clock();
+                valid = inventory_hashes(package, &inventory);
+                metric_add(&metrics.inventory_s, inventory_started);
+            }
             metric_add(&metrics.verify_s, started);
             if (!valid) {
                 error = "Invalid recipe, required package structure or immutable inventory.";
@@ -686,6 +791,7 @@ static void connection(int client, const uint8_t key[32]) {
             if (!frame_send(&wire, ACK, "verified", 8))
                 goto cleanup;
         } else if (type == COMMIT) {
+            metric_phase(PH_COMMIT);
             if (!verified || file >= 0 || length)
                 goto fail;
             double started = metric_clock();
@@ -709,9 +815,12 @@ static void connection(int client, const uint8_t key[32]) {
                 goto cleanup;
             /* Legacy clients close after the exact original publication receipt.
                Only a capable client requests this authenticated, bounded record. */
+            metric_phase(PH_METRICS);
             if (diagnostics_enabled && frame_read(&wire, &type, body, &length) &&
-                type == GET_METRICS && length == 0)
-                send_metrics(&wire, connection_started);
+                type == GET_METRICS && length == 0 && send_metrics(&wire, connection_started)) {
+                if (frame_read(&wire, &type, body, &length) && type == GET_PROFILE && length == 0)
+                    send_profile(&wire, connection_started);
+            }
             goto cleanup;
         } else
             goto fail;
@@ -721,6 +830,7 @@ fail:
     printf("receiver_error %s\n", error);
     frame_send(&wire, ERROR_REPLY, error, strlen(error));
 cleanup:
+    metric_phase(-1);
     /* Report the transfer before filesystem deletion/close: slow storage, a
        forced unload or a cleanup fault must not hide the transfer timings. */
     metric_report(connection_started);
@@ -756,6 +866,7 @@ cleanup:
     free(inventory.items);
     free(inventory.slots);
     free(body);
+    free(wire.rx);
     memset(wire.key, 0, sizeof(wire.key));
     if (diagnostics_enabled) {
         printf("receiver_cleanup wall_s=%.6f complete=%d errno=%d (%s)\n",
@@ -846,6 +957,8 @@ int main(int argc, char **argv) {
             if (*end || value <= 0 || value > 4095)
                 return 2;
             test_permission_errno = (int)value;
+        } else if (!strcmp(argv[i], "--unbuffered-frames")) {
+            buffered_reads = 0;
         } else if (!strcmp(argv[i], "--test-pause-cleanup")) {
             test_pause_cleanup = 1;
         } else if (!strcmp(argv[i], "--test-stage-device-mismatch")) {
@@ -891,6 +1004,7 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, &action, NULL);
     umask(0077);
     setbuf(stdout, NULL);
+    metric_probe_clock();
     int listener = socket(AF_INET, SOCK_STREAM, 0);
     if (listener < 0)
         return 1;
