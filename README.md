@@ -36,7 +36,7 @@ and a working Playden installation.
 | NeoForge / Quilt | **Not supported** for launch packaging |
 
 Confirmed PS5 configurations are **Vanilla 26.3** and, separately, **26.3 with Fabric
-Loader 0.20.1 without Ixeris**. This does not certify every mod or modpack. A
+Loader 0.20.1**. This does not certify every mod or modpack. A
 successful package validation is not proof that the game will launch on PS5.
 
 Untested combinations show:
@@ -65,10 +65,10 @@ glibc 2.36+; musl/Alpine and Windows/Linux ARM builds are not targets. See the
 
 ## Build and copy
 
-1. Finish installing your instance in its normal launcher, close Minecraft, then open the packager.
+1. Finish installing your instance in its normal launcher, then open the packager.
 2. Select an instance, or use **Add source folder**. Ctrl/Cmd-click or Shift-click selects several.
-3. Check the version, loader and compatibility status. Any blocked selected instance disables the whole Build action; deselect it or fix the reported problem.
-4. Choose an output location and a separate download cache. Leave **Privacy cleanup** enabled. Build and review every result.
+3. Check the version, loader and compatibility status. Any blocked selected instance disables the whole Build action.
+4. Choose an output location.
 5. Use **Copy to USB** in the completion popup or main window. Both copy all successful, available outputs from the latest queue. Check the destination preview and keep the drive connected through verification.
 6. Review individual USB results. Retry copies only failed/cancelled/pending items; a new Copy action uses fresh destination names. Safely eject before unplugging.
 
@@ -82,8 +82,7 @@ verification, failures and cancellation cannot authorise cleanup of that package
 ## Configure the game in Playden
 
 Packages are copied under `playden/import/<package-name>/`. Use the supported local
-game/folder import or add-game flow in your installed Playden version, then select
-the executable and arguments below. Check Playden's own instructions for its UI.
+game/folder import in Playden, then select the executable and arguments below.
 
 ```text
 Playden configuration:
@@ -93,8 +92,8 @@ Playden configuration:
 Note: Online play limited to offline mode servers, authentication is not yet implemented
 ```
 
-Configure these settings manually. Internal `recipe.json` files remain part of
-package validation; no recipe-upload feature is required or advertised.
+Configure these settings manually. Included `recipe.json` file cannot be imported yet,
+however it is planned to be introduced into playden eventually. 
 
 ## Troubleshooting and bug reports
 
