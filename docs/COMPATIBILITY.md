@@ -34,3 +34,47 @@ Legacy Java 8/virtual-asset layouts, arbitrary patched clients and unsupported
 custom metadata are technical blockers. There is no authenticated multiplayer,
 Realms, online client acquisition, PS5 helper, direct console transfer or console
 log collection. Console game/mod/runtime acceptance remains configuration-specific.
+
+## Known Minecraft Version Compatibility
+
+This table tracks Minecraft Java Edition versions tested with **Playden on PS5**. Compatibility depends on the Minecraft version, mod loader and installed mods.
+
+| Minecraft Version | Mod Loader | Loader Version | Status | Notes |
+|---|---|---|---|---|
+| 26.3 | Vanilla | N/A | ✅ Working | Confirmed working |
+| 26.3 | Fabric | 0.20.1 | ✅ Working | Confirmed working |
+
+**Status key:**
+
+- ✅ Working — Tested and confirmed working on PS5.
+- ⚠️ Partially working — Runs with known limitations.
+- ❌ Not working — Tested and confirmed broken.
+
+**Note:** Compatibility is specific to the tested configuration. Other versions, Fabric Loader versions and mod combinations are not guaranteed to work.
+
+## Known Mod Compatibility
+
+This table tracks mods that cause issues or break the package on playden. Compatibility may vary depending on the Minecraft version, Fabric Loader version and mod version.
+
+| Mod                                       | Status        | Notes                                                          |
+| ----------------------------------------- | ------------- | -------------------------------------------------------------- |
+| [Ixeris](https://modrinth.com/mod/ixeris) | ❌ Not working | Known compatibility issues with Playden. Avoid using this mod. |
+
+**Status key:**
+
+- ✅ Working — Tested and confirmed working on PS5.
+- ⚠️ Partially working — Works with limitations or known issues.
+- ❌ Not working — Known to cause issues or prevent the game from running.
+
+### Report Mod Compatibility
+
+Tested a mod that isn't listed? [Open an issue](https://github.com/isaacm0880/Minecraft-Playden-Packager/issues/new) with \:borked-mod
+
+- Mod name and version
+- Minecraft and Fabric Loader versions
+- Whether it works, partially works or fails
+- Any errors or limitations encountered
+
+**Note:** Successfully packaging a mod does not guarantee it will work when launched through Playden.
+
+
