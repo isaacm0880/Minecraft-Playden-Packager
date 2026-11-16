@@ -72,6 +72,11 @@ class ReleaseGuiTests(unittest.TestCase):
         while self.window.busy() and time.monotonic() < until:
             self.app.processEvents()
             time.sleep(0.001)
+        if self.window.busy():
+            import faulthandler
+            faulthandler.dump_traceback()
+            print('TIMEOUT STATE', self.window.operation, self.window.outcome, self.window.usb_current,
+                  [(r.state, r.detail) for r in self.window.usb_records], self.window.log.toPlainText(), flush=True)
         self.assertFalse(self.window.busy(), 'GUI worker did not finish')
 
     def tearDown(self):
