@@ -1,7 +1,7 @@
 # Minecraft Playden Packager
 
 [![Release status](https://img.shields.io/badge/release-v0.1.0_in_preparation-orange)](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases)
-![Platform targets](https://img.shields.io/badge/targets-Windows%20%7C%20Linux%20%7C%20macOS-blue)
+![Platform targets](https://img.shields.io/badge/binaries-Windows%20%7C%20Linux-blue)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 
 Package your locally installed **Minecraft Java Edition** instances for use with
@@ -54,10 +54,11 @@ No official release downloads are available yet. Workflow candidates are for rev
 | --- | --- |
 | Windows x64 | Portable ZIP — extract the whole folder, then open `MinecraftPlaydenPackager.exe` |
 | Linux x86_64 | AppImage — make it executable, then run it |
-| macOS Apple Silicon | ARM64 application ZIP — extract the `.app` |
-| macOS Intel | x86_64 application ZIP — extract the `.app` |
+| macOS | **Experimental, source-only, not yet verified** — no v0.1.0 application download |
 
-Native acceptance is pending for all four release artifacts. The Linux build targets
+Windows/Linux candidates have passed automated build checks; manual acceptance is
+still required. macOS is experimental and not yet verified; see
+[macOS source instructions](docs/INSTALLATION.md#macos-experimental-source-only). The Linux build targets
 glibc 2.36+; musl/Alpine and Windows/Linux ARM builds are not targets. See the
 [installation guide](docs/INSTALLATION.md) for source setup, checksums and platform notes.
 

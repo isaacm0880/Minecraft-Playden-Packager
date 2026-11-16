@@ -10,10 +10,10 @@ Do not treat workflow artifacts or source previews as an accepted public release
 | --- | --- |
 | Windows x64 | `Minecraft-Playden-Packager-v0.1.0-Windows-x64.zip` |
 | Linux x86_64 | `Minecraft-Playden-Packager-v0.1.0-Linux-x86_64.AppImage` |
-| macOS Apple Silicon | `Minecraft-Playden-Packager-v0.1.0-macOS-ARM64.zip` |
-| macOS Intel | `Minecraft-Playden-Packager-v0.1.0-macOS-x86_64.zip` |
+| macOS | Experimental source-only support; not yet verified; no application ZIP |
 
-All four native artifacts still require acceptance. The Linux toolchain uses
+Only Windows x64 and Linux x86_64 are required v0.1.0 binary artifacts.
+Both still require manual desktop and USB acceptance. The Linux toolchain uses
 Debian 12/glibc 2.36; older glibc and musl/Alpine are not supported build targets.
 
 After download, compare its SHA-256 with the published `SHA256SUMS`. On Windows use
@@ -25,11 +25,6 @@ After download, compare its SHA-256 with the published `SHA256SUMS`. On Windows 
 - **Linux:** mark the AppImage executable (`chmod +x <file>.AppImage`) and run it.
   A graphical desktop and compatible host graphics/platform libraries are required.
   If FUSE is unavailable, AppImage extraction can be used on compatible hosts.
-- **macOS:** select your native CPU architecture, extract the ZIP, then open the app.
-  The current build recipe uses ad-hoc signing, not Developer ID signing or
-  notarisation. Gatekeeper/Finder acceptance must be checked before publication;
-  do not disable system security globally to run an unverified build.
-
 ## Source installation
 
 Use Python 3.11+ and a graphical desktop. From a checkout of this public repository:
@@ -58,6 +53,39 @@ sets the CLI's offline display name independently of GUI preferences. `versions`
 queries the public version catalog; listing is not a compatibility guarantee.
 Advanced diagnostic launch profiles and unverified file-only imports remain CLI
 features; run `--help` for their scope. They do not make unsupported loaders launchable.
+
+## macOS: experimental source-only
+
+**Not yet verified on Apple Silicon or Intel Macs.** v0.1.0 has no supported macOS
+application ZIP. Source execution or a self-built app may fail; report the exact
+macOS, CPU, Python and Qt versions with any bug. This does not change the package's
+Windows Java target or guarantee that a game/modpack works on PS5.
+
+Install Python 3.11+ from [python.org](https://www.python.org/downloads/macos/).
+Open Terminal in a checkout of this repository, then run:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[gui]"
+.venv/bin/python -m minecraft_playden gui
+```
+
+For a self-built `.app`, use a **clean committed checkout**, native Python **3.11.9**
+matching your CPU, and a new output directory. The pinned release builder runs its
+full tests, all type targets, privacy/content audits and frozen smoke tests:
+
+```sh
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r release/requirements.txt
+.venv/bin/python -m pip install --no-deps --no-build-isolation -e .
+.venv/bin/python -m release.build_desktop --source-sha "$(git rev-parse HEAD)" --output ../my-macos-candidate
+```
+
+Run this on the actual Mac architecture; cross-compilation is not a substitute.
+The output is an experimental local ZIP containing an ad-hoc signed app, not a
+notarized or supported release. Gatekeeper, Finder, Cocoa startup and external-drive
+permissions remain unverified. Do not disable system security globally. A failed
+check is a blocker for that self-build, not a reason to bypass the builder's gates.
 
 ## Playden configuration
 

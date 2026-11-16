@@ -1,8 +1,9 @@
 # Compatibility
 
 Packaging targets Windows x64 Java for Playden regardless of the host platform.
-Host application targets are Windows x64, Linux x86_64 and macOS ARM64/x86_64;
-release-artifact native acceptance is pending. See [installation](INSTALLATION.md).
+v0.1.0 binary targets are Windows x64 and Linux x86_64; manual acceptance is
+pending. macOS Apple Silicon/Intel support is experimental, source-only and not
+yet verified; there is no required macOS binary. See [installation](INSTALLATION.md).
 
 | Status | Meaning |
 | --- | --- |

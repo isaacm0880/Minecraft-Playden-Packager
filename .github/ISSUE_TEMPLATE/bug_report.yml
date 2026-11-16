@@ -19,8 +19,8 @@ body:
       options:
         - Windows x64
         - Linux x86_64
-        - macOS Apple Silicon
-        - macOS Intel
+        - macOS Apple Silicon (experimental source)
+        - macOS Intel (experimental source)
         - Other/source environment
     validations:
       required: true

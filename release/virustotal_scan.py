@@ -140,13 +140,15 @@ class GitHub:
                 stream.write(block)
 
 
-def select_artifacts(run: dict, artifacts: list[dict], run_id: str) -> dict[str, dict]:
+def select_artifacts(run: dict, artifacts: list[dict], run_id: str, include_macos: bool = True) -> dict[str, dict]:
     if (str(run.get('id')) != run_id or run.get('status') != 'completed' or run.get('conclusion') != 'success'
-            or run.get('path') != '.github/workflows/desktop-build.yml' or run.get('event') != 'workflow_dispatch'
+            or run.get('path') != '.github/workflows/desktop-build.yml' or run.get('event') not in ('workflow_dispatch', 'push')
+            or (run.get('event') == 'push' and run.get('head_branch') != 'release/v0.1.0-prep')
             or run.get('head_branch') not in BRANCHES or run.get('repository', {}).get('full_name') != REPOSITORY
             or not re.fullmatch(r'[0-9a-f]{40}', run.get('head_sha', ''))):
-        raise ValidationError('Select a successful manual desktop build in this repository/release branch')
-    expected = {f'{label}-{run["head_sha"]}': key for key, (label, _) in PLATFORMS.items()}
+        raise ValidationError('Select a successful desktop build in this repository/release branch')
+    platforms = set(PLATFORMS) if include_macos else {'windows', 'linux'}
+    expected = {f'{label}-{run["head_sha"]}': key for key, (label, _) in PLATFORMS.items() if key in platforms}
     expected[f'Verified-source-pair-{run["head_sha"]}'] = 'pair'
     found = {}
     for artifact in artifacts:
@@ -162,8 +164,8 @@ def select_artifacts(run: dict, artifacts: list[dict], run_id: str) -> dict[str,
         if type(artifact.get('id')) is not int or not 0 < artifact.get('size_in_bytes', 0) <= MAX_ARCHIVE:
             raise ValidationError('Invalid artifact ID or size')
         found[key] = artifact
-    if set(found) != set(PLATFORMS) | {'pair'}:
-        raise ValidationError('All four platform artifacts and the verified pair report are required')
+    if set(found) != platforms | {'pair'}:
+        raise ValidationError('All selected platform artifacts and the verified pair report are required')
     return found
 
 
@@ -268,17 +270,24 @@ def audit_zip(path: Path, audit: dict, target_dir: Path, platform: str, extract:
 
 def verified_targets(workspace: Path, include_macos: bool) -> tuple[dict, list[Target]]:
     context = read_json(workspace / 'context.json')
-    selected = select_artifacts(context['run'], context['artifacts'], str(context['run']['id']))
+    cohort_macos = context.get('include_macos', True)
+    if include_macos and not cohort_macos:
+        raise ValidationError('This v0.1.0 cohort contains Windows/Linux only; no macOS executables are available')
+    selected = select_artifacts(context['run'], context['artifacts'], str(context['run']['id']), cohort_macos)
     for key, artifact in selected.items():
         checked_hash(workspace / f'{key}.zip', artifact['digest'].split(':', 1)[1], artifact['size_in_bytes'])
     source = context['run']['head_sha']
-    pair = verify(workspace / 'windows', workspace / 'linux', source, workspace / 'macos-arm64', workspace / 'macos-x86_64')
+    pair = verify(workspace / 'windows', workspace / 'linux', source,
+                  workspace / 'macos-arm64' if cohort_macos else None,
+                  workspace / 'macos-x86_64' if cohort_macos else None)
     if pair != read_json(workspace / 'pair/release-pair.json'):
         raise ValidationError('Verified release-pair report does not match the downloaded candidates')
     targets = []
     # Fresh extraction directory each validation pass; it cannot address user files.
     target_dir = workspace / ('targets-' + uuid.uuid4().hex)
     for key, (_, filename) in PLATFORMS.items():
+        if key not in selected:
+            continue
         record = read_json(workspace / key / 'artifact.json')
         path = workspace / key / filename
         checked_hash(path, record['sha256'], record['size'])
@@ -291,21 +300,21 @@ def verified_targets(workspace: Path, include_macos: bool) -> tuple[dict, list[T
     return context, targets
 
 
-def prepare(workspace: Path, run_id: str, token: str) -> None:
+def prepare(workspace: Path, run_id: str, token: str, include_macos: bool = False) -> None:
     if not re.fullmatch(r'[1-9][0-9]{0,19}', run_id):
         raise ValidationError('Build run ID must be a positive integer')
     workspace.mkdir(parents=True, exist_ok=False)
     api = GitHub(token)
     run = api.get(f'actions/runs/{run_id}')
     artifacts = api.artifacts(run_id)
-    selected = select_artifacts(run, artifacts, run_id)
+    selected = select_artifacts(run, artifacts, run_id, include_macos)
     (workspace / 'context.json').write_text(json.dumps({'run': run, 'artifacts': artifacts,
-        'scanner_commit': os.environ.get('SCANNER_SOURCE_SHA', 'local')}))
+        'include_macos': include_macos, 'scanner_commit': os.environ.get('SCANNER_SOURCE_SHA', 'local')}))
     for key, artifact in selected.items():
         wrapper = workspace / f'{key}.zip'
         api.download(artifact['id'], wrapper)
         checked_hash(wrapper, artifact['digest'].split(':', 1)[1], artifact['size_in_bytes'])
-        allowed = {'release-pair.json'} if key == 'pair' else {PLATFORMS[key][1], 'artifact.json', 'content-audit.json', 'build-metadata.json'}
+        allowed = {'release-pair.json', 'SHA256SUMS'} if key == 'pair' else {PLATFORMS[key][1], 'artifact.json', 'content-audit.json', 'build-metadata.json', 'SHA256SUMS'}
         unpack_wrapper(wrapper, workspace / key, allowed)
     verified_targets(workspace, False)
 
@@ -527,15 +536,18 @@ def main() -> int:
     parser.add_argument('command', choices=('prepare', 'scan'))
     parser.add_argument('--workspace', type=Path, required=True)
     parser.add_argument('--report-dir', type=Path, required=True)
-    parser.add_argument('--run-id', required=True)
+    parser.add_argument('--run-id', help='Required for prepare')
+    parser.add_argument('--include-macos', action='store_true', help='Advanced: prepare a separately verified four-platform cohort')
     parser.add_argument('--mode', choices=('lookup-only', 'upload-missing'), default='lookup-only')
     parser.add_argument('--macos-executables', action='store_true')
     args = parser.parse_args()
     summary = Path(os.environ['GITHUB_STEP_SUMMARY']) if os.environ.get('GITHUB_STEP_SUMMARY') else None
     try:
         if args.command == 'prepare':
-            prepare(args.workspace, args.run_id, os.environ.get('GH_TOKEN', ''))
-            print('All four release candidates and ZIP inventories verified. No VirusTotal requests made.')
+            if args.run_id is None:
+                raise ValidationError('prepare requires --run-id')
+            prepare(args.workspace, args.run_id, os.environ.get('GH_TOKEN', ''), args.include_macos)
+            print('Selected release candidates and ZIP inventories verified. No VirusTotal requests made.')
             return 0
         context, targets = verified_targets(args.workspace, args.macos_executables)
         client = VirusTotal(os.environ.get('VIRUSTOTAL_API_KEY', ''))

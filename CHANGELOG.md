@@ -13,7 +13,7 @@ First public release candidate; no binary release is published yet.
 - Default-off, explicitly confirmed cleanup of eligible fully verified generated outputs.
 - Idle startup progress and remembered offline GUI player name.
 - Offline-only local-client CLI and package validation.
-- Four platform build targets with pinned tooling, provenance, content audits,
+- Windows/Linux binary targets and optional experimental macOS builds with pinned tooling, provenance, content audits,
   frozen GUI smoke tests and SHA-256 checksums; native acceptance remains pending.
 - Preparation-branch candidate builds use the exact public push commit without
   requiring a merge; combined checksum reports preserve existing evidence.
@@ -23,3 +23,5 @@ First public release candidate; no binary release is published yet.
 - Windows filesystem aliases retain verified USB results and safe cleanup eligibility.
 - GUI regression fixtures use canonical transfer receipts and folder URLs; unexpected
   modal warnings fail tests promptly instead of stalling native CI.
+- v0.1.0 requires Windows/Linux binaries only; macOS is experimental source-only
+  and does not block binary verification. Retain the verified 70daa32 candidates.

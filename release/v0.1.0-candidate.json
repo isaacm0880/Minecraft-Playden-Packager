@@ -1,0 +1,63 @@
+{
+  "version": "0.1.0",
+  "source_commit": "70daa32e92c2fe7cac47737c640ca19c2838bbd4",
+  "binary_platforms": [
+    "win32-x86_64",
+    "linux-x86_64"
+  ],
+  "macos_status": "experimental; not verified for release; source-only in v0.1.0",
+  "source_tree_sha256": "4ddff1382f22602866b97d4f10683b3178b008f3a2018ce6610c7b7d346062c8",
+  "python_versions": {
+    "win32": "3.11.9",
+    "linux": "3.11.14"
+  },
+  "artifacts": [
+    {
+      "content_audit_passed": true,
+      "filename": "Minecraft-Playden-Packager-v0.1.0-Windows-x64.zip",
+      "frozen_smoke_passed": true,
+      "preview": false,
+      "sha256": "59da2be8571145d501b841a5b04034b4461b85b6d6038a37c425937ac44da53a",
+      "size": 50451544,
+      "source_commit": "70daa32e92c2fe7cac47737c640ca19c2838bbd4",
+      "source_tree_sha256": "4ddff1382f22602866b97d4f10683b3178b008f3a2018ce6610c7b7d346062c8"
+    },
+    {
+      "content_audit_passed": true,
+      "filename": "Minecraft-Playden-Packager-v0.1.0-Linux-x86_64.AppImage",
+      "frozen_smoke_passed": true,
+      "preview": false,
+      "sha256": "395dc82471558c8ea338a0655c8d0ac3e78f6c72372b5d6cd5f447853dc09975",
+      "size": 57674232,
+      "source_commit": "70daa32e92c2fe7cac47737c640ca19c2838bbd4",
+      "source_tree_sha256": "4ddff1382f22602866b97d4f10683b3178b008f3a2018ce6610c7b7d346062c8"
+    }
+  ],
+  "automated_pair_checks_passed": true,
+  "release_published": false,
+  "manual_acceptance_required": [
+    "Visible Windows startup, Explorer and physical USB workflow",
+    "Native KDE Wayland and another Linux desktop, with physical USB",
+    "Minecraft 26.3 package regression and PS5/Playden acceptance"
+  ],
+  "workflow_run": 43760353213,
+  "repository": "isaacm0880/Minecraft-Playden-Packager",
+  "workflow_wrappers": {
+    "windows": {
+      "artifact_id": 14180162693,
+      "sha256": "320a13ba897389e8af26a2b24f5756f20bb750ec3e5106193431dc5ce040514a",
+      "size": 50266162,
+      "job_id": 132954499064
+    },
+    "linux": {
+      "artifact_id": 14179834184,
+      "sha256": "8ca75271f122aef96a3a94f9bd3e4f140aac8f92f0a3d29cdf813286795c7a9a",
+      "size": 57028184,
+      "job_id": 132954499062
+    }
+  },
+  "application_tree_sha256": "0b2f7500e9b1558b767ed89a22e8ee1619fd979053777d0514a723cb58acdc78",
+  "selection": "Retain these original binaries unchanged; preparation documentation/tooling is newer.",
+  "embedded_documentation_notice": "Earlier four-platform planning text is superseded by current installation guide and release notes.",
+  "manual_acceptance_completed": false
+}
