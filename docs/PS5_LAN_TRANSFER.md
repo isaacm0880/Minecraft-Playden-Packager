@@ -1,0 +1,118 @@
+# PS5 LAN package transfer — v0.4 development
+
+The PC sends a validated launch package to an explicitly started custom receiver.
+It does not deploy the payload, execute a game, modify Playden's managed games,
+remove local outputs, or silently overwrite an existing import. No physical PS5
+testing has been performed for this feature. The published v0.1.0 binaries do not
+include it; run the development source on `feat/ps5-network-transfer`.
+
+| Selection | Exact receiver root |
+| --- | --- |
+| `internal` (new-user default) | `/data/playden-import/` |
+| `usb0` | `/mnt/usb0/playden/import/` |
+
+USB0 must be mounted; its absence is an error, never an internal-storage fallback.
+The receiver cannot write arbitrary destinations. Only these import roots and
+its own private staging directories are writable through the protocol.
+
+## Build locally
+
+Use an installed [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk).
+These build commands contact no console:
+
+```bash
+export PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk
+make -C ps5/receiver
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -e '.[dev,gui]'
+python -m pytest -q
+```
+
+The ELF output is `ps5/receiver/minecraft_playden_receiver.elf`. It is not
+committed or published. `make` has no deployment target. Building the SDK payload
+and running host tests does not establish firmware/loader compatibility.
+
+## Physical testing — manual commands only
+
+Stop automation here. The following commands are for the owner to execute when
+ready. A compatible ELF loader must already be running on the jailbroken PS5.
+Use the loader's configured port (the SDK deployer defaults to 9021). The receiver
+itself listens on TCP **9025**, on the first available private IPv4 interface.
+
+```bash
+read -r -p 'PS5 LAN IPv4 address: ' PS5_IP
+PS5_LOADER_PORT=9021
+"$PS5_PAYLOAD_SDK/bin/prospero-deploy" -h "$PS5_IP" -p "$PS5_LOADER_PORT" \
+  ps5/receiver/minecraft_playden_receiver.elf
+```
+
+Run the next commands in a second terminal if the loader retains the first one
+for payload output. Read the fresh **64-character pairing token** from the PS5
+notification or receiver console output. Never paste it into a public report.
+It changes on every payload start. The sender prompts for it without echo:
+
+```bash
+. .venv/bin/activate
+read -r -p 'Existing built package directory: ' PACKAGE_DIR
+python -m minecraft_playden validate "$PACKAGE_DIR"
+python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" \
+  --destination internal --name LAN-Test-Internal
+python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" \
+  --destination usb0 --name LAN-Test-USB0
+```
+
+If using a second terminal, set `PS5_IP` there too. For scripted sends the token
+can be supplied via `PLAYDEN_PS5_TOKEN`; it is not accepted as a command-line
+argument and is never saved in QSettings. The GUI is available with
+`python -m minecraft_playden gui`. Enter IP/token, select the destination and
+click **Send to PS5 (LAN)**. Close/reopen to check that USB0 persists and the token
+does not. The existing local USB-copy feature continues to work independently.
+
+After transfer, inspect `/data/playden-import/LAN-Test-Internal/` and
+`/mnt/usb0/playden/import/LAN-Test-USB0/`, then manually select the corresponding
+folder in Playden's **Play from Import Folder** flow. Do not move files into or
+modify Playden-managed game directories. Launch compatibility is separate from
+file-transfer validation and remains unverified.
+
+For an owner-approved interruption test, send a fresh name and cancel in the GUI
+or interrupt the CLI before the publication step. Confirm that local files remain
+unchanged and the final import name is absent. Re-send an existing name to verify
+refusal; try USB0 while it is unavailable to verify the error and absence of an
+internal fallback. Do not simulate storage exhaustion by filling the console;
+automated tests cover both preflight and write-time insufficient-space errors.
+
+## Pairing, integrity and recovery
+
+The receiver expires after an hour between connections; stop/unload it through
+the loader when finished. A fresh random key and per-connection nonces provide
+mutual HMAC-SHA256 authentication, ordered authenticated frames and replay
+protection. The token authorizes writes to the import roots: keep it private.
+This protocol does **not encrypt** packages, worlds or mods. Use a trusted private
+LAN and do not expose TCP 9025 outside it.
+
+The receiver uses no-follow, descriptor-relative file operations; checks path
+bounds, entry counts and free-space overhead; re-reads every file for SHA-256;
+and validates the constrained recipe and immutable inventory before publication.
+The PC also runs the complete exporter validator. The receiver does not run Java
+or independently resolve Minecraft dependencies. Full launch validation belongs
+to the PC and physical Playden testing.
+
+Cancellation/disconnect before COMMIT discards only the session's private stage.
+After COMMIT, publication may finish even if the network connection disappears.
+If no success receipt arrives, inspect the exact import path before retrying.
+The client never automatically retries or deletes either copy. Existing names
+are always refused; choose a fresh `--name` rather than deleting old imports.
+
+A crash/payload kill may leave `.pdlan-*` stages or an empty reserved final name.
+While the receiver is stopped, inspect those paths manually before removing
+anything. There is no automatic deletion of abandoned or unrelated directories.
+On platforms without exclusive rename, the receiver reserves a new empty final
+directory and verifies that reservation before the atomic rename. Local
+processes with write access to the import root must be trusted. File `fsync`
+must succeed; unsupported directory `fsync` is tolerated. Actual USB durability,
+mount detection, notifications and Playden access permissions need physical tests.
+
+Historical v0.1.0 release manifests, checksums and source approval remain intact.
+The existing release gate intentionally rejects these new development sources
+until a separate release review. No v0.4 binary release is produced here.

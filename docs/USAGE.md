@@ -76,7 +76,25 @@ instances and USB destinations are never deletion targets. A cleanup failure is
 reported separately; inspect local files and retain the verified USB copy. Checking
 can be cancelled; deletion finishes once its commit point is crossed.
 
-## Playden
+## PS5 LAN transfer (v0.4 development)
+
+Start the custom receiver manually, then enter the PS5 IPv4 address and its
+pairing token. Select **Internal storage** or **USB0 storage**, then click
+**Send to PS5 (LAN)**. The destination and valid IP address persist per user;
+the token is kept only in memory. The default destination is internal storage.
+Every available package in the latest successful build queue is sent in order.
+An error stops the remaining queue; previously confirmed packages stay on PS5.
+Local files are always retained. The existing **Copy to USB** action is separate.
+
+The receiver refuses existing package names. Use the CLI `--name` option to send
+another copy under a fresh name. Pairing authenticates transfers but does not
+encrypt them: use a trusted private LAN. Cancellation is available until the
+publication commit point. A lost completion receipt requires inspecting the
+PS5 import folder before retrying.
+
+See [receiver setup and physical testing](PS5_LAN_TRANSFER.md).
+
+## Playden import
 
 Use your installed Playden version's supported local-game/folder flow for the copied
 package, then configure manually:

@@ -5,11 +5,17 @@
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 
 Package your locally installed **Minecraft Java Edition** instances for use with
-**Playden on PS5**, using a desktop GUI or an offline-only CLI.
+**Playden on PS5**, using a desktop GUI or CLI.
 
 **v0.1.0 is released for Windows x64 and Linux x86_64.** macOS is experimental
 and source-only. Automated build checks passed; manual desktop, physical USB and
 PS5 acceptance testing has not been verified.
+
+**This development branch is v0.4.0.dev0.** It adds paired LAN transfers to a
+custom PS5 receiver, targeting internal import storage or USB0. The receiver
+builds with the PS5 Payload SDK and passes host integration tests; physical PS5
+transfer and Playden launch testing are still required. See
+[PS5 LAN setup and physical test commands](docs/PS5_LAN_TRANSFER.md).
 
 ## What it does
 
@@ -19,9 +25,10 @@ PS5 acceptance testing has not been verified.
 - Shows compatibility warnings and blocks known-broken or technically unsupported builds.
 - Cleans known private data from package copies by default in the GUI; original instances stay untouched.
 - Copies every successful queue output to USB, with progress, cancellation and checksum verification enabled by default.
+- Sends validated packages over a paired LAN connection to the PS5 import receiver, with progress and cancellation.
 
-It does **not** sign in, download a replacement Minecraft client, send files directly
-to a PS5, collect console logs or install a payload. Public metadata, dependencies,
+It does **not** sign in, download a replacement Minecraft client, collect console
+logs or install a payload automatically. Public metadata, dependencies,
 assets and Windows Java may still need downloads. You need your own Minecraft files
 and a working Playden installation.
 
