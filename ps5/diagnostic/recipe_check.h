@@ -1,6 +1,9 @@
 #ifndef PS5_RECIPE_CHECK_H
 #define PS5_RECIPE_CHECK_H
 #include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -74,11 +77,25 @@ static int recipe_check(const char *folder,char *reason,size_t cap){
  char path[1024];struct stat st;
  int n=snprintf(path,sizeof(path),"%s/recipe.json",folder);
  if(n<0||(size_t)n>=sizeof(path)){snprintf(reason,cap,"path-too-long");return 0;}
- if(lstat(path,&st)||!S_ISREG(st.st_mode)){snprintf(reason,cap,"recipe-missing");return 0;}
- if(st.st_size<=0||st.st_size>RECIPE_MAX){snprintf(reason,cap,"recipe-size-invalid");return 0;}
- FILE *f=fopen(path,"rb");if(!f){snprintf(reason,cap,"recipe-unreadable");return 0;}
- char buf[RECIPE_MAX+1];size_t z=fread(buf,1,sizeof(buf),f);int err=ferror(f);fclose(f);
- if(err||z==0||z>RECIPE_MAX){snprintf(reason,cap,"recipe-read-failed");return 0;}
+ /* Open without following the final symlink, then inspect the opened inode.
+    This avoids the lstat/fopen time-of-check/time-of-use race. */
+ int fd=open(path,O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK);
+ if(fd<0){snprintf(reason,cap,"recipe-unreadable");return 0;}
+ if(fstat(fd,&st)!=0||!S_ISREG(st.st_mode)){
+   close(fd);snprintf(reason,cap,"recipe-missing");return 0;
+ }
+ if(st.st_size<=0||st.st_size>RECIPE_MAX){
+   close(fd);snprintf(reason,cap,"recipe-size-invalid");return 0;
+ }
+ char buf[RECIPE_MAX+1];size_t z=0;
+ while(z<sizeof(buf)){
+   ssize_t got=read(fd,buf+z,sizeof(buf)-z);
+   if(got<0){if(errno==EINTR)continue;close(fd);snprintf(reason,cap,"recipe-read-failed");return 0;}
+   if(got==0)break;
+   z+=(size_t)got;
+ }
+ close(fd);
+ if(z==0||z>RECIPE_MAX){snprintf(reason,cap,"recipe-read-failed");return 0;}
  J j={buf,z,0,0};skipws(&j);if(j.p>=z||buf[j.p]!='{'||!value(&j)){snprintf(reason,cap,"recipe-invalid-json");return 0;}
  skipws(&j);if(j.p!=z){snprintf(reason,cap,"recipe-invalid-json");return 0;}
  if(!field(buf,z,"recipe_version","1")||!field(buf,z,"architecture","\"pe64\"")||
