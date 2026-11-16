@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#include "recipe_check.h"
 
 #ifndef PS5_INTERNAL_IMPORT
 #define PS5_INTERNAL_IMPORT "/data/playden-import"
@@ -72,6 +73,21 @@ static void scan_imports(const char *root, const char *label) {
                label, name, recipe ? "present" : "missing",
                args ? "present" : "missing", java ? "present" : "missing",
                recipe && args && java ? "structure-present" : "incomplete");
+        if (recipe) {
+            char reason[80];
+            int valid = recipe_check(folder, reason, sizeof(reason));
+            int args_nonempty = 0;
+            char argpath[1024];
+            struct stat argstat;
+            int an = snprintf(argpath, sizeof(argpath), "%s/playden.args", folder);
+            if (an > 0 && (size_t)an < sizeof(argpath) &&
+                lstat(argpath, &argstat) == 0 && S_ISREG(argstat.st_mode) &&
+                argstat.st_size > 0) args_nonempty = 1;
+            const char *status = valid && args_nonempty && java ? "valid" : "invalid";
+            printf("package_validation_root=%s package=%s status=%s recipe_check=%s args_check=%s java_check=%s\n",
+                   label, name, status, reason, args_nonempty ? "nonempty" : "missing-or-empty",
+                   java ? "present" : "missing");
+        }
         ++packages;
     }
     closedir(dir);
@@ -80,7 +96,7 @@ static void scan_imports(const char *root, const char *label) {
 
 int main(void) {
     struct utsname system;
-    puts("minecraft-playden-ps5-diagnostic version=0.2 mode=read-only");
+    puts("minecraft-playden-ps5-diagnostic version=0.3 mode=read-only");
     printf("pid=%ld uid=%ld euid=%ld\n",
            (long)getpid(), (long)getuid(), (long)geteuid());
     if (uname(&system) == 0) {

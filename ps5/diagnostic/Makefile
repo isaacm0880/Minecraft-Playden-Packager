@@ -12,7 +12,7 @@ PS5_PORT ?= 9021
 .PHONY: all clean test
 all: $(ELF)
 
-$(ELF): main.c
+$(ELF): main.c recipe_check.h
 	$(CC) $(CFLAGS) -o $@ $<
 
 clean:
