@@ -7,6 +7,7 @@ import stat
 import time
 from dataclasses import dataclass, field
 import struct
+import sys
 from typing import BinaryIO
 
 from .cleanup import linked, plain_directory, snapshot
@@ -20,6 +21,35 @@ from .network_protocol import (
 )
 
 
+def _windows_handle_identity(fd: int) -> tuple[int, int, int]:
+    """Read the opened inode and timestamp without CRT fstat/path differences."""
+    import ctypes
+    from ctypes import wintypes
+    class FileIdInfo(ctypes.Structure):
+        _fields_ = [('volume', ctypes.c_ulonglong), ('identifier', ctypes.c_ubyte * 16)]
+    class BasicInfo(ctypes.Structure):
+        _fields_ = [('creation', ctypes.c_longlong), ('access', ctypes.c_longlong),
+                    ('write', ctypes.c_longlong), ('change', ctypes.c_longlong),
+                    ('attributes', wintypes.DWORD)]
+    native = getattr(__import__('msvcrt'), 'get_osfhandle')(fd)
+    kernel = getattr(ctypes, 'WinDLL')('kernel32', use_last_error=True)
+    get_info = kernel.GetFileInformationByHandleEx
+    get_info.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    get_info.restype = wintypes.BOOL
+    identity, basic = FileIdInfo(), BasicInfo()
+    if not get_info(native, 18, ctypes.byref(identity), ctypes.sizeof(identity)) or not get_info(native, 0, ctypes.byref(basic), ctypes.sizeof(basic)):
+        raise getattr(ctypes, 'WinError')(getattr(ctypes, 'get_last_error')())
+    inode = int.from_bytes(bytes(identity.identifier), 'little')
+    device = int(identity.volume)
+    # CPython 3.11 exposes the legacy 64-bit file index and 32-bit volume ID.
+    # Since 3.12 stat/lstat expose the full FileIdInfo values.
+    if sys.version_info < (3, 12):
+        inode &= (1 << 64) - 1
+        device &= (1 << 32) - 1
+    modified_ns = (int(basic.write) - 116444736000000000) * 100
+    return device, inode, modified_ns
+
+
 def _open_local_file(source: Path, relative: str, expected: tuple[int, int, int, int, int]) -> BinaryIO:
     path = source / relative
     plain_directory(path.parent)
@@ -30,7 +60,11 @@ def _open_local_file(source: Path, relative: str, expected: tuple[int, int, int,
     try:
         info = os.fstat(handle.fileno())
         actual = (info.st_mode, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
-        if not stat.S_ISREG(info.st_mode) or actual != expected:
+        if os.name == 'nt':
+            device, inode, modified = _windows_handle_identity(handle.fileno())
+            # CRT fstat also omits filename-dependent execute bits on Windows.
+            actual = (expected[0], device, inode, info.st_size, modified)
+        if not stat.S_ISREG(info.st_mode) or actual != expected or linked(path.lstat()):
             raise ValueError('Source changed before opening; package not transferred.')
         return handle
     except BaseException:
