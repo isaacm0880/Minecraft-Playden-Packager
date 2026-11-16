@@ -264,7 +264,7 @@ done:
     return ok;
 }
 
-static int count_tree(int root, unsigned depth, size_t *count) {
+static int count_tree(int root, unsigned depth, size_t *count, Wire *wire, uint64_t total) {
     if (depth > 32)
         return 0;
     DIR *dir = fdopendir(dup(root));
@@ -280,6 +280,15 @@ static int count_tree(int root, unsigned depth, size_t *count) {
             ok = 0;
             break;
         }
+        if (*count % 128 == 0) {
+            uint8_t progress[16];
+            putnum(progress, total, 8);
+            putnum(progress + 8, total, 8);
+            if (!frame_send(wire, VERIFY_PROGRESS, progress, 16)) {
+                ok = 0;
+                break;
+            }
+        }
         if (S_ISDIR(st.st_mode)) {
             int child =
                 openat(root, entry->d_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
@@ -287,7 +296,7 @@ static int count_tree(int root, unsigned depth, size_t *count) {
                 ok = 0;
                 break;
             }
-            ok = count_tree(child, depth + 1, count);
+            ok = count_tree(child, depth + 1, count, wire, total);
             close(child);
             if (!ok)
                 break;
@@ -374,6 +383,7 @@ static int verify_staging(int root, Inventory *inventory, Wire *wire, uint64_t t
         }
     }
     size_t count = 0;
-    return verified == total && count_tree(root, 0, &count) && count == inventory->count;
+    return verified == total && count_tree(root, 0, &count, wire, total) &&
+           count == inventory->count;
 }
 #endif
