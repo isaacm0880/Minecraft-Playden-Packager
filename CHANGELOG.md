@@ -1,8 +1,9 @@
 # Changelog
 
-## v0.1.0 — in preparation
+## v0.1.0 — 2026-11-16
 
-First public release candidate; no binary release is published yet.
+First public release: Windows x64 portable ZIP and Linux x86_64 AppImage.
+macOS is experimental and source-only; no prebuilt Mac application is provided.
 
 - Desktop discovery for Minecraft Launcher, Prism Launcher and MultiMC.
 - Local Vanilla/Fabric packaging with compatibility evidence, warnings and blocking.

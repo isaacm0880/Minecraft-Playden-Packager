@@ -1,4 +1,4 @@
-# Preparing v0.1.0
+# v0.1.0 release provenance and maintenance
 
 This repository builds its own candidates. Application source is the reviewed GUI
 snapshot identified in `release/source-policy.json`; its complete application
@@ -12,28 +12,25 @@ notices. Apply the description, homepage and topics in
 `release/repository.json` through repository settings. Leave visibility unchanged.
 Do not merge, tag or publish without approval.
 
-## Starting candidate builds without merging
+## Release and future candidate workflows
 
-A push to `release/v0.1.0-prep` runs **Desktop release candidate (no publishing)**.
-Only that branch has the automatic candidate trigger. The source job records the
-exact pushed public commit; every native job checks out that SHA. It does not
-check out another branch, build a pull-request merge commit or select an earlier
-revision. Candidate artifacts stay attached to the workflow run, not a release. A new
-preparation push cancels obsolete in-flight candidate jobs; previously uploaded
-artifacts and local build attempts remain intact. Tests have time limits and
-Python stack diagnostics so a stalled native GUI check cannot run indefinitely.
+v0.1.0 uses the retained Windows/Linux binaries from `70daa32`. The tag identifies
+the approved newer documentation/infrastructure commit on `main`. The original
+archives, metadata and checksums are preserved. Manual acceptance is not claimed.
 
-GitHub requires a manually dispatched workflow to exist on the default branch.
-Manual dispatch therefore remains unavailable while `main` contains only the
-placeholder README; the restricted push trigger avoids that dependency without
-merging. See [GitHub workflow dispatch documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
+Desktop candidate builds are manual-only to avoid rebuilding published binaries
+for documentation edits. The existing exact-source, test, type, privacy/audit,
+smoke and publication guards remain active when a candidate build is requested.
+Select the reviewed ref and supply its exact commit as `source_sha`. Optional
+experimental Mac builds remain opt-in, independent of the required binary pair.
 
-After an approved merge activates manual dispatch, select the intended reviewed
-branch/ref and supply its exact 40-character commit as `source_sha`. Empty,
-malformed or different manual input is rejected, never silently substituted.
-Both triggers require a clean checkout and an application matching the reviewed
-source policy. Future application updates require explicit review and a policy
-hash update. GitHub Actions must be enabled and have available runner capacity.
+`Publish verified v0.1.0 assets (no rebuild)` runs a read-only artifact preflight
+on publication-infrastructure updates to the preparation branch. Only a push of
+`v0.1.0`, pointing to the approved current `main` commit, can run its publication
+job. It stages the pinned original artifacts, creates an unpublished draft,
+uploads assets, checks GitHub's recorded SHA-256 digests and sizes for every file,
+and publishes only after all match. It never replaces an existing asset or
+changes an already-published release. An error leaves any draft unpublished.
 
 If Actions is unavailable, a candidate can be built from the same clean commit
 on a native host using its pinned Python and `release/requirements.txt`:
@@ -79,7 +76,7 @@ its privacy implications before enabling any missing-file upload. It requires
 an explicit candidate workflow run ID; no historical run is selected implicitly.
 
 Complete [platform acceptance](ACCEPTANCE.md), record the tested source commit,
-then update the release-notes draft with actual artifact names and results.
+and retain the recorded manual-testing limitations in the release notes.
 Publishing, tags, merging and visibility changes require separate approval.
 The workflows do not create releases or publish binaries automatically.
 

@@ -1,14 +1,15 @@
 # Minecraft Playden Packager
 
-[![Release status](https://img.shields.io/badge/release-v0.1.0_in_preparation-orange)](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases)
+[![Release status](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases)
 ![Platform targets](https://img.shields.io/badge/binaries-Windows%20%7C%20Linux-blue)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 
 Package your locally installed **Minecraft Java Edition** instances for use with
 **Playden on PS5**, using a desktop GUI or an offline-only CLI.
 
-**v0.1.0 is being prepared. No binary release is published yet.** Platform targets
-below describe planned downloads, not completed native acceptance testing.
+**v0.1.0 is released for Windows x64 and Linux x86_64.** macOS is experimental
+and source-only. Automated build checks passed; manual desktop, physical USB and
+PS5 acceptance testing has not been verified.
 
 ## What it does
 
@@ -46,14 +47,14 @@ Untested combinations show:
 
 ## Download and install
 
-When available, download **v0.1.0** only from this project's
-[Releases page](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases).
-No official release downloads are available yet. Workflow candidates are for review.
+Download **v0.1.0** from the [GitHub Release](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases/tag/v0.1.0).
+Verify the download using its `SHA256SUMS`. No installer or Python setup is needed
+for the Windows/Linux binaries.
 
-| Host platform | Planned download |
+| Host platform | Download |
 | --- | --- |
-| Windows x64 | Portable ZIP — extract the whole folder, then open `MinecraftPlaydenPackager.exe` |
-| Linux x86_64 | AppImage — make it executable, then run it |
+| Windows x64 | [Portable ZIP](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases/download/v0.1.0/Minecraft-Playden-Packager-v0.1.0-Windows-x64.zip) — extract the whole folder, then open `MinecraftPlaydenPackager.exe` |
+| Linux x86_64 | [AppImage](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases/download/v0.1.0/Minecraft-Playden-Packager-v0.1.0-Linux-x86_64.AppImage) — make it executable, then run it |
 | macOS | **Experimental, source-only, not yet verified** — no v0.1.0 application download |
 
 Windows/Linux candidates have passed automated build checks; manual acceptance is
@@ -117,7 +118,7 @@ python -m minecraft_playden validate ./My-Package
 ```
 
 [Source installation and CLI](docs/INSTALLATION.md#source-installation) ·
-[Changelog](CHANGELOG.md) · [Release preparation](docs/RELEASE.md)
+[Changelog](CHANGELOG.md) · [Release provenance](docs/RELEASE.md)
 
 Thanks to the Playden, Python, Qt for Python, Fabric and Prism/MultiMC projects.
 Project code is [MIT licensed](LICENSE); see [third-party notices](THIRD_PARTY.md).

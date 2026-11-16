@@ -1,10 +1,11 @@
 # Installation — v0.1.0
 
-No binary release has been published yet. Planned downloads will appear on the
-[public Releases page](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases).
-Do not treat workflow artifacts or source previews as an accepted public release.
+Download the Windows/Linux binaries and `SHA256SUMS` from the
+[v0.1.0 release](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases/tag/v0.1.0).
+They retain their original build source, `70daa32`, and are portable downloads.
+Manual desktop, physical USB and PS5 acceptance testing has not been verified.
 
-## Planned downloads
+## Release downloads
 
 | Platform | Filename |
 | --- | --- |
@@ -25,6 +26,7 @@ After download, compare its SHA-256 with the published `SHA256SUMS`. On Windows 
 - **Linux:** mark the AppImage executable (`chmod +x <file>.AppImage`) and run it.
   A graphical desktop and compatible host graphics/platform libraries are required.
   If FUSE is unavailable, AppImage extraction can be used on compatible hosts.
+
 ## Source installation
 
 Use Python 3.11+ and a graphical desktop. From a checkout of this public repository:
@@ -89,7 +91,7 @@ check is a blocker for that self-build, not a reason to bypass the builder's gat
 
 ## Playden configuration
 
-Follow [usage](USAGE.md), then add the copied package through your installed
+Follow [usage](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/v0.1.0/docs/USAGE.md), then add the copied package through your installed
 Playden's supported local-game flow and configure manually:
 
 ```text

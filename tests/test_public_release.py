@@ -48,7 +48,7 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertIn('workflow_dispatch:', workflow)
         self.assertNotIn('contents: write', workflow)
         self.assertIn("requested = candidate_source(", workflow)
-        self.assertIn("branches: [release/v0.1.0-prep]", workflow)
+        self.assertNotIn("  push:", workflow)
         self.assertEqual(workflow.count('ref: ${{ needs.source.outputs.sha }}'), 4)
         for expected in ('windows-2022', 'macos-15-intel', 'architecture: arm64',
                          'release.verify_pair', 'SHA256SUMS', 'release.public_audit',

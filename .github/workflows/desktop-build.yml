@@ -1,7 +1,5 @@
 name: Desktop release candidate (no publishing)
 on:
-  push:
-    branches: [release/v0.1.0-prep]
   workflow_dispatch:
     inputs:
       source_sha:

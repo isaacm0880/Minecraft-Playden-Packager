@@ -7,21 +7,21 @@ reviewed release fixes. Cleanup still rejects traversal, symlinks and junctions
 before normalising a source path; confirmation and checksum gates remain mandatory.
 Automated validation during preparation (Linux host, Python 3.14.8 / PySide6 6.11.3):
 
-- Complete pytest suite: 434 passed, 1 optional upstream integration skipped,
-  325 subtests passed.
+- Complete pytest suite: 447 passed, 1 optional upstream integration skipped,
+  321 subtests passed.
 - Additional GUI regression run using Qt minimal with Windows widget style:
   111 passed, 41 subtests passed. This does not simulate a native Windows system.
 - mypy Linux, Windows and macOS targets: all passed for the application and
-  release scripts (49 source files per target).
+  release scripts (50 source files per target).
 - GitHub Actions configuration: actionlint 1.7.7 passed.
 - Public source content/privacy audit passed; reviewed application hash matched.
   CLI help exposes offline commands and no experimental authentication options.
 
-No official release has been published. Check the candidate workflow run and
-draft PR for the current artifact availability and exact public source commit.
-Workflow builds and automated smoke tests do not replace platform acceptance.
+v0.1.0 publishes the retained Windows/Linux binaries from `70daa32`.
+Automated build and smoke checks do not replace the manual acceptance checks
+below, which have not been verified.
 
-Before public release, record results against the same candidate source commit:
+Outstanding manual checks: record results against the exact released binary source:
 
 - Verify the Windows x64 ZIP and Linux x86_64 AppImage from one exact source
   commit. Inspect provenance, bundled licences, content/privacy audits and actual

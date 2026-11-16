@@ -1,6 +1,7 @@
 name: Tests
 on:
   push:
+    branches: [main, release/v0.1.0-prep]
   pull_request:
   workflow_dispatch:
     inputs:
