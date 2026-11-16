@@ -1,0 +1,19 @@
+Qt for Python / PySide6, Shiboken and the Qt shared libraries: version 6.11.3.
+Copyright (C) The Qt Company Ltd. and other contributors.
+The LGPL v3 option is used for the included LGPL-available components.
+The accompanying LGPL-3.txt and GPL-3.txt contain the applicable licence texts.
+
+Qt source: https://code.qt.io/cgit/qt/ (v6.11.3 module tags).
+PySide/Shiboken source: https://code.qt.io/cgit/pyside/pyside-setup.git/ (v6.11.3).
+Qt third-party component details: https://doc.qt.io/qt-6/licenses-used-in-qt.html
+Qt for Python licensing: https://doc.qt.io/qtforpython-6/licenses.html
+
+The one-folder distribution leaves Qt libraries dynamically linked and replaceable.
+In an AppImage, extract it first; libraries reside under
+usr/lib/minecraft-playden-packager/_internal/PySide6/Qt/lib.
+On Windows they reside under _internal/PySide6 alongside the Qt plugins.
+Use the approved source revision and the published build procedure to rebuild.
+
+LGPL/GPL licence text source: SPDX license-list-data v3.27.0,
+https://github.com/spdx/license-list-data/tree/v3.27.0/text
+Native Linux dependency copyright notices are included separately when available.

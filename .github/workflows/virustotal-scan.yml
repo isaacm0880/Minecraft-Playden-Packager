@@ -1,0 +1,62 @@
+name: Manual VirusTotal artifact scan
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: 'Successful Windows/Linux desktop-build run ID'
+        required: true
+        type: string
+      mode:
+        description: 'lookup-only never uploads. upload-missing shares missing files with VirusTotal.'
+        required: true
+        default: lookup-only
+        type: choice
+        options:
+          - lookup-only
+          - upload-missing
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: virustotal-public-api
+  cancel-in-progress: false
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out trusted scanner implementation, not downloaded build code
+        id: scanner
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download and verify exact build artifacts (no VirusTotal secret)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCANNER_SOURCE_SHA: ${{ steps.scanner.outputs.commit }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          VT_WORKSPACE: ${{ runner.temp }}/virustotal-${{ github.run_id }}-${{ github.run_attempt }}
+          VT_REPORT: ${{ runner.temp }}/virustotal-report
+        run: >-
+          python3 -m release.virustotal_scan prepare
+          --run-id "$BUILD_RUN_ID" --workspace "$VT_WORKSPACE" --report-dir "$VT_REPORT"
+      - name: Manual VirusTotal lookup or explicitly opted-in submission
+        env:
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          VT_MODE: ${{ inputs.mode }}
+          VT_WORKSPACE: ${{ runner.temp }}/virustotal-${{ github.run_id }}-${{ github.run_attempt }}
+          VT_REPORT: ${{ runner.temp }}/virustotal-report
+        run: |
+          python3 -m release.virustotal_scan scan --mode "$VT_MODE" \
+            --workspace "$VT_WORKSPACE" --report-dir "$VT_REPORT"
+      - name: Upload reports only (never payload files or secrets)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: VirusTotal-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/virustotal-report/virustotal-report.json
+            ${{ runner.temp }}/virustotal-report/virustotal-report.md
+          if-no-files-found: warn
+          retention-days: 30

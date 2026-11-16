@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Minecraft Playden Packager
+Comment=Package a local vanilla Minecraft installation for Playden
+Exec=MinecraftPlaydenPackager
+Icon=minecraft-playden-packager
+Terminal=false
+Categories=Utility;Game;

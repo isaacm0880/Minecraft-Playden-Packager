@@ -1,0 +1,103 @@
+{
+  "id": "fixture",
+  "type": "release",
+  "mainClass": "net.minecraft.client.main.Main",
+  "javaVersion": {
+    "majorVersion": 25
+  },
+  "downloads": {
+    "client": {
+      "url": "https://fixture/client",
+      "size": 182,
+      "sha1": "93739f77e5b203ccf4585d72c3251f6c281c7722"
+    }
+  },
+  "assetIndex": {
+    "id": "fixture",
+    "url": "https://fixture/index"
+  },
+  "libraries": [
+    {
+      "name": "io.netty:netty-transport-native-unix-common:1",
+      "downloads": {
+        "artifact": {
+          "path": "netty/common.jar",
+          "url": "https://fixture/netty"
+        }
+      }
+    },
+    {
+      "name": "it.unimi.dsi:fastutil:8.5.18",
+      "downloads": {
+        "artifact": {
+          "path": "it/unimi/dsi/fastutil/8.5.18/fastutil-8.5.18.jar",
+          "url": "https://fixture/fastutil"
+        }
+      }
+    },
+    {
+      "name": "org.lwjgl:lwjgl:1:natives-windows",
+      "rules": [
+        {
+          "action": "allow",
+          "os": {
+            "name": "windows"
+          }
+        }
+      ],
+      "downloads": {
+        "artifact": {
+          "path": "lwjgl/native.jar",
+          "url": "https://fixture/native"
+        }
+      }
+    },
+    {
+      "name": "org.lwjgl:lwjgl:1:natives-windows-arm64",
+      "rules": [
+        {
+          "action": "allow",
+          "os": {
+            "name": "windows"
+          }
+        }
+      ],
+      "downloads": {
+        "artifact": {
+          "path": "lwjgl/arm.jar",
+          "url": "https://fixture/arm"
+        }
+      }
+    }
+  ],
+  "arguments": {
+    "jvm": [
+      "-Djava.library.path=${natives_directory}",
+      "-cp",
+      "${classpath}"
+    ],
+    "game": [
+      "--username",
+      "${auth_player_name}",
+      "--gameDir",
+      "${game_directory}",
+      "--assetsDir",
+      "${assets_root}",
+      "--assetIndex",
+      "${assets_index_name}",
+      "--accessToken",
+      "${auth_access_token}",
+      {
+        "rules": [
+          {
+            "action": "allow",
+            "features": {
+              "is_demo_user": true
+            }
+          }
+        ],
+        "value": "--demo"
+      }
+    ]
+  }
+}

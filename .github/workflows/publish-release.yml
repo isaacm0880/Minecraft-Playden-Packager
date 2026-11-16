@@ -1,0 +1,47 @@
+name: Publish verified v0.1.0 assets (no rebuild)
+on:
+  push:
+    branches: [release/v0.1.0-prep]
+    tags: [v0.1.0]
+    paths:
+      - '.github/workflows/publish-release.yml'
+      - 'release/publish_release.py'
+      - 'tests/test_publish_release.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: publish-v0.1.0
+  cancel-in-progress: false
+jobs:
+  preflight:
+    if: github.ref == 'refs/heads/release/v0.1.0-prep'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify original downloadable artifacts without changing GitHub state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -m release.publish_release
+  publish:
+    if: github.ref == 'refs/tags/v0.1.0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Upload original assets, verify server digests, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVED_COMMIT: ${{ github.sha }}
+        run: python3 -m release.publish_release --publish --approved-commit "$APPROVED_COMMIT"
