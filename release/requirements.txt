@@ -3,7 +3,7 @@ PyInstaller==6.22.3
 pyinstaller-hooks-contrib==2026.10
 PySide6==6.11.3
 certifi==2026.10.23
-setuptools==80.9.0
+setuptools==84.2.1
 pytest==9.2.0
 mypy==2.4.1
 pip==26.3
