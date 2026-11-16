@@ -22,6 +22,7 @@ Minecraft-Playden-Packages/
 *.AppImage
 *.exe
 *.dmg
+/ps5/**/*.elf
 
 # Credentials, account data, worlds and local configuration
 .env

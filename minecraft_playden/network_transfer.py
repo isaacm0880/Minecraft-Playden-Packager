@@ -5,14 +5,15 @@ from pathlib import Path
 import socket
 import stat
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import struct
 
 from .cleanup import linked, plain_directory, snapshot
 from .operations import CancellationToken
 from .progress import Progress, ProgressCallback
 from .validator import validate
 from .network_protocol import (
-    ACK, BEGIN, BEGIN_INFO, COMMIT, DATA, END_FILE, ENTRY, ENTRY_INFO,
+    ACK, BEGIN, BEGIN_INFO, COMMIT, DATA, END_FILE, ENTRY, ENTRY_INFO, VERIFY, VERIFY_PROGRESS,
     MAX_ENTRIES, MAX_FILE, MAX_FRAME, MAX_TOTAL, PORT, ROOTS,
     NetworkTransferError, Session, lan_address, pairing_key, safe_relative,
 )
@@ -30,7 +31,7 @@ class NetworkResult:
 class NetworkRequest:
     source: Path
     host: str
-    pairing_token: str
+    pairing_token: str = field(repr=False)
     destination: str = 'internal'
     port: int = PORT
     package_name: str | None = None
@@ -126,6 +127,18 @@ class NetworkRequest:
                 if snapshot(source) != before:
                     raise ValueError('Package changed during upload; package not committed.')
                 token.check()
+                session.send(VERIFY)
+                while True:
+                    kind, body = session.receive()
+                    if kind == ACK and body == b'verified':
+                        break
+                    if kind != VERIFY_PROGRESS or len(body) != 16:
+                        raise NetworkTransferError('Invalid receiver verification response.')
+                    verified, expected_total = struct.unpack('!QQ', body)
+                    if expected_total != total or verified > total:
+                        raise NetworkTransferError('Invalid receiver verification progress.')
+                    report('network-verify', 'PS5 is verifying staged file hashes…', verified, total)
+                token.check()
                 report('network-commit', 'PS5 is verifying and publishing the package…', copied, total)
                 session.send(COMMIT)
                 committed = True
@@ -142,3 +155,16 @@ class NetworkRequest:
             state = ('Publication receipt was lost; check the PS5 import folder before retrying under a new name.'
                      if committed else 'Transfer not confirmed; local output retained. Check the receiver, pairing token and LAN.')
             raise NetworkTransferError(f'{state} {exc}') from exc
+
+
+def run_network_queue(requests: tuple[NetworkRequest, ...], progress: ProgressCallback,
+                      cancellation: CancellationToken) -> tuple[NetworkResult, ...]:
+    results = []
+    for request in requests:
+        cancellation.check()
+        try:
+            results.append(request.run(progress, cancellation))
+        except (OSError, ValueError) as exc:
+            raise NetworkTransferError(f'{len(results)}/{len(requests)} packages confirmed on PS5. '
+                                       f'Queue stopped at {request.source.name}; local outputs retained. {exc}') from exc
+    return tuple(results)

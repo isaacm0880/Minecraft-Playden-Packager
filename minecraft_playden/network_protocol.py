@@ -17,8 +17,8 @@ MAGIC = b'PDLAN1\r\n'
 HEADER = struct.Struct('!BIQ')
 BEGIN_INFO = struct.Struct('!BHIQ')
 ENTRY_INFO = struct.Struct('!BHQ')
-BEGIN, ENTRY, DATA, END_FILE, COMMIT = range(1, 6)
-ACK, ERROR = 128, 129
+BEGIN, ENTRY, DATA, END_FILE, VERIFY, COMMIT = range(1, 7)
+ACK, ERROR, VERIFY_PROGRESS = 128, 129, 130
 MAX_FRAME = 65536
 MAX_ENTRIES = 100000
 MAX_FILE = 64 * 1024**3
@@ -55,6 +55,8 @@ def safe_relative(name: str, *, package: bool = False) -> bytes:
     if not encoded or len(encoded) > (120 if package else MAX_PATH):
         raise ValueError('Package name or path exceeds the transfer limit.')
     parts = name.split('/')
+    if len(parts) > 32:
+        raise ValueError('Package paths may have at most 32 components.')
     if package and (len(parts) != 1 or name.startswith('.')):
         raise ValueError('Choose a plain package name, without a path or leading dot.')
     for part in parts:
@@ -75,6 +77,8 @@ class Session:
         self.key = b''
         self.sent = self.received = 0
         stream.settimeout(.2)
+        if stream.family in (socket.AF_INET, socket.AF_INET6):
+            stream.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
     def read(self, size: int) -> bytes:
         result = bytearray()
@@ -87,6 +91,8 @@ class Session:
                 block = self.stream.recv(size - len(result))
             except socket.timeout:
                 continue
+            except OSError as exc:
+                raise NetworkTransferError('PS5 disconnected or rejected the transfer.') from exc
             if not block:
                 raise NetworkTransferError('PS5 disconnected. No completion receipt; local files were retained.')
             result.extend(block)
@@ -103,6 +109,8 @@ class Session:
                 count = self.stream.send(pending)
             except socket.timeout:
                 continue
+            except OSError as exc:
+                raise NetworkTransferError('PS5 connection failed while sending.') from exc
             if count <= 0:
                 raise NetworkTransferError('PS5 connection closed during upload.')
             pending = pending[count:]

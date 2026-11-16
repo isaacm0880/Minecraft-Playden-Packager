@@ -23,3 +23,11 @@ No blanket licence for redistributed Minecraft packages is granted by this proje
 The test suite includes a tiny synthetic client JAR with dummy bytes, public metadata
 snapshots and synthetic payloads generated during tests. It contains no playable
 Minecraft client. Fixture provenance is described under `tests/fixtures/`.
+
+## PS5 receiver SHA-256
+
+The receiver includes Alain Mosnier’s SHA-256 implementation from
+[amosnier/sha-2](https://github.com/amosnier/sha-2), pinned to commit
+`565f65009bdd98267361b17d50cddd7c9beb3e6c`, under the 0BSD licence.
+The unmodified source and licence are in `ps5/receiver/vendor/`.
+The PS5 Payload SDK remains an external build dependency.

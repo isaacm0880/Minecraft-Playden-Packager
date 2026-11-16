@@ -41,14 +41,18 @@ command except DATA, or ERROR (129) containing a bounded UTF-8 error, then close
 3. For files only: DATA (3) frames, then END_FILE (4), empty payload. ACK only
    after declared size, SHA-256 and file flush succeed. Zero-length files still
    require END_FILE. No symlink or special-file entry type exists.
-4. COMMIT (5), empty payload, after exactly the declared entries and total bytes.
-   Receiver checks recipe structure, required runtime/argument files and all
-   immutable inventory hashes before publication. ACK contains the exact final
-   absolute import path. It is the only success receipt.
+4. VERIFY (5), empty payload, after exactly the declared entries and total bytes.
+   Receiver re-reads and hashes every staged file, rejects links and extra entries,
+   and checks the recipe, required runtime/argument files and immutable inventory.
+   VERIFY_PROGRESS (130) replies contain verified_bytes:u64, total_bytes:u64.
+   ACK `verified` means staging passed; it does not publish. Cancellation remains
+   available throughout this phase. After VERIFY only COMMIT is accepted.
+5. COMMIT (6), empty payload. ACK contains the exact final absolute import path.
+   It is the only publication success receipt.
 
 Limits: 100000 entries, 768 UTF-8 bytes per relative path, 120 bytes per package
 name, 64 GiB per file, 256 GiB total; 16 KiB recipes and 16 MiB inventories.
-Paths must have no empty/dot/traversal components, NUL/control bytes, backslashes,
+Paths have at most 32 components and must have no empty/dot/traversal components, NUL/control bytes, backslashes,
 Windows drive/ADS separators, reserved names or trailing dots/spaces. Case-folded
 ASCII collisions and duplicate entries are rejected. Hidden package names are
 rejected. Directory and file opens use descriptor-relative no-follow operations.

@@ -1,0 +1,528 @@
+/* Authenticated import-only receiver. Never reads/writes Playden managed games. */
+#define _GNU_SOURCE
+#include <arpa/inet.h>
+#include <ctype.h>
+#include <errno.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/statvfs.h>
+#include <sys/time.h>
+#include <time.h>
+#include <unistd.h>
+#ifdef PS5_RECEIVER
+#include <sys/mount.h>
+#include <sys/param.h>
+#endif
+#include "package.h"
+#include "paths.h"
+#include "wire.h"
+
+static volatile sig_atomic_t stopping;
+static const char *roots[] = {"/data/playden-import", "/mnt/usb0/playden/import"};
+#ifdef HOST_TEST
+static char test_root[1024];
+static uint64_t test_free = UINT64_MAX;
+#endif
+static void stop_receiver(int sig) {
+    (void)sig;
+    stopping = 1;
+}
+static int private_ip(uint32_t ip) {
+    ip = ntohl(ip);
+    return (ip >> 24) == 10 || (ip >> 20) == 0xac1 || (ip >> 16) == 0xc0a8 || (ip >> 24) == 127;
+}
+static int choose_address(char out[INET_ADDRSTRLEN]) {
+    struct ifaddrs *all = NULL;
+    if (getifaddrs(&all) < 0)
+        return 0;
+    int ok = 0;
+    for (struct ifaddrs *i = all; i; i = i->ifa_next) {
+        if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET)
+            continue;
+        struct sockaddr_in *address = (struct sockaddr_in *)i->ifa_addr;
+        if (private_ip(address->sin_addr.s_addr) &&
+            (ntohl(address->sin_addr.s_addr) >> 24) != 127) {
+            if (inet_ntop(AF_INET, &address->sin_addr, out, INET_ADDRSTRLEN)) {
+                ok = 1;
+                break;
+            }
+        }
+    }
+    freeifaddrs(all);
+    return ok;
+}
+static void hex(const uint8_t *bytes, size_t n, char *out) {
+    const char *digits = "0123456789abcdef";
+    for (size_t i = 0; i < n; i++) {
+        out[i * 2] = digits[bytes[i] >> 4];
+        out[i * 2 + 1] = digits[bytes[i] & 15];
+    }
+    out[n * 2] = 0;
+}
+static void show_pairing(const char *address, unsigned port, const char *token) {
+    printf("PDLAN/1 address=%s port=%u token=%s\n", address, port, token);
+#ifdef PS5_RECEIVER
+    /* Same ABI used by upstream ps5-payload-dev/elfldr's notification helper. */
+    typedef struct {
+        char reserved[45];
+        char message[3075];
+    } Notification;
+    extern int sceKernelSendNotificationRequest(int, Notification *, size_t, int);
+    Notification request;
+    memset(&request, 0, sizeof(request));
+    snprintf(request.message, sizeof(request.message),
+             "Playden LAN receiver %s:%u\nPairing token:\n%s", address, port, token);
+    sceKernelSendNotificationRequest(0, &request, sizeof(request), 0);
+#endif
+}
+static int handshake(Wire *w, const uint8_t key[32]) {
+    uint8_t greeting[40], reply[64], expected[32], proof[32];
+    memcpy(greeting, MAGIC, 8);
+    arc4random_buf(greeting + 8, 32);
+    if (!io_all(w->fd, greeting, 40, 1) || !io_all(w->fd, reply, 64, 0))
+        return 0;
+    mac(key, "client", 6, greeting + 8, 32, reply, 32, expected);
+    if (!same(reply + 32, expected, 32))
+        return 0;
+    mac(key, "server", 6, greeting + 8, 32, reply, 32, proof);
+    if (!io_all(w->fd, proof, 32, 1))
+        return 0;
+    mac(key, "session", 7, greeting + 8, 32, reply, 32, w->key);
+    return 1;
+}
+static int destination_root(int destination, char path[2048]) {
+#ifdef HOST_TEST
+    if (test_root[0]) {
+        snprintf(path, 2048, "%s/%s", test_root, destination ? "usb0/playden/import" : "internal");
+        if (destination) {
+            char usb[1200];
+            snprintf(usb, sizeof(usb), "%s/usb0", test_root);
+            int fd = open_absolute(usb, 0);
+            if (fd < 0)
+                return -1;
+            close(fd);
+        }
+        return open_absolute(path, 1);
+    }
+#endif
+    strcpy(path, roots[destination]);
+    /* Only create the leaf internal import root, never /data or a USB mount. */
+    if (!destination) {
+        int data = open_absolute("/data", 0);
+        if (data < 0)
+            return -1;
+        int fd = open_dirs(data, "playden-import", 1);
+        close(data);
+        return fd;
+    }
+    int usb = open_absolute("/mnt/usb0", 0);
+    if (usb < 0)
+        return -1;
+#ifdef PS5_RECEIVER
+    struct statfs fs;
+    if (fstatfs(usb, &fs) < 0 || strcmp(fs.f_mntonname, "/mnt/usb0")) {
+        close(usb);
+        errno = ENODEV;
+        return -1;
+    }
+#endif
+    int fd = open_dirs(usb, "playden/import", 1);
+    close(usb);
+    return fd;
+}
+static int enough_space(int fd, uint64_t bytes, uint32_t entries) {
+    struct statvfs fs;
+    if (fstatvfs(fd, &fs) < 0)
+        return 0;
+    uint64_t unit = fs.f_frsize ? fs.f_frsize : fs.f_bsize;
+    if (unit < 4096)
+        unit = 4096;
+    uint64_t required = bytes + unit * ((uint64_t)entries + 8) + 16 * 1024 * 1024;
+    uint64_t free_bytes = fs.f_bavail > UINT64_MAX / unit ? UINT64_MAX : fs.f_bavail * unit;
+#ifdef HOST_TEST
+    if (test_free != UINT64_MAX)
+        free_bytes = test_free;
+#endif
+    return free_bytes >= required;
+}
+static int sync_dir(int fd) {
+    if (fsync(fd) == 0)
+        return 1;
+    /* Some USB filesystems cannot fsync directories. File flushes still must
+       succeed; atomic rename controls visibility. Physical durability needs
+       on-console verification for each firmware/filesystem combination. */
+    return errno == EINVAL || errno == EOPNOTSUPP;
+}
+static int write_all(int fd, const uint8_t *data, size_t n) {
+    while (n) {
+        ssize_t got = write(fd, data, n);
+        if (got < 0 && errno == EINTR)
+            continue;
+        if (got <= 0)
+            return 0;
+        data += got;
+        n -= (size_t)got;
+    }
+    return 1;
+}
+static int publish(int root, int stage, const char *name, const char *absolute_root) {
+    int fresh = open_absolute(absolute_root, 0);
+    struct stat held, current;
+    int same_root = fresh >= 0 && fstat(root, &held) == 0 && fstat(fresh, &current) == 0 &&
+                    held.st_dev == current.st_dev && held.st_ino == current.st_ino;
+    if (fresh >= 0)
+        close(fresh);
+    if (!same_root) {
+        errno = ENODEV;
+        return 0;
+    }
+    if (mkdirat(root, name, 0700) < 0)
+        return 0;
+    int reservation = openat(root, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (reservation < 0)
+        return 0;
+    int ok = sync_dir(stage) && same_inode(reservation, root, name) &&
+             renameat(stage, "package", root, name) == 0;
+    if (!ok && same_inode(reservation, root, name))
+        unlinkat(root, name, AT_REMOVEDIR);
+    close(reservation);
+    return ok && sync_dir(root);
+}
+
+static void connection(int client, const uint8_t key[32]) {
+    Wire wire = {.fd = client, .sent = 0, .received = 0};
+    if (!handshake(&wire, key)) {
+        sleep(1);
+        return;
+    }
+    uint8_t *body = malloc(FRAME_MAX);
+    int root = -1, stage = -1, package = -1, file = -1;
+    Inventory inventory = {0};
+    char stage_name[64] = {0}, package_name[121] = {0}, root_path[2048] = {0};
+    char package_path[2300];
+    const char *error = "Malformed or out-of-order transfer command.";
+    uint64_t total = 0, planned = 0, completed = 0, remaining = 0;
+    uint32_t expected_entries = 0;
+    int destination = 0, verified = 0;
+    struct Sha_256 file_hash;
+    uint8_t actual_hash[32];
+    Item *active = NULL;
+    size_t length;
+    uint8_t type;
+    if (!body) {
+        error = "Receiver out of memory.";
+        goto fail;
+    }
+    if (!frame_read(&wire, &type, body, &length) || type != BEGIN || length < 15)
+        goto fail;
+    destination = body[0];
+    size_t name_length = (size_t)getnum(body + 1, 2);
+    expected_entries = (uint32_t)getnum(body + 3, 4);
+    total = getnum(body + 7, 8);
+    if (destination > 1 || length != 15 + name_length ||
+        !safe_path((char *)body + 15, name_length, 1) || !expected_entries ||
+        expected_entries > ENTRY_MAX || total > TOTAL_MAX_BYTES)
+        goto fail;
+    memcpy(package_name, body + 15, name_length);
+    package_name[name_length] = 0;
+    root = destination_root(destination, root_path);
+    if (root < 0) {
+        error = destination ? "USB0 is unavailable or unsafe; no internal fallback."
+                            : "Internal import directory is unavailable or unsafe.";
+        goto fail;
+    }
+    struct stat existing;
+    if (fstatat(root, package_name, &existing, AT_SYMLINK_NOFOLLOW) == 0 || errno != ENOENT) {
+        error = "Package name already exists. Choose a new name; overwrite is disabled.";
+        goto fail;
+    }
+    if (!enough_space(root, total, expected_entries)) {
+        error = "Insufficient storage for the complete package and staging overhead.";
+        goto fail;
+    }
+    uint8_t random[16];
+    char random_hex[33];
+    arc4random_buf(random, 16);
+    hex(random, 16, random_hex);
+    snprintf(stage_name, sizeof(stage_name), ".pdlan-%s", random_hex);
+    if (mkdirat(root, stage_name, 0700) < 0 ||
+        (stage = openat(root, stage_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0 ||
+        mkdirat(stage, "package", 0700) < 0 ||
+        (package = openat(stage, "package", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0) {
+        error = "Cannot create a private import stage. Check storage and permissions.";
+        goto fail;
+    }
+    snprintf(package_path, sizeof(package_path), "%s/%s/package", root_path, stage_name);
+    inventory.capacity = 1;
+    while (inventory.capacity < (size_t)expected_entries * 2)
+        inventory.capacity *= 2;
+    inventory.items = calloc(expected_entries, sizeof(Item));
+    inventory.slots = calloc(inventory.capacity, sizeof(uint32_t));
+    if (!inventory.items || !inventory.slots) {
+        error = "Receiver out of memory.";
+        goto fail;
+    }
+    if (!frame_send(&wire, ACK, "ready", 5))
+        goto cleanup;
+    while (!stopping && frame_read(&wire, &type, body, &length)) {
+        if (verified && type != COMMIT)
+            goto fail;
+        if (type == ENTRY) {
+            if (file >= 0 || inventory.count >= expected_entries || length < 43)
+                goto fail;
+            int kind = body[0];
+            size_t path_length = (size_t)getnum(body + 1, 2);
+            uint64_t size = getnum(body + 3, 8);
+            if (kind > 1 || length != 43 + path_length ||
+                !safe_path((char *)body + 43, path_length, 0) || size > FILE_MAX_BYTES ||
+                size > total - planned ||
+                (!kind && (size || !same(body + 11, (const uint8_t[32]){0}, 32))))
+                goto fail;
+            char path[PATH_MAX_WIRE + 1];
+            memcpy(path, body + 43, path_length);
+            path[path_length] = 0;
+            if (lookup(&inventory, path, 1)) {
+                error = "Duplicate or case-colliding package path.";
+                goto fail;
+            }
+            Item *item = &inventory.items[inventory.count];
+            item->path = strdup(path);
+            item->kind = kind;
+            item->size = size;
+            memcpy(item->hash, body + 11, 32);
+            if (!item->path) {
+                error = "Receiver out of memory.";
+                goto fail;
+            }
+            ++inventory.count;
+            planned += size;
+            char leaf[256];
+            int parent = parent_fd(package, path, leaf);
+            if (parent < 0) {
+                error = "Entry parent is missing, linked or unsafe.";
+                goto fail;
+            }
+            if (kind) {
+                file = openat(parent, leaf, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                              0600);
+                close(parent);
+                if (file < 0) {
+                    error = "Cannot create package file; path exists or storage is unavailable.";
+                    goto fail;
+                }
+                active = item;
+                remaining = size;
+                sha_256_init(&file_hash, actual_hash);
+            } else {
+                int result = mkdirat(parent, leaf, 0700);
+                close(parent);
+                if (result < 0) {
+                    error =
+                        "Cannot create package directory; path exists or storage is unavailable.";
+                    goto fail;
+                }
+            }
+            if (!frame_send(&wire, ACK, "entry", 5))
+                goto cleanup;
+        } else if (type == DATA) {
+            if (file < 0 || !length || length > remaining)
+                goto fail;
+            if (!write_all(file, body, length)) {
+                error = errno == ENOSPC ? "Insufficient storage while writing package."
+                                        : "Package write failed; staging discarded.";
+                goto fail;
+            }
+            sha_256_write(&file_hash, body, length);
+            remaining -= length;
+        } else if (type == END_FILE) {
+            if (file < 0 || length || remaining)
+                goto fail;
+            sha_256_close(&file_hash);
+            if (!same(actual_hash, active->hash, 32)) {
+                error = "File SHA-256 mismatch; staging discarded.";
+                goto fail;
+            }
+            if (fsync(file) < 0) {
+                error = "File flush failed; package was not published.";
+                goto fail;
+            }
+            if (close(file) < 0) {
+                file = -1;
+                error = "File close failed; package was not published.";
+                goto fail;
+            }
+            file = -1;
+            completed += active->size;
+            active = NULL;
+            if (!frame_send(&wire, ACK, "stored", 6))
+                goto cleanup;
+        } else if (type == VERIFY) {
+            if (file >= 0 || length || inventory.count != expected_entries || completed != total)
+                goto fail;
+            if (!verify_staging(package, &inventory, &wire, total) ||
+                !strict_recipe(package, package_path) || !inventory_hashes(package, &inventory)) {
+                error = "Invalid recipe, required package structure or immutable inventory.";
+                goto fail;
+            }
+            verified = 1;
+            if (!frame_send(&wire, ACK, "verified", 8))
+                goto cleanup;
+        } else if (type == COMMIT) {
+            if (!verified || file >= 0 || length)
+                goto fail;
+            if (!sync_dir(package) || !publish(root, stage, package_name, root_path)) {
+                error = "Publication failed or its durability is uncertain; inspect the import "
+                        "folder before retrying.";
+                goto fail;
+            }
+            char receipt[256];
+            snprintf(receipt, sizeof(receipt), "%s/%s", roots[destination], package_name);
+            frame_send(&wire, ACK, receipt, strlen(receipt));
+            goto cleanup;
+        } else
+            goto fail;
+    }
+    goto cleanup;
+fail:
+    frame_send(&wire, ERROR_REPLY, error, strlen(error));
+cleanup:
+    if (file >= 0)
+        close(file);
+    if (package >= 0)
+        close(package);
+    if (stage >= 0) {
+        if (root >= 0 && same_inode(stage, root, stage_name)) {
+            remove_contents(stage);
+            unlinkat(root, stage_name, AT_REMOVEDIR);
+        }
+        close(stage);
+    }
+    if (root >= 0)
+        close(root);
+    if (inventory.items)
+        for (size_t i = 0; i < inventory.count; i++)
+            free(inventory.items[i].path);
+    free(inventory.items);
+    free(inventory.slots);
+    free(body);
+    memset(wire.key, 0, sizeof(wire.key));
+}
+
+int main(int argc, char **argv) {
+    char bind_address[INET_ADDRSTRLEN] = {0};
+    unsigned port = 9025;
+    int once = 0;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--bind") && i + 1 < argc) {
+            if (strlen(argv[++i]) >= sizeof(bind_address))
+                return 2;
+            strcpy(bind_address, argv[i]);
+        } else if (!strcmp(argv[i], "--port") && i + 1 < argc) {
+            char *end;
+            unsigned long value = strtoul(argv[++i], &end, 10);
+            if (*end || value > 65535)
+                return 2;
+            port = (unsigned)value;
+        }
+#ifdef HOST_TEST
+        else if (!strcmp(argv[i], "--test-root") && i + 1 < argc) {
+            if (strlen(argv[++i]) >= sizeof(test_root))
+                return 2;
+            strcpy(test_root, argv[i]);
+        } else if (!strcmp(argv[i], "--test-free-bytes") && i + 1 < argc) {
+            char *end;
+            test_free = strtoull(argv[++i], &end, 10);
+            if (*end)
+                return 2;
+        } else if (!strcmp(argv[i], "--once"))
+            once = 1;
+#endif
+        else {
+            fprintf(stderr, "Invalid receiver option.\n");
+            return 2;
+        }
+    }
+#ifdef HOST_TEST
+    if (!test_root[0]) {
+        fprintf(stderr, "Host tests require --test-root.\n");
+        return 2;
+    }
+#endif
+    if (!bind_address[0] && !choose_address(bind_address)) {
+        fprintf(stderr, "No private LAN interface; receiver not started.\n");
+        return 1;
+    }
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons((uint16_t)port);
+    if (inet_pton(AF_INET, bind_address, &address.sin_addr) != 1 ||
+        !private_ip(address.sin_addr.s_addr)) {
+        fprintf(stderr,
+                "Bind to a private LAN IPv4 address; wildcard/public binds are disabled.\n");
+        return 2;
+    }
+    signal(SIGPIPE, SIG_IGN);
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = stop_receiver;
+    sigaction(SIGTERM, &action, NULL);
+    sigaction(SIGINT, &action, NULL);
+    umask(0077);
+    setbuf(stdout, NULL);
+    int listener = socket(AF_INET, SOCK_STREAM, 0);
+    if (listener < 0)
+        return 1;
+    int yes = 1;
+    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    if (bind(listener, (struct sockaddr *)&address, sizeof(address)) < 0 ||
+        listen(listener, 2) < 0) {
+        perror("receiver bind/listen");
+        close(listener);
+        return 1;
+    }
+    socklen_t size = sizeof(address);
+    getsockname(listener, (struct sockaddr *)&address, &size);
+    uint8_t key[32];
+    char token[65];
+    arc4random_buf(key, 32);
+    hex(key, 32, token);
+    show_pairing(bind_address, ntohs(address.sin_port), token);
+    memset(token, 0, sizeof(token));
+    time_t expiry = time(NULL) + 3600;
+    while (!stopping && time(NULL) < expiry) {
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(listener, &readfds);
+        struct timeval wait = {1, 0};
+        int ready = select(listener + 1, &readfds, NULL, NULL, &wait);
+        if (ready < 0 && errno != EINTR)
+            break;
+        if (ready <= 0)
+            continue;
+        struct sockaddr_in peer;
+        socklen_t peer_size = sizeof(peer);
+        int client = accept(listener, (struct sockaddr *)&peer, &peer_size);
+        if (client < 0)
+            continue;
+        setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
+        struct timeval timeout = {15, 0};
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+        if (private_ip(peer.sin_addr.s_addr))
+            connection(client, key);
+        close(client);
+        if (once)
+            break;
+    }
+    close(listener);
+    memset(key, 0, sizeof(key));
+    return 0;
+}
