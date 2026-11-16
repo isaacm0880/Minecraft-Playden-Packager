@@ -321,6 +321,20 @@ class ReleaseGuiTests(unittest.TestCase):
         stack.enter_context(patch('minecraft_playden.volumes._mounted_identity', return_value=identity))
         stack.enter_context(patch('minecraft_playden.transfer.flush_volume', side_effect=lambda drive: drive.check()))
         stack.enter_context(patch('minecraft_playden.transfer.allocation_unit', return_value=4096))
+        from minecraft_playden.transfer import flush_file, replace_private
+        metrics = {}
+        def timed(name, function):
+            def call(*args, **kwargs):
+                begin = time.monotonic()
+                try:
+                    return function(*args, **kwargs)
+                finally:
+                    count, elapsed = metrics.get(name, (0, 0))
+                    metrics[name] = (count + 1, elapsed + time.monotonic() - begin)
+            return call
+        stack.enter_context(patch('minecraft_playden.transfer.flush_file', side_effect=timed('flush_file', flush_file)))
+        stack.enter_context(patch('minecraft_playden.transfer.replace_private', side_effect=timed('replace_private', replace_private)))
+        stack.callback(lambda: print('USB DURABILITY TIMINGS', metrics, flush=True))
         return stack, DriveTarget.capture(root)
 
     def test_real_verified_usb_cleanup_opt_in_confirmation_and_skipped_verification(self):
