@@ -264,6 +264,19 @@ done:
     return ok;
 }
 
+/* Both hash readback and the namespace walk use the identical !QQ payload.
+   The namespace heartbeat reports total/total only after all file hashes pass. */
+static int verification_progress(Wire *wire, uint64_t verified, uint64_t total) {
+    if (verified > total) {
+        errno = EOVERFLOW;
+        return 0;
+    }
+    uint8_t progress[16];
+    putnum(progress, verified, 8);
+    putnum(progress + 8, total, 8);
+    return frame_send(wire, VERIFY_PROGRESS, progress, sizeof(progress));
+}
+
 static int count_tree(int root, unsigned depth, size_t *count, Wire *wire, uint64_t total) {
     if (depth > 32)
         return 0;
@@ -288,10 +301,7 @@ static int count_tree(int root, unsigned depth, size_t *count, Wire *wire, uint6
             break;
         }
         if (*count % 128 == 0) {
-            uint8_t progress[16];
-            putnum(progress, total, 8);
-            putnum(progress + 8, total, 8);
-            if (!frame_send(wire, VERIFY_PROGRESS, progress, 16)) {
+            if (!verification_progress(wire, total, total)) {
                 ok = 0;
                 break;
             }
@@ -318,7 +328,7 @@ static int count_tree(int root, unsigned depth, size_t *count, Wire *wire, uint6
 
 /* Verify bytes read back from staging, not merely the incoming network stream. */
 static int verify_staging(int root, Inventory *inventory, Wire *wire, uint64_t total) {
-    uint8_t block[65536], digest[32], progress[16];
+    uint8_t block[65536], digest[32];
     uint64_t verified = 0, last_report = 0;
     for (size_t i = 0; i < inventory->count; i++) {
         Item *item = &inventory->items[i];
@@ -364,14 +374,17 @@ static int verify_staging(int root, Inventory *inventory, Wire *wire, uint64_t t
                     close(fd);
                     return 0;
                 }
+                if (verified > total || (uint64_t)n > total - verified) {
+                    close(fd);
+                    errno = EOVERFLOW;
+                    return 0;
+                }
                 verified += (uint64_t)n;
                 started = metric_clock();
                 sha_256_write(&hash, block, (size_t)n);
                 metric_add(&metrics.verify_hash_s, started);
                 if (verified - last_report >= 1024 * 1024) {
-                    putnum(progress, verified, 8);
-                    putnum(progress + 8, total, 8);
-                    if (!frame_send(wire, VERIFY_PROGRESS, progress, 16)) {
+                    if (!verification_progress(wire, verified, total)) {
                         close(fd);
                         return 0;
                     }
@@ -386,9 +399,7 @@ static int verify_staging(int root, Inventory *inventory, Wire *wire, uint64_t t
         }
         close(fd);
         if (i % 128 == 0) {
-            putnum(progress, verified, 8);
-            putnum(progress + 8, total, 8);
-            if (!frame_send(wire, VERIFY_PROGRESS, progress, 16))
+            if (!verification_progress(wire, verified, total))
                 return 0;
             last_report = verified;
         }

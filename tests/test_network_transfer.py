@@ -282,3 +282,39 @@ def test_socket_buffer_option_failure_is_reported_and_keeps_os_defaults():
     configure_socket(stream, 524288, metrics)
     assert metrics.values['socket_buffer_errors'] == 2
     assert metrics.values['socket_receive_effective'] == 16384
+
+
+@pytest.mark.parametrize('fault', ['wrong-total', 'over-total', 'backwards', 'bad-length'])
+def test_invalid_verification_progress_reports_counters_and_never_commits(receiver, built_package, fault):
+    import struct
+    from minecraft_playden.network_protocol import VERIFY_PROGRESS
+    original_receive = Session.receive
+    total = sum(p.stat().st_size for p in built_package.rglob('*') if p.is_file())
+    injected = False
+    def receive(session):
+        nonlocal injected
+        kind, body = original_receive(session)
+        if kind == VERIFY_PROGRESS and not injected:
+            injected = True
+            if fault == 'bad-length':
+                return kind, b'invalid'
+            if fault == 'wrong-total':
+                return kind, struct.pack('!QQ', 1, total + 1)
+            if fault == 'over-total':
+                return kind, struct.pack('!QQ', total + 1, total)
+            return kind, struct.pack('!QQ', 1, total)
+        if fault == 'backwards' and kind == ACK and body == b'verified':
+            return VERIFY_PROGRESS, struct.pack('!QQ', 0, total)
+        return kind, body
+    before = snapshot(built_package)
+    with receiver('--diagnostics') as (sandbox, port, token):
+        with patch.object(Session, 'receive', receive), pytest.raises(NetworkTransferError) as failure:
+            NetworkRequest(built_package, '127.0.0.1', token, port=port).run()
+        if fault != 'bad-length':
+            assert 'receiver_total=' in str(failure.value)
+            assert f'sender_total={total}' in str(failure.value)
+            assert 'previous_verified=' in str(failure.value)
+        assert token not in str(failure.value)
+        wait_clean(sandbox)
+        assert not (sandbox / 'internal' / built_package.name).exists()
+    assert snapshot(built_package) == before

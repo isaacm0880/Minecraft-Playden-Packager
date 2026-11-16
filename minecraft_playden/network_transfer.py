@@ -225,6 +225,7 @@ class NetworkRequest:
                 report('network-verify', 'PS5 is verifying staged file hashes…', 0, total)
                 verify_started = metrics.tick()
                 session.send(VERIFY)
+                last_verified = 0
                 while True:
                     kind, body = session.receive()
                     if kind == ACK and body == b'verified':
@@ -232,8 +233,12 @@ class NetworkRequest:
                     if kind != VERIFY_PROGRESS or len(body) != 16:
                         raise NetworkTransferError('Invalid receiver verification response.')
                     verified, expected_total = struct.unpack('!QQ', body)
-                    if expected_total != total or verified > total:
-                        raise NetworkTransferError('Invalid receiver verification progress.')
+                    if expected_total != total or not last_verified <= verified <= total:
+                        raise NetworkTransferError(
+                            f'Invalid receiver verification progress: verified={verified}, '
+                            f'receiver_total={expected_total}, sender_total={total}, '
+                            f'previous_verified={last_verified}. Package not committed; local output retained.')
+                    last_verified = verified
                     report('network-verify', 'PS5 is verifying staged file hashes…', verified, total)
                 metrics.elapsed('verification_s', verify_started)
                 token.check()

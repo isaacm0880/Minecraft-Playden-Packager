@@ -14,14 +14,7 @@ static inline long receiver_syscall_result(long value, int failed) {
     return value;
 }
 
-#ifdef PS5_RECEIVER
-#include <fcntl.h>
-#include <stdarg.h>
-#include <sys/mount.h>
-#include <sys/stat.h>
-#include <sys/syscall.h>
-#include <unistd.h>
-
+#if defined(PS5_RECEIVER) || defined(RECEIVER_SYSCALL_ABI_TEST)
 typedef struct {
     long value;
     int failed;
@@ -32,12 +25,30 @@ static inline ReceiverSyscall receiver_syscall4(long number, uintptr_t a, uintpt
     register uintptr_t fourth __asm__("r10") = d;
     long value = number;
     unsigned char failed;
+    /* FreeBSD's fast return restores C-preserved registers, not Linux's full
+       argument register set. RDX is a second return value; R8/R9/R10 are scratch.
+       Never keep counters, pointers or syscall arguments live in those registers.
+       Model RDI/RSI as modified too rather than depending on bonus preservation. */
+#ifdef RECEIVER_SYSCALL_ABI_TEST
+    __asm__ volatile("call receiver_test_gate"
+#else
     __asm__ volatile("syscall"
-                     : "+a"(value), "=@ccc"(failed)
-                     : "D"(a), "S"(b), "d"(c), "r"(fourth)
-                     : "rcx", "r11", "memory");
+#endif
+                     : "+a"(value), "=@ccc"(failed), "+D"(a), "+S"(b), "+d"(c), "+r"(fourth)
+                     :
+                     : "rcx", "r11", "r8", "r9", "memory");
     return (ReceiverSyscall){value, failed};
 }
+
+#endif
+
+#ifdef PS5_RECEIVER
+#include <fcntl.h>
+#include <stdarg.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 static inline int receiver_openat(int directory, const char *path, int flags, ...) {
     mode_t mode = 0;

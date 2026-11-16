@@ -152,7 +152,7 @@ umask 077
 "$PS5_PAYLOAD_SDK/bin/prospero-deploy" -h "$PS5_IP" -p "$PS5_LOADER_PORT" ps5/receiver/minecraft_playden_receiver.elf | tee /tmp/playden-receiver-private.log
 ```
 
-Check `receiver_build=v0.4-lan-issues-15-17 stat_backend=freebsd-carry`. The full
+Check `receiver_build=v0.4-verify-abi-1 stat_backend=freebsd-carry`. The full
 log includes a pairing token; keep it private. In a second Fish terminal:
 
 ```fish
@@ -180,10 +180,18 @@ name before retrying; never automatically delete it.
 To share diagnostic evidence without the startup pairing banner:
 
 ```fish
-rg '^(receiver_build=|receiver_metrics |receiver_socket )' /tmp/playden-receiver-private.log > /tmp/playden-receiver-metrics.txt
+rg '^(receiver_build=|receiver_metrics |receiver_cleanup |receiver_socket )' /tmp/playden-receiver-private.log > /tmp/playden-receiver-metrics.txt
 ```
 
 See [performance experiments and reproducible benchmarks](PS5_LAN_PERFORMANCE.md)
 for controlled Wi-Fi/wired, internal/USB and buffer comparisons. The
 [future shutdown proposal](PS5_RECEIVER_SHUTDOWN.md) is documentation only; no
 shutdown command or automatic shutdown option is available in this receiver.
+
+
+If verification rejects progress after upload, see the
+[syscall ABI investigation and metrics lifecycle](PS5_LAN_PERFORMANCE.md#verification-failure-near-completion--syscall-abi-fix).
+The current sender includes the rejected numeric counters in its error. Keep
+mandatory verification enabled; a rejected frame never authorizes publication.
+`receiver_metrics` is flushed before staging deletion; `receiver_cleanup` confirms
+whether cleanup completed. Check `diagnostics=1` in the startup build line.

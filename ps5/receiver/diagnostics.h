@@ -33,7 +33,7 @@ static void metric_add(double *field, double start) {
         *field += metric_clock() - start;
 }
 static void metric_report(double start) {
-    if (diagnostics_enabled)
+    if (diagnostics_enabled) {
         printf("receiver_metrics wall_s=%.6f published=%d bytes=%llu data_frames=%llu files=%llu "
                "fsyncs=%llu send_calls=%llu recv_calls=%llu socket_read_s=%.6f "
                "socket_write_s=%.6f frame_auth_s=%.6f file_write_s=%.6f file_hash_s=%.6f "
@@ -45,5 +45,7 @@ static void metric_report(double start) {
                metrics.socket_write_s, metrics.frame_auth_s, metrics.file_write_s,
                metrics.file_hash_s, metrics.fsync_s, metrics.verify_s, metrics.verify_read_s,
                metrics.verify_hash_s, metrics.commit_s);
+        fflush(stdout);
+    }
 }
 #endif

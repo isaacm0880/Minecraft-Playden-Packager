@@ -28,12 +28,12 @@ static volatile sig_atomic_t stopping;
 static const char *roots[] = {"/data/playden-import", "/mnt/usb0/playden/import"};
 static const char *temp_roots[] = {"/data/playden-packager-temp",
                                    "/mnt/usb0/playden-packager-temp"};
-#define RECEIVER_BUILD "v0.4-lan-issues-15-17"
+#define RECEIVER_BUILD "v0.4-verify-abi-1"
 #ifdef HOST_TEST
 static char test_root[1024];
 static uint64_t test_free = UINT64_MAX;
 static uint64_t test_write_limit = UINT64_MAX, test_written;
-static int test_stage_device_mismatch, test_rename_errno;
+static int test_stage_device_mismatch, test_rename_errno, test_pause_cleanup;
 #endif
 static void stop_receiver(int sig) {
     (void)sig;
@@ -73,13 +73,13 @@ static void hex(const uint8_t *bytes, size_t n, char *out) {
 }
 static void show_pairing(const char *address, unsigned port, const char *token) {
     printf("PDLAN/1 address=%s port=%u token=%s\n", address, port, token);
-    printf("receiver_build=%s stat_backend=%s\n", RECEIVER_BUILD,
+    printf("receiver_build=%s stat_backend=%s diagnostics=%d stdout=unbuffered\n", RECEIVER_BUILD,
 #ifdef PS5_RECEIVER
-           "freebsd-carry"
+           "freebsd-carry",
 #else
-           "posix-host"
+           "posix-host",
 #endif
-    );
+           diagnostics_enabled);
 #ifdef PS5_RECEIVER
     /* Same ABI used by upstream ps5-payload-dev/elfldr's notification helper. */
     typedef struct {
@@ -579,14 +579,28 @@ fail:
     printf("receiver_error %s\n", error);
     frame_send(&wire, ERROR_REPLY, error, strlen(error));
 cleanup:
+    /* Report the transfer before filesystem deletion/close: slow storage, a
+       forced unload or a cleanup fault must not hide the transfer timings. */
+    metric_report(connection_started);
+#ifdef HOST_TEST
+    /* Deterministic test gate: prove metrics escape even when cleanup is blocked. */
+    if (test_pause_cleanup && stage >= 0)
+        (void)getchar();
+#endif
+    double cleanup_started = metric_clock();
+    int cleanup_error = 0;
     if (file >= 0)
         close(file);
     if (package >= 0)
         close(package);
     if (stage >= 0) {
         if (temporary >= 0 && same_inode(stage, temporary, stage_name)) {
-            remove_contents(stage);
-            unlinkat(temporary, stage_name, AT_REMOVEDIR);
+            if (!remove_contents(stage))
+                cleanup_error = errno ? errno : EIO;
+            if (unlinkat(temporary, stage_name, AT_REMOVEDIR) < 0 && !cleanup_error)
+                cleanup_error = errno ? errno : EIO;
+        } else {
+            cleanup_error = ESTALE;
         }
         close(stage);
     }
@@ -601,7 +615,12 @@ cleanup:
     free(inventory.slots);
     free(body);
     memset(wire.key, 0, sizeof(wire.key));
-    metric_report(connection_started);
+    if (diagnostics_enabled) {
+        printf("receiver_cleanup wall_s=%.6f complete=%d errno=%d (%s)\n",
+               metric_clock() - cleanup_started, !cleanup_error, cleanup_error,
+               strerror(cleanup_error));
+        fflush(stdout);
+    }
 }
 
 /* Optional experiment: set buffers before listen/connect for window negotiation.
@@ -679,6 +698,8 @@ int main(int argc, char **argv) {
             test_stat_errno = (int)value;
         } else if (!strcmp(argv[i], "--test-stat-dot")) {
             test_stat_dot = 1;
+        } else if (!strcmp(argv[i], "--test-pause-cleanup")) {
+            test_pause_cleanup = 1;
         } else if (!strcmp(argv[i], "--test-stage-device-mismatch")) {
             test_stage_device_mismatch = 1;
         } else if (!strcmp(argv[i], "--test-rename-errno") && i + 1 < argc) {

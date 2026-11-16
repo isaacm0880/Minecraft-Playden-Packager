@@ -573,3 +573,173 @@ int main(int argc, char **argv) {
                     str(source), str(root / 'ps5/receiver/vendor/sha-256.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary), str(sandbox)], check=True)
     assert list(sandbox.iterdir()) == []
+
+
+@pytest.mark.parametrize('compiler', ['cc', 'clang'])
+def test_freebsd_syscall_clobbers_preserve_progress_total_and_live_pointers(tmp_path, compiler):
+    import platform
+    if os.name != 'posix' or platform.machine().lower() not in ('x86_64', 'amd64') or not shutil.which(compiler):
+        pytest.skip('x86-64 POSIX compiler required for the FreeBSD ABI simulation')
+    source = tmp_path / 'syscall-registers.c'
+    source.write_text(r'''
+#define RECEIVER_SYSCALL_ABI_TEST
+#include "sdk_fs.h"
+#include <assert.h>
+/* Emulate FreeBSD's volatile register return, including secondary RDX output.
+   No Linux/FreeBSD syscall or physical device is invoked by this test. */
+__asm__(".text\n.global receiver_test_gate\nreceiver_test_gate:\n"
+        "xor %r8d,%r8d\nxor %r9d,%r9d\nxor %r10d,%r10d\n"
+        "xor %edi,%edi\nxor %esi,%esi\nxor %edx,%edx\n"
+        "mov $77,%eax\nstc\nret\n");
+__attribute__((noinline)) static uint64_t retained_total(long a, uintptr_t b, uintptr_t c,
+                                                       uintptr_t d, uint64_t total) {
+    ReceiverSyscall result = receiver_syscall4(a, b, c, d, 0);
+    assert(result.value == 77 && result.failed == 1);
+    return total;
+}
+__attribute__((noinline)) static uint64_t progress(long a, uintptr_t b, uintptr_t c,
+                                                 uintptr_t d, uint64_t total, uint64_t *state) {
+    ReceiverSyscall result = receiver_syscall4(a, b, c, d, 0);
+    assert(result.value == 77 && result.failed == 1);
+    *state += 128;
+    return total;
+}
+int main(void) {
+    volatile uint64_t totals[] = {UINT64_C(937944806), UINT64_C(4294967301),
+                                  UINT64_C(274877906944)};
+    for (unsigned i = 0; i < 3; ++i)
+        assert(retained_total(499, 1, 2, 3, totals[i]) == totals[i]);
+    uint64_t state = 0;
+    assert(progress(499, 1, 2, 3, UINT64_C(937944806), &state) == UINT64_C(937944806));
+    assert(state == 128);
+    return 0;
+}
+''')
+    binary = tmp_path / 'syscall-registers'
+    include = Path(__file__).resolve().parents[1] / 'ps5/receiver'
+    subprocess.run([compiler, '-std=c11', '-O2', '-mno-red-zone', '-Wall', '-Wextra', '-Werror',
+                    '-I', str(include), str(source), '-o', str(binary)], check=True, capture_output=True)
+    subprocess.run([str(binary)], check=True, timeout=5)
+
+
+def test_many_file_verification_heartbeats_are_monotonic_and_keep_exact_total(receiver):
+    import struct
+    files = contents()
+    # The physical report had 5,678 files. Hit dozens of 128-entry heartbeats
+    # without making every routine test upload almost a gigabyte.
+    for index in range(5678 - len(files) - 1):
+        files[f'extras/{index:05}.bin'] = (index.to_bytes(4, 'big') * (1 + index % 3))
+    files['package.json'] = inventory(files)
+    total = sum(map(len, files.values()))
+    with receiver('--diagnostics') as (sandbox, port, token):
+        with paired(port, token) as session:
+            upload(session, files)
+            session.send(VERIFY)
+            values = []
+            while True:
+                kind, body = session.receive()
+                if kind == ACK:
+                    assert body == b'verified'
+                    break
+                assert kind == VERIFY_PROGRESS and len(body) == 16
+                done, expected = struct.unpack('!QQ', body)
+                assert expected == total and 0 <= done <= total
+                assert not values or done >= values[-1]
+                values.append(done)
+            assert len(values) >= 2 * (5678 // 128)
+            assert values[-1] == total
+            session.send(COMMIT)
+            assert session.ack().endswith(b'/Package')
+        wait_clean(sandbox)
+        assert sum(p.is_file() for p in (sandbox / 'internal/Package').rglob('*')) == 5678
+
+
+def test_metrics_are_visible_while_receiver_is_alive_after_disconnect(receiver_binary, tmp_path):
+    sandbox = tmp_path / 'metrics-console'
+    sandbox.mkdir()
+    process = subprocess.Popen([str(receiver_binary), '--bind', '127.0.0.1', '--port', '0',
+                                '--test-root', str(sandbox), '--diagnostics', '--test-pause-cleanup'],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    lines = queue.Queue()
+    def drain():
+        for line in process.stdout:
+            lines.put(line)
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    try:
+        banner = lines.get(timeout=10)
+        match = re.fullmatch(r'PDLAN/1 address=127.0.0.1 port=(\d+) token=([0-9a-f]{64})\n', banner)
+        assert match
+        port, token = int(match[1]), match[2]
+        files = contents()
+        files['package.json'] = inventory(files)
+        with paired(port, token) as session:
+            upload(session, files)
+            session.send(VERIFY)
+            kind, body = session.receive()
+            assert kind == VERIFY_PROGRESS
+            # Close during verification rather than requesting receiver termination.
+        observed = []
+        deadline = time.monotonic() + 5
+        while not any(line.startswith('receiver_metrics ') for line in observed):
+            observed.append(lines.get(timeout=max(.01, deadline - time.monotonic())))
+        metric = next(line for line in observed if line.startswith('receiver_metrics '))
+        assert 'published=0' in metric
+        assert list((sandbox / 'playden-packager-temp').glob('.pdlan-*'))
+        assert not any(line.startswith('receiver_cleanup ') for line in observed)
+        process.stdin.write('x')  # Release the deterministic cleanup gate.
+        process.stdin.flush()
+        while not any(line.startswith('receiver_cleanup ') for line in observed):
+            observed.append(lines.get(timeout=5))
+        assert observed.index(metric) < next(i for i, line in enumerate(observed) if line.startswith('receiver_cleanup '))
+        assert process.poll() is None  # No SIGTERM needed to flush the record.
+        wait_clean(sandbox)
+        assert not (sandbox / 'internal/Package').exists()
+        with paired(port, token) as session:
+            assert begin(session, 1, 0, name='Still-Available')
+        process.stdin.close()
+    finally:
+        if not process.stdin.closed:
+            process.stdin.close()
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        reader.join(2)
+        assert process.returncode == 0
+        assert not process.stderr.read()
+
+
+def test_socket_io_rejects_impossible_counts_without_underflow(receiver_binary, tmp_path):
+    source = tmp_path / 'io-count.c'
+    source.write_text(r'''
+#include <sys/socket.h>
+#include <assert.h>
+#include <errno.h>
+static int calls;
+static ssize_t bad_send(int fd, const void *data, size_t n, int flags) {
+    (void)fd; (void)data; (void)flags; ++calls; return (ssize_t)n + 1;
+}
+static ssize_t bad_recv(int fd, void *data, size_t n, int flags) {
+    (void)fd; (void)data; (void)flags; ++calls; return (ssize_t)n + 1;
+}
+#define send bad_send
+#define recv bad_recv
+#include "wire.h"
+int main(void) {
+    char data[1] = {0};
+    assert(!io_all(-1, data, 1, 1) && errno == EIO && calls == 1);
+    assert(!io_all(-1, data, 1, 0) && errno == EIO && calls == 2);
+    return 0;
+}
+''')
+    binary = tmp_path / 'io-count'
+    root = Path(__file__).resolve().parents[1]
+    flags = ['-O2']
+    if os.environ.get('PLAYDEN_RECEIVER_SANITIZE') == '1':
+        flags = ['-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer']
+    subprocess.run(['cc', '-std=c11', '-D_POSIX_C_SOURCE=200809L', *flags, '-I', str(root / 'ps5/receiver'),
+                    str(source), str(root / 'ps5/receiver/vendor/sha-256.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=5)

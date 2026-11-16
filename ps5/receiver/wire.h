@@ -72,7 +72,12 @@ static int io_all(int fd, void *buffer, size_t n, int writing) {
     uint8_t *p = buffer;
     while (n) {
         double started = metric_clock();
-        ssize_t got = writing ? send(fd, p, n, 0) : recv(fd, p, n, 0);
+        int flags = 0;
+#ifdef MSG_NOSIGNAL
+        if (writing)
+            flags = MSG_NOSIGNAL;
+#endif
+        ssize_t got = writing ? send(fd, p, n, flags) : recv(fd, p, n, 0);
         if (diagnostics_enabled) {
             if (writing)
                 ++metrics.send_calls;
@@ -84,6 +89,10 @@ static int io_all(int fd, void *buffer, size_t n, int writing) {
             continue;
         if (got <= 0)
             return 0;
+        if ((size_t)got > n) {
+            errno = EIO;
+            return 0;
+        }
         p += got;
         n -= (size_t)got;
     }

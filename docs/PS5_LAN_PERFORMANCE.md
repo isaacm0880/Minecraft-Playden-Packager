@@ -79,9 +79,11 @@ commit and total wall time. Diagnostics are disabled by default.
 
 Receiver: build with `make -B ... DIAGNOSTICS=1`. The payload prints one
 `receiver_metrics` record per authenticated connection on success, failure or
-disconnect, after cleanup. It reports publication state, bytes/files/DATA frames,
+disconnect, before cleanup, explicitly flushed. Metrics include publication state,
+bytes/files/DATA frames,
 send/receive calls, socket read/write times, file write/hash time, fsync count/time,
-verification/read/hash time and commit time. `receiver_socket` records show
+verification/read/hash time and commit time. A separate `receiver_cleanup` record
+reports cleanup duration, completion and errno. `receiver_socket` records show
 requested/effective buffers and errno. There is no per-frame logging. The normal
 startup banner contains the pairing token; **do not share raw receiver logs**.
 Share only metrics/socket/build lines after checking them. Timing records contain
@@ -225,3 +227,93 @@ and low disk/hash times as a reason to inspect Wi-Fi/TCP/window behaviour. High
 small-file time with fast bulk transfer points to per-file latency/flush overhead.
 Do not infer a single cause from one cumulative throughput number. The remaining
 PS5 bottleneck and any physical throughput gain require these manual traces.
+
+
+## Verification failure near completion — syscall ABI fix
+
+A physical wired transfer reported 937,944,806 bytes / 5,678 files uploaded, then
+`Invalid receiver verification progress` near 99% verification. The previous
+sender error discarded the rejected values, so the exact physical frame's two
+integers cannot be recovered from that message. No console was deployed to or
+inspected during this investigation.
+
+The defect is in `sdk_fs.h`'s inline assembly contract. The
+[reference FreeBSD fast syscall return](https://github.com/freebsd/freebsd-src/blob/releng/9.0/sys/amd64/amd64/exception.S#L397)
+restores C-preserved registers and gives bonus preservation to the first two
+arguments. RDX holds a second return value; R8/R9/R10 are not restored by that
+fast path. Our helper declared only RAX, carry, RCX and R11 modified, allowing
+optimized code to keep live values in unpreserved registers across `syscall`.
+The fix marks argument registers read/write and declares R8/R9 clobbered, while
+retaining carry-based errno translation. It does not rely on bonus preservation.
+
+Inspection of the previous SDK-built ELF found this concrete sequence in
+`count_tree`: the fifth argument (expected total) arrives in R8, `openat` executes
+inline, then R8 is saved for later use. Every 128 namespace entries the saved
+value is encoded twice into a heartbeat. An unpreserved R8 therefore changes
+both `verified` and `expected_total` **before** their HMAC is computed: message
+authentication still passes, but the sender correctly rejects the inconsistent
+total. This walk starts after all file readback hashes pass, explaining the late
+failure after the last displayed hash update near 99%. On Linux, normal POSIX
+calls preserve live C values through compiler-generated call boundaries, so
+ordinary host socket tests did not exercise this PS5-only assembly contract.
+
+An optimized host assembly gate now deliberately clobbers the ABI's volatile
+registers. With the original constraints, the live-total assertion fails or a
+live pointer crashes; with the fix both GCC and Clang preserve the exact reported
+total, values above 4 GiB and the 256 GiB protocol limit. The gate invokes no
+kernel syscall. SDK ELF inspection confirms the total is now saved before the
+syscall rather than trusting its previous register value afterward. Physical
+register contents and firmware behaviour still require an owner-run re-test.
+
+Both readback and namespace heartbeats now share one encoder: two unsigned
+big-endian 64-bit integers (`!QQ`), exactly 16 bytes. Readback counts bytes once
+per file and guards addition against the declared total. The namespace pass
+reports total/total only after every file hash passed. The sender checks payload
+size, equal expected total, bounded verified bytes and monotonicity, including
+repeated equal heartbeats. Rejections include numeric `verified`,
+`receiver_total`, `sender_total` and `previous_verified` values. No token, key or
+local filename is included. No COMMIT follows a rejected frame.
+
+Regression coverage includes 5,678 files and dozens of both kinds of heartbeat,
+malformed payloads, wrong totals, excess bytes, backwards progress and preservation
+of local files/no publication after rejection. A separate offline fixture transfer
+with **exactly 937,944,806 bytes / 5,678 files** completed on host loopback with
+983 valid progress frames, a final count of 937,944,806, verified publication and
+successful staging cleanup. That is a correctness reproduction at the reported
+scale, not a measurement or physical PS5 compatibility claim.
+
+### Missing metrics after disconnect
+
+Previously `receiver_metrics` was emitted only after closing files, recursively
+removing all staging contents and releasing inventory. Deleting 5,678 files can
+delay that line; the same syscall register defect also exposes cleanup's live
+values to corruption. A crash, forced unload or blocked filesystem call before
+the report would prevent it entirely. Without the old receiver/loader trace,
+the console's exact termination or blocking point cannot be established.
+
+Stdout was already unbuffered via `setbuf(stdout, NULL)` before listening. Normal
+SIGINT/SIGTERM set the stop flag; SIGPIPE is ignored. Metrics are opt-in, so the
+startup build line now explicitly includes `diagnostics=0/1 stdout=unbuffered`.
+Build with `make -B ... DIAGNOSTICS=1`; reusing an older ELF cannot enable them.
+Socket sends additionally suppress SIGPIPE per call where supported, and reject
+impossible oversized I/O return counts instead of underflowing the remaining
+length. Existing socket timeouts still bound network waits; they cannot bound
+kernel filesystem deletion/close latency.
+
+The transfer metrics record now runs **before filesystem cleanup**, with an
+explicit flush. Its `wall_s` excludes cleanup; a second, flushed
+`receiver_cleanup wall_s=... complete=... errno=...` record follows cleanup.
+`published=0` still means no publication, not that staging cleanup has completed.
+A deterministic host gate blocks deletion after the metrics record: the test
+reads the record through a pipe while the receiver is alive and the stage still
+exists, releases cleanup, observes the completion record, and pairs again with
+the same receiver. No receiver termination is needed to flush metrics. Existing
+recorded benchmark JSONL predates this timing boundary and remains unchanged.
+
+For a manual re-test, expect build `v0.4-verify-abi-1` with `diagnostics=1` and
+capture only `receiver_build`, `receiver_metrics`, `receiver_cleanup` and
+`receiver_error` lines, plus any sender numeric counter error. Keep the pairing
+banner private. A closed or backpressured loader/stdout pipe can still lose or
+block output even when unbuffered; a process killed before reaching the report
+cannot emit it. Inspect loader exit/crash status separately. This change adds no
+PS5 log files, automatic shutdown, deployment or new write destinations.

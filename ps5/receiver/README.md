@@ -24,7 +24,7 @@ The SHA-256 implementation is pinned and credited in `vendor/README.md`.
 
 For “already exists” errors where no destination is visible, see the
 [stat/errno compatibility investigation and manual redeployment guide](STAT_COMPATIBILITY.md).
-The rebuilt payload identifies itself as `v0.4-lan-issues-15-17` in console output.
+The rebuilt payload identifies itself as `v0.4-verify-abi-1` in console output.
 
 
 Use `make -B DIAGNOSTICS=1` for numeric per-connection timings. Optional
