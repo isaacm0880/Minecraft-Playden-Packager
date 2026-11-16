@@ -12,6 +12,7 @@ import struct
 import time
 
 from .operations import CancellationToken
+from .network_metrics import NetworkMetrics
 
 MAGIC = b'PDLAN1\r\n'
 HEADER = struct.Struct('!BIQ')
@@ -69,8 +70,26 @@ def safe_relative(name: str, *, package: bool = False) -> bytes:
     return encoded
 
 
+def configure_socket(stream: socket.socket, buffer_size: int | None, metrics: NetworkMetrics) -> None:
+    """Best-effort experiment; call before connect to negotiate receive windows."""
+    for name, option in (('send', socket.SO_SNDBUF), ('receive', socket.SO_RCVBUF)):
+        if buffer_size is not None:
+            try:
+                stream.setsockopt(socket.SOL_SOCKET, option, buffer_size)
+            except OSError:
+                metrics.add('socket_buffer_errors')
+        if metrics.enabled:
+            metrics.values['socket_' + name + '_requested'] = buffer_size or 0
+            try:
+                metrics.values['socket_' + name + '_effective'] = stream.getsockopt(socket.SOL_SOCKET, option)
+            except OSError:
+                metrics.add('socket_buffer_errors')
+
+
 class Session:
-    def __init__(self, stream: socket.socket, token: CancellationToken, *, timeout: float = 15):
+    def __init__(self, stream: socket.socket, token: CancellationToken, *, timeout: float = 15,
+                 metrics: NetworkMetrics | None = None):
+        self.metrics = metrics if metrics is not None else NetworkMetrics(False)
         self.stream = stream
         self.token = token
         self.timeout = timeout
@@ -88,7 +107,12 @@ class Session:
             if time.monotonic() >= deadline:
                 raise NetworkTransferError('PS5 receiver timed out. Check its payload and LAN connection.')
             try:
-                block = self.stream.recv(size - len(result))
+                started = self.metrics.tick()
+                try:
+                    block = self.stream.recv(size - len(result))
+                finally:
+                    self.metrics.elapsed('socket_read_s', started)
+                    self.metrics.add('recv_calls')
             except socket.timeout:
                 continue
             except OSError as exc:
@@ -106,7 +130,12 @@ class Session:
             if time.monotonic() >= deadline:
                 raise NetworkTransferError('PS5 stopped receiving. Transfer timed out; local files were retained.')
             try:
-                count = self.stream.send(pending)
+                started = self.metrics.tick()
+                try:
+                    count = self.stream.send(pending)
+                finally:
+                    self.metrics.elapsed('socket_write_s', started)
+                    self.metrics.add('send_calls')
             except socket.timeout:
                 continue
             except OSError as exc:
@@ -132,7 +161,11 @@ class Session:
         if len(payload) > MAX_FRAME:
             raise ValueError('Transfer frame too large.')
         header = HEADER.pack(kind, len(payload), self.sent)
-        self.write(header + payload + hmac.digest(self.key, b'C' + header + payload, hashlib.sha256))
+        started = self.metrics.tick()
+        packet = header + payload + hmac.digest(self.key, b'C' + header + payload, hashlib.sha256)
+        self.metrics.elapsed('frame_auth_s', started)
+        self.write(packet)
+        self.metrics.add('sent_frames')
         self.sent += 1
 
     def receive(self) -> tuple[int, bytes]:
@@ -141,7 +174,10 @@ class Session:
         if size > MAX_FRAME or sequence != self.received:
             raise NetworkTransferError('Invalid receiver frame length or sequence.')
         payload, tag = self.read(size), self.read(32)
-        if not hmac.compare_digest(tag, hmac.digest(self.key, b'S' + header + payload, 'sha256')):
+        started = self.metrics.tick()
+        valid = hmac.compare_digest(tag, hmac.digest(self.key, b'S' + header + payload, 'sha256'))
+        self.metrics.elapsed('frame_auth_s', started)
+        if not valid:
             raise NetworkTransferError('Receiver message authentication failed; no completion confirmed.')
         self.received += 1
         if kind == ERROR:

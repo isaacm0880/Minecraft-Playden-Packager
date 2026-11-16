@@ -1,5 +1,6 @@
 #ifndef PDLAN_WIRE_H
 #define PDLAN_WIRE_H
+#include "diagnostics.h"
 #include "vendor/sha-256.h"
 #include <errno.h>
 #include <stddef.h>
@@ -70,7 +71,15 @@ static void mac(const uint8_t key[32], const void *a, size_t an, const void *b, 
 static int io_all(int fd, void *buffer, size_t n, int writing) {
     uint8_t *p = buffer;
     while (n) {
+        double started = metric_clock();
         ssize_t got = writing ? send(fd, p, n, 0) : recv(fd, p, n, 0);
+        if (diagnostics_enabled) {
+            if (writing)
+                ++metrics.send_calls;
+            else
+                ++metrics.recv_calls;
+            metric_add(writing ? &metrics.socket_write_s : &metrics.socket_read_s, started);
+        }
         if (got < 0 && errno == EINTR)
             continue;
         if (got <= 0)
@@ -94,9 +103,21 @@ static int frame_send(Wire *w, uint8_t type, const void *body, size_t size) {
     uint8_t prefix[14];
     prefix[0] = 'S';
     memcpy(prefix + 1, header, 13);
+    double started = metric_clock();
     mac(w->key, prefix, 14, body, size, "", 0, tag);
-    return io_all(w->fd, header, 13, 1) && io_all(w->fd, (void *)body, size, 1) &&
-           io_all(w->fd, tag, 32, 1);
+    metric_add(&metrics.frame_auth_s, started);
+    /* All receiver replies are bounded metadata. Coalesce header/body/tag to
+       avoid three tiny TCP writes with NODELAY, especially over Wi-Fi. */
+    uint8_t packet[13 + 1024 + 32];
+    if (size > 1024) {
+        errno = EMSGSIZE;
+        return 0;
+    }
+    memcpy(packet, header, 13);
+    if (size)
+        memcpy(packet + 13, body, size);
+    memcpy(packet + 13 + size, tag, 32);
+    return io_all(w->fd, packet, 13 + size + 32, 1);
 }
 static int frame_read(Wire *w, uint8_t *type, uint8_t *body, size_t *size) {
     uint8_t header[13], prefix[14], tag[32], expected[32];
@@ -110,7 +131,9 @@ static int frame_read(Wire *w, uint8_t *type, uint8_t *body, size_t *size) {
         return 0;
     prefix[0] = 'C';
     memcpy(prefix + 1, header, 13);
+    double started = metric_clock();
     mac(w->key, prefix, 14, body, *size, "", 0, expected);
+    metric_add(&metrics.frame_auth_s, started);
     if (!same(tag, expected, 32))
         return 0;
     ++w->received;

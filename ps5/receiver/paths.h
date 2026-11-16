@@ -235,14 +235,36 @@ static int read_file(int root, const char *path, size_t max, char **out, size_t 
     close(fd);
     return 1;
 }
+/* dup shares directory offsets and filesystem enumeration state. Open a fresh
+   description of the pinned directory for each walk, including cleanup. This
+   also sees entries added since the pinned directory was originally opened. */
+static DIR *directory_stream(int root) {
+    int fd = openat(root, ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0)
+        return NULL;
+    DIR *stream = fdopendir(fd);
+    if (!stream) {
+        int saved_error = errno;
+        close(fd);
+        errno = saved_error;
+    }
+    return stream;
+}
 /* Called only on the random stage created and held open by this connection. */
 static int remove_contents(int root) {
-    DIR *dir = fdopendir(dup(root));
+    DIR *dir = directory_stream(root);
     if (!dir)
         return 0;
     struct dirent *e;
     int ok = 1;
-    while ((e = readdir(dir))) {
+    for (;;) {
+        errno = 0;
+        e = readdir(dir);
+        if (!e) {
+            if (errno)
+                ok = 0;
+            break;
+        }
         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
             continue;
         struct stat st;

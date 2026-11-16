@@ -62,8 +62,11 @@ rejected. Directory and file opens use descriptor-relative no-follow operations.
 there is no fallback. Preflight includes allocation overhead and a 16 MiB reserve.
 Actual write/flush errors are also checked; estimates cannot reserve disk space.
 
-The receiver creates a random private staging directory under the selected root
-after authentication. It removes only its own stage on normal errors/disconnects.
+After authentication, the receiver creates a random `.pdlan-*` directory under
+`/data/playden-packager-temp/` (internal) or
+`/mnt/usb0/playden-packager-temp/` (USB0), outside both import roots. It pins the
+staging and import directory descriptors, requires them to be distinct and on
+the same filesystem, and revalidates their identity before publication. It removes only its own stage on normal errors/disconnects.
 On systems lacking exclusive directory rename, publication first reserves an
 empty final directory with exclusive mkdir and verifies its identity before
 renaming the fully validated stage over that reservation. Existing names are
@@ -78,3 +81,13 @@ retry, resume or local deletion occurs. A payload/process crash may leave privat
 be inspected and removed manually while the receiver is stopped. An incomplete
 stage has no published package path. Idle I/O times out; unauthenticated peers
 cannot create files. Tokens rotate when the payload restarts.
+
+
+Receiver replies coalesce the unchanged header, payload and HMAC into one socket
+write (partial writes are still handled). DATA remains streaming without
+per-frame acknowledgements. The 64 KiB maximum, sequence checks, pairing, SHA-256,
+per-file flushes and readback verification are unchanged. Experimental smaller
+DATA frames and socket buffer requests do not alter the wire protocol.
+
+Shutdown commands and automatic shutdown are **not implemented** in PDLAN/1.
+See the [future design proposal](../../docs/PS5_RECEIVER_SHUTDOWN.md).

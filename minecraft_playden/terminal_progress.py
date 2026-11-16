@@ -75,7 +75,8 @@ class TransferProgress:
         final = event.stage == 'network-complete'
         if final and not changed:
             return
-        if not changed and not final and now - self.last_render < (.1 if self.interactive else 30):
+        boundary = event.stage == 'network-send' and total is not None and done >= total
+        if not changed and not final and not boundary and now - self.last_render < (.1 if self.interactive else 30):
             return
         elapsed = max(0, now - self.started)
         message = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', event.message)
@@ -97,7 +98,7 @@ class TransferProgress:
         if self.interactive:
             width = max(1, shutil.get_terminal_size((120, 24)).columns - 1)
             message = message[:width]
-            self.stream.write('\r' + message + ' ' * max(0, self.previous_width - len(message)))
+            self.stream.write('\r' + message + ' ' * max(0, min(width, self.previous_width) - len(message)))
             self.previous_width = len(message)
             self.active = True
         else:

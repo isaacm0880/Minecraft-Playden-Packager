@@ -133,3 +133,7 @@ redistribute populated game packages without permission. This independent projec
 is not affiliated with Mojang, Microsoft or Sony.
 
 > **AI disclosure:** built with the assistance of AI.
+
+LAN development: [staging, pairing and manual PS5 testing](docs/PS5_LAN_TRANSFER.md),
+[performance diagnostics and benchmarks](docs/PS5_LAN_PERFORMANCE.md), and
+[future receiver shutdown proposal](docs/PS5_RECEIVER_SHUTDOWN.md).

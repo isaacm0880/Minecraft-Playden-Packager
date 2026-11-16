@@ -182,7 +182,12 @@ static int enough_space(int fd, uint64_t bytes, uint32_t entries) {
     return free_bytes >= required;
 }
 static int sync_dir(int fd) {
-    if (fsync(fd) == 0)
+    double started = metric_clock();
+    int result = fsync(fd);
+    metric_add(&metrics.fsync_s, started);
+    if (diagnostics_enabled)
+        ++metrics.fsyncs;
+    if (result == 0)
         return 1;
     /* Some USB filesystems cannot fsync directories. File flushes still must
        succeed; atomic rename controls visibility. Physical durability needs
@@ -290,6 +295,8 @@ static void log_lstat_comparison(const char *root, const char *name) {
 }
 
 static void connection(int client, const uint8_t key[32]) {
+    memset(&metrics, 0, sizeof(metrics));
+    double connection_started = metric_clock();
     Wire wire = {.fd = client, .sent = 0, .received = 0};
     if (!handshake(&wire, key)) {
         sleep(1);
@@ -482,12 +489,21 @@ static void connection(int client, const uint8_t key[32]) {
         } else if (type == DATA) {
             if (file < 0 || !length || length > remaining)
                 goto fail;
-            if (!write_all(file, body, length)) {
+            double started = metric_clock();
+            int written = write_all(file, body, length);
+            metric_add(&metrics.file_write_s, started);
+            if (!written) {
                 error = errno == ENOSPC ? "Insufficient storage while writing package."
                                         : "Package write failed; staging discarded.";
                 goto fail;
             }
+            started = metric_clock();
             sha_256_write(&file_hash, body, length);
+            metric_add(&metrics.file_hash_s, started);
+            if (diagnostics_enabled) {
+                metrics.bytes += length;
+                ++metrics.data_frames;
+            }
             remaining -= length;
         } else if (type == END_FILE) {
             if (file < 0 || length || remaining)
@@ -497,7 +513,14 @@ static void connection(int client, const uint8_t key[32]) {
                 error = "File SHA-256 mismatch; staging discarded.";
                 goto fail;
             }
-            if (fsync(file) < 0) {
+            double started = metric_clock();
+            int flushed = fsync(file);
+            metric_add(&metrics.fsync_s, started);
+            if (diagnostics_enabled) {
+                ++metrics.files;
+                ++metrics.fsyncs;
+            }
+            if (flushed < 0) {
                 error = "File flush failed; package was not published.";
                 goto fail;
             }
@@ -514,9 +537,13 @@ static void connection(int client, const uint8_t key[32]) {
         } else if (type == VERIFY) {
             if (file >= 0 || length || inventory.count != expected_entries || completed != total)
                 goto fail;
-            if (!same_inode(package, stage, "package") ||
-                !verify_staging(package, &inventory, &wire, total) ||
-                !strict_recipe(package, package_path) || !inventory_hashes(package, &inventory)) {
+            double started = metric_clock();
+            int valid = same_inode(package, stage, "package") &&
+                        verify_staging(package, &inventory, &wire, total) &&
+                        strict_recipe(package, package_path) &&
+                        inventory_hashes(package, &inventory);
+            metric_add(&metrics.verify_s, started);
+            if (!valid) {
                 error = "Invalid recipe, required package structure or immutable inventory.";
                 goto fail;
             }
@@ -526,6 +553,7 @@ static void connection(int client, const uint8_t key[32]) {
         } else if (type == COMMIT) {
             if (!verified || file >= 0 || length)
                 goto fail;
+            double started = metric_clock();
             if (!same_inode(package, stage, "package") || !sync_dir(package) ||
                 !publish(root, temporary, stage, stage_name, package_name, root_path,
                          temporary_path)) {
@@ -537,6 +565,8 @@ static void connection(int client, const uint8_t key[32]) {
                 error = diagnostic_error;
                 goto fail;
             }
+            metric_add(&metrics.commit_s, started);
+            metrics.published = 1;
             char receipt[256];
             snprintf(receipt, sizeof(receipt), "%s/%s", roots[destination], package_name);
             frame_send(&wire, ACK, receipt, strlen(receipt));
@@ -571,8 +601,28 @@ cleanup:
     free(inventory.slots);
     free(body);
     memset(wire.key, 0, sizeof(wire.key));
+    metric_report(connection_started);
 }
 
+/* Optional experiment: set buffers before listen/connect for window negotiation.
+   Unsupported requests never disable authentication or filesystem checks. */
+static void tune_socket(int fd, const char *side) {
+    int options[] = {SO_SNDBUF, SO_RCVBUF};
+    const char *names[] = {"send", "receive"};
+    for (int i = 0; i < 2; ++i) {
+        int saved = errno, error = 0, effective = 0;
+        if (socket_buffer &&
+            setsockopt(fd, SOL_SOCKET, options[i], &socket_buffer, sizeof(socket_buffer)) < 0)
+            error = errno;
+        socklen_t size = sizeof(effective);
+        if (getsockopt(fd, SOL_SOCKET, options[i], &effective, &size) < 0 && !error)
+            error = errno;
+        if (diagnostics_enabled)
+            printf("receiver_socket side=%s direction=%s requested=%d effective=%d errno=%d (%s)\n",
+                   side, names[i], socket_buffer, effective, error, strerror(error));
+        errno = saved;
+    }
+}
 int main(int argc, char **argv) {
     char bind_address[INET_ADDRSTRLEN] = {0};
     unsigned port = 9025;
@@ -588,6 +638,14 @@ int main(int argc, char **argv) {
             if (*end || value > 65535)
                 return 2;
             port = (unsigned)value;
+        } else if (!strcmp(argv[i], "--diagnostics")) {
+            diagnostics_enabled = 1;
+        } else if (!strcmp(argv[i], "--socket-buffer") && i + 1 < argc) {
+            char *end;
+            long value = strtol(argv[++i], &end, 10);
+            if (*end || value < 4096 || value > 4 * 1024 * 1024)
+                return 2;
+            socket_buffer = (int)value;
         }
 #ifdef HOST_TEST
         else if (!strcmp(argv[i], "--test-root") && i + 1 < argc) {
@@ -669,6 +727,11 @@ int main(int argc, char **argv) {
         return 1;
     int yes = 1;
     setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    /* Configure silently until the pairing banner (host harness contract). */
+    int diagnostic_mode = diagnostics_enabled;
+    diagnostics_enabled = 0;
+    tune_socket(listener, "listener");
+    diagnostics_enabled = diagnostic_mode;
     if (bind(listener, (struct sockaddr *)&address, sizeof(address)) < 0 ||
         listen(listener, 2) < 0) {
         perror("receiver bind/listen");
@@ -683,6 +746,7 @@ int main(int argc, char **argv) {
     hex(key, 32, token);
     show_pairing(bind_address, ntohs(address.sin_port), token);
     memset(token, 0, sizeof(token));
+    tune_socket(listener, "listener");
     time_t expiry = time(NULL) + 3600;
     while (!stopping && time(NULL) < expiry) {
         fd_set readfds;
@@ -699,6 +763,7 @@ int main(int argc, char **argv) {
         int client = accept(listener, (struct sockaddr *)&peer, &peer_size);
         if (client < 0)
             continue;
+        tune_socket(client, "accepted");
         setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
         struct timeval timeout = {15, 0};
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));

@@ -136,3 +136,54 @@ stage starts. Ctrl-C and errors finish the line before the diagnostic appears.
 When stdout or stderr is redirected, or `NO_COLOR` is set, the CLI writes plain
 stage records and at most one intermediate record every 30 seconds to stderr;
 the final receipt remains on stdout. GUI callbacks retain the same byte fields.
+
+## Physical testing — Fish
+
+These commands are manual. Stop/unload the old receiver through the loader first;
+do not run two listeners on port 9025. Build with numeric diagnostics enabled:
+
+```fish
+cd /path/to/Minecraft-Playden-Packager
+set -gx PS5_PAYLOAD_SDK /opt/ps5-payload-sdk/ps5-payload-sdk
+make -B -C ps5/receiver PS5_PAYLOAD_SDK="$PS5_PAYLOAD_SDK" DIAGNOSTICS=1
+read -P 'PS5 LAN IPv4 address: ' PS5_IP
+read -P 'ELF loader port (usually 9021): ' PS5_LOADER_PORT
+umask 077
+"$PS5_PAYLOAD_SDK/bin/prospero-deploy" -h "$PS5_IP" -p "$PS5_LOADER_PORT" ps5/receiver/minecraft_playden_receiver.elf | tee /tmp/playden-receiver-private.log
+```
+
+Check `receiver_build=v0.4-lan-issues-15-17 stat_backend=freebsd-carry`. The full
+log includes a pairing token; keep it private. In a second Fish terminal:
+
+```fish
+cd /path/to/Minecraft-Playden-Packager
+read -P 'PS5 LAN IPv4 address: ' PS5_IP
+read -P 'Existing validated package directory: ' PACKAGE_DIR
+.venv/bin/python -m minecraft_playden validate "$PACKAGE_DIR"
+set TEST_SUFFIX (date +%Y%m%d-%H%M%S)
+.venv/bin/python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" --destination internal --name "LAN-Internal-$TEST_SUFFIX" --diagnostics
+.venv/bin/python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" --destination usb0 --name "LAN-USB0-$TEST_SUFFIX" --diagnostics
+```
+
+Each send prompts privately for the fresh token. Inspect the exact named import
+folders only after success. During a transfer, verify that the random private
+stage appears under `/data/playden-packager-temp/` or
+`/mnt/usb0/playden-packager-temp/`, not inside the import root. Cancel another
+fresh-name transfer before COMMIT; its private stage and final import name should
+be absent, local outputs unchanged, and unrelated staging directories preserved.
+Retry an existing successful name and confirm refusal without changing its files.
+Check USB0 unavailable behaviour, GUI destination persistence and local USB copy.
+Do not fill the PS5 to simulate ENOSPC; automated fault tests cover storage errors.
+If publication reports uncertain durability or a lost receipt, inspect that final
+name before retrying; never automatically delete it.
+
+To share diagnostic evidence without the startup pairing banner:
+
+```fish
+rg '^(receiver_build=|receiver_metrics |receiver_socket )' /tmp/playden-receiver-private.log > /tmp/playden-receiver-metrics.txt
+```
+
+See [performance experiments and reproducible benchmarks](PS5_LAN_PERFORMANCE.md)
+for controlled Wi-Fi/wired, internal/USB and buffer comparisons. The
+[future shutdown proposal](PS5_RECEIVER_SHUTDOWN.md) is documentation only; no
+shutdown command or automatic shutdown option is available in this receiver.

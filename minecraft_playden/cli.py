@@ -48,6 +48,9 @@ def main() -> int:
     transfer.add_argument('--name', help='New package folder name; existing remote names are never overwritten')
     transfer.add_argument('--token-env', default='PLAYDEN_PS5_TOKEN',
                           help='Environment variable holding the pairing token; otherwise prompt without echo')
+    transfer.add_argument('--diagnostics', action='store_true', help='Print numeric timing counters to stderr (no token or file paths)')
+    transfer.add_argument('--socket-buffer', type=int, help='Experimental socket buffer bytes, 4096..4194304; OS default if omitted')
+    transfer.add_argument('--chunk-size', type=int, default=65536, help='Experimental DATA size, 4096..65536 (default 65536)')
     args = parser.parse_args()
     try:
         if args.command == 'transfer-ps5':
@@ -57,8 +60,16 @@ def main() -> int:
             from .terminal_progress import TransferProgress
             pairing = os.environ.get(args.token_env) or getpass.getpass('PS5 receiver pairing token: ')
             interactive = sys.stderr.isatty() and sys.stdout.isatty() and 'NO_COLOR' not in os.environ
-            with TransferProgress(interactive=interactive) as report:
-                result = NetworkRequest(args.path, args.host, pairing, args.destination, args.port, args.name).run(report)
+            import json
+            metrics: dict[str, int | float] = {}
+            try:
+                with TransferProgress(interactive=interactive) as report:
+                    result = NetworkRequest(args.path, args.host, pairing, args.destination, args.port, args.name,
+                                            args.socket_buffer, args.chunk_size).run(
+                        report, diagnostics=metrics.update if args.diagnostics else None)
+            finally:
+                if args.diagnostics:
+                    print('sender_metrics ' + json.dumps(metrics, sort_keys=True), file=sys.stderr)
             print(f'PS5 package received and verified: {result.destination}. Local output retained.')
             return 0
         if args.command == 'import-instance':

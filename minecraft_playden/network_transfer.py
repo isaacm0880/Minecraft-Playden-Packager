@@ -13,11 +13,12 @@ from typing import BinaryIO
 from .cleanup import linked, plain_directory, snapshot
 from .operations import CancellationToken
 from .progress import Progress, ProgressCallback
+from .network_metrics import NetworkMetrics, MetricsCallback
 from .validator import validate
 from .network_protocol import (
     ACK, BEGIN, BEGIN_INFO, COMMIT, DATA, END_FILE, ENTRY, ENTRY_INFO, VERIFY, VERIFY_PROGRESS,
     MAX_ENTRIES, MAX_FILE, MAX_FRAME, MAX_TOTAL, PORT, ROOTS,
-    NetworkTransferError, Session, lan_address, pairing_key, safe_relative,
+    NetworkTransferError, Session, configure_socket, lan_address, pairing_key, safe_relative,
 )
 
 
@@ -88,9 +89,30 @@ class NetworkRequest:
     destination: str = 'internal'
     port: int = PORT
     package_name: str | None = None
+    socket_buffer: int | None = None
+    chunk_size: int = MAX_FRAME
 
     def run(self, progress: ProgressCallback | None = None,
-            cancellation: CancellationToken | None = None) -> NetworkResult:
+            cancellation: CancellationToken | None = None, *,
+            diagnostics: MetricsCallback | None = None) -> NetworkResult:
+        metrics = NetworkMetrics(diagnostics is not None)
+        started = metrics.tick()
+        try:
+            result = self._run(progress, cancellation, metrics)
+            metrics.add('published')
+            return result
+        finally:
+            metrics.elapsed('wall_s', started)
+            if diagnostics is not None:
+                diagnostics(dict(metrics.values))
+
+    def _run(self, progress: ProgressCallback | None, cancellation: CancellationToken | None,
+             metrics: NetworkMetrics) -> NetworkResult:
+        if not 4096 <= self.chunk_size <= MAX_FRAME:
+            raise ValueError('Chunk size must be between 4096 and 65536 bytes.')
+        if self.socket_buffer is not None and not 4096 <= self.socket_buffer <= 4 * 1024 * 1024:
+            raise ValueError('Socket buffer must be between 4096 and 4194304 bytes.')
+        validation_started = metrics.tick()
         token = cancellation if cancellation is not None else CancellationToken()
         host, key = lan_address(self.host.strip()), pairing_key(self.pairing_token)
         if self.destination not in ROOTS or not 1 <= self.port <= 65535:
@@ -115,6 +137,7 @@ class NetworkRequest:
         if not (source / 'recipe.json').is_file():
             raise ValueError('PS5 transfer requires a launch package with recipe.json.')
         entries: list[tuple[str, int, int, bytes]] = []
+        hashing_started = metrics.tick()
         total = files = 0
         for relative, info in sorted(before.items()):
             if relative == '.':
@@ -134,18 +157,28 @@ class NetworkRequest:
                 files += 1
             total += size
             entries.append((relative, kind, size, digest.digest() if kind else bytes(32)))
+        metrics.elapsed('prehash_s', hashing_started)
         if snapshot(source) != before:
             raise ValueError('Package changed during validation/hashing. Retry with stable local files.')
+        metrics.elapsed('validation_s', validation_started)
         report('network-connect', f'Pairing with PS5 at {host}:{self.port}…')
         committed = False
         try:
-            with socket.create_connection((host, self.port), timeout=3) as connection:
-                session = Session(connection, token)
+            pairing_started = metrics.tick()
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+                configure_socket(connection, self.socket_buffer, metrics)
+                connection.settimeout(3)
+                connection.connect((host, self.port))
+                session = Session(connection, token, metrics=metrics)
                 session.authenticate(key)
+                metrics.elapsed('pairing_s', pairing_started)
                 session.send(BEGIN, BEGIN_INFO.pack(int(self.destination == 'usb0'), len(encoded_name),
                                                    len(entries), total) + encoded_name)
                 session.ack()
                 copied, started = 0, time.monotonic()
+                last_report, last_bytes, rate = started, 0, 0.
+                report('network-send', 'Sending to PS5…', 0, total)
+                transfer_started = metrics.tick()
                 for relative, kind, size, expected in entries:
                     token.check()
                     encoded = safe_relative(relative)
@@ -156,24 +189,41 @@ class NetworkRequest:
                     digest = hashlib.sha256()
                     with _open_local_file(source, relative, before[relative]) as handle:
                         sent = 0
-                        while block := handle.read(MAX_FRAME):
+                        while True:
+                            read_started = metrics.tick()
+                            block = handle.read(self.chunk_size)
+                            metrics.elapsed('file_read_s', read_started)
+                            if not block:
+                                break
                             token.check()
                             sent += len(block)
                             if sent > size:
                                 raise ValueError('Source grew while uploading; package not committed.')
+                            hash_started = metrics.tick()
                             digest.update(block)
+                            metrics.elapsed('file_hash_s', hash_started)
                             session.send(DATA, block)
+                            metrics.add('data_frames')
+                            metrics.add('bytes', len(block))
                             copied += len(block)
-                            rate = copied / max(.001, time.monotonic() - started) / (1024 * 1024)
-                            report('network-send', f'Sending to PS5 — {rate:.1f} MiB/s', copied, total, relative)
+                            now = time.monotonic()
+                            if now - last_report >= .1:
+                                sample = (copied - last_bytes) / (now - last_report)
+                                rate = sample if not rate else .25 * sample + .75 * rate
+                                report('network-send', f'Sending to PS5 — {rate / (1024 * 1024):.1f} MiB/s', copied, total, relative)
+                                last_report, last_bytes = now, copied
                         if sent != size or digest.digest() != expected:
                             raise ValueError('Source changed while uploading; package not committed.')
+                    metrics.add('files')
                     session.send(END_FILE)
                     session.ack()
+                report('network-send', 'All file data sent; waiting for verification…', copied, total)
+                metrics.elapsed('transfer_s', transfer_started)
                 if snapshot(source) != before:
                     raise ValueError('Package changed during upload; package not committed.')
                 token.check()
                 report('network-verify', 'PS5 is verifying staged file hashes…', 0, total)
+                verify_started = metrics.tick()
                 session.send(VERIFY)
                 while True:
                     kind, body = session.receive()
@@ -185,8 +235,10 @@ class NetworkRequest:
                     if expected_total != total or verified > total:
                         raise NetworkTransferError('Invalid receiver verification progress.')
                     report('network-verify', 'PS5 is verifying staged file hashes…', verified, total)
+                metrics.elapsed('verification_s', verify_started)
                 token.check()
                 report('network-commit', 'PS5 is verifying and publishing the package…', copied, total)
+                commit_started = metrics.tick()
                 session.send(COMMIT)
                 committed = True
                 # Publication is the commit point: cancellation after COMMIT cannot
@@ -196,6 +248,7 @@ class NetworkRequest:
                 expected_path = ROOTS[self.destination] + '/' + name
                 if remote != expected_path:
                     raise NetworkTransferError('Receiver returned an unexpected publication receipt.')
+                metrics.elapsed('commit_s', commit_started)
                 report('network-complete', f'Package received and verified: {remote}', total, total)
                 return NetworkResult(source, remote, files, total)
         except OSError as exc:

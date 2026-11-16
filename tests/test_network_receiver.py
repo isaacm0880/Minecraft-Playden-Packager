@@ -530,3 +530,46 @@ def test_cross_device_or_failed_rename_does_not_publish(receiver, options):
             session.ack()
         wait_clean(sandbox)
         assert list((sandbox / 'internal').iterdir()) == []
+
+
+def test_directory_walks_and_cleanup_ignore_shared_descriptor_offsets(receiver_binary, tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    source, binary = tmp_path / 'scan.c', tmp_path / 'scan'
+    source.write_text(r'''
+#define main receiver_main
+#include "main.c"
+#undef main
+#include <assert.h>
+int main(int argc, char **argv) {
+    assert(argc == 2);
+    int root = open(argv[1], O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    assert(root >= 0);
+    int file = openat(root, "first", O_WRONLY | O_CREAT | O_EXCL, 0600);
+    assert(file >= 0); close(file);
+    /* Consume a dup of the pinned directory. New walks must start independently. */
+    DIR *old = fdopendir(dup(root)); assert(old);
+    while (readdir(old)) {}
+    closedir(old);
+    file = openat(root, "second", O_WRONLY | O_CREAT | O_EXCL, 0600);
+    assert(file >= 0); close(file);
+    Wire wire = {.fd = -1};
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        size_t count = 0;
+        assert(count_tree(root, 0, &count, &wire, 0) && count == 2);
+    }
+    assert(remove_contents(root));
+    size_t count = 0;
+    assert(count_tree(root, 0, &count, &wire, 0) && count == 0);
+    close(root);
+    return 0;
+}
+''')
+    sandbox = tmp_path / 'scan-root'
+    sandbox.mkdir()
+    flags = ['-O2']
+    if os.environ.get('PLAYDEN_RECEIVER_SANITIZE') == '1':
+        flags = ['-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer']
+    subprocess.run(['cc', '-std=c11', '-DHOST_TEST', *flags, '-I', str(root / 'ps5/receiver'),
+                    str(source), str(root / 'ps5/receiver/vendor/sha-256.c'), '-o', str(binary)], check=True)
+    subprocess.run([str(binary), str(sandbox)], check=True)
+    assert list(sandbox.iterdir()) == []

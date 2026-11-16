@@ -267,12 +267,19 @@ done:
 static int count_tree(int root, unsigned depth, size_t *count, Wire *wire, uint64_t total) {
     if (depth > 32)
         return 0;
-    DIR *dir = fdopendir(dup(root));
+    DIR *dir = directory_stream(root);
     if (!dir)
         return 0;
     int ok = 1;
     struct dirent *entry;
-    while ((entry = readdir(dir))) {
+    for (;;) {
+        errno = 0;
+        entry = readdir(dir);
+        if (!entry) {
+            if (errno)
+                ok = 0;
+            break;
+        }
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
             continue;
         struct stat st;
@@ -341,7 +348,9 @@ static int verify_staging(int root, Inventory *inventory, Wire *wire, uint64_t t
             sha_256_init(&hash, digest);
             uint64_t read_bytes = 0;
             for (;;) {
+                double started = metric_clock();
                 ssize_t n = read(fd, block, sizeof(block));
+                metric_add(&metrics.verify_read_s, started);
                 if (n < 0 && errno == EINTR)
                     continue;
                 if (n < 0) {
@@ -356,7 +365,9 @@ static int verify_staging(int root, Inventory *inventory, Wire *wire, uint64_t t
                     return 0;
                 }
                 verified += (uint64_t)n;
+                started = metric_clock();
                 sha_256_write(&hash, block, (size_t)n);
+                metric_add(&metrics.verify_hash_s, started);
                 if (verified - last_report >= 1024 * 1024) {
                     putnum(progress, verified, 8);
                     putnum(progress + 8, total, 8);

@@ -10,8 +10,6 @@ from unittest.mock import patch
 import pytest
 
 from minecraft_playden.cli import main
-from minecraft_playden.desktop import LocalBuildRequest
-from minecraft_playden.discovery import discover
 from minecraft_playden.network_transfer import NetworkRequest, NetworkResult
 from minecraft_playden.network_protocol import (
     ACK, BEGIN, BEGIN_INFO, COMMIT, DATA, END_FILE, ENTRY, ENTRY_INFO,
@@ -19,35 +17,13 @@ from minecraft_playden.network_protocol import (
 )
 from minecraft_playden.operations import CancellationToken, OperationCancelled
 from minecraft_playden.validator import validate
-from test_fabric_launch import installed, archive, save
+from lan_fixtures import build_package
 from test_network_receiver import receiver, receiver_binary, wait_clean
 
 
 @pytest.fixture
 def built_package(tmp_path):
-    instance, metadata, _ = installed(tmp_path / 'source', '26.3', '0.20.1')
-    payloads = {
-        'https://fixture/netty': archive({'io/netty/channel/unix/Errors.class': b'class'}),
-        'https://fixture/fastutil': archive({'it/unimi/dsi/fastutil/floats/FloatList.class': b'class'}),
-        'https://fixture/native': archive({'lwjgl.dll': b'MZnative'}),
-        'https://fixture/index': b'{"objects":{}}',
-        'https://fixture/base': json.dumps(metadata).encode(),
-    }
-    def request(req, **kwargs):
-        url = req.full_url
-        if url.endswith('version_manifest_v2.json'):
-            return io.BytesIO(json.dumps({'versions': [{'id': metadata['id'], 'url': 'https://fixture/base'}]}).encode())
-        return io.BytesIO(payloads[url])
-    def runtime(metadata, downloader, java):
-        for path in ['bin/java.exe', 'bin/server/jvm.dll', 'release']:
-            save(java, path, b'Windows-x64-fixture')
-        return {'fixture': 'windows x64'}
-    source = discover([instance], include_defaults=False).installations[0]
-    output = tmp_path / 'Minecraft Package'
-    with patch('urllib.request.urlopen', side_effect=request), patch('minecraft_playden.runtime.install', side_effect=runtime):
-        LocalBuildRequest(source, output, tmp_path / 'cache').run()
-    assert validate(output) == []
-    return output
+    return build_package(tmp_path)
 
 
 def snapshot(path):
@@ -248,3 +224,61 @@ def test_cli_destination_override_does_not_use_gui_settings(tmp_path, monkeypatc
     request = run.call_args.args[0]
     assert request.destination == 'usb0' and request.package_name == 'Fresh Package'
     assert token not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('chunk_size,buffer', [(4096, None), (16384, 4096), (65536, 524288)])
+def test_experimental_transfer_sizes_preserve_bytes_and_bounded_diagnostics(
+        receiver, built_package, chunk_size, buffer):
+    original = snapshot(built_package)
+    logs = []
+    with receiver('--diagnostics', '--socket-buffer', '524288') as (sandbox, port, token):
+        result = NetworkRequest(built_package, '127.0.0.1', token, port=port,
+                                chunk_size=chunk_size, socket_buffer=buffer).run(diagnostics=logs.append)
+        wait_clean(sandbox)
+        assert snapshot(sandbox / 'internal' / built_package.name) == original
+    assert len(logs) == 1
+    metrics = logs[0]
+    assert metrics['bytes'] == result.bytes_copied
+    assert metrics['files'] == result.files and metrics['published'] == 1
+    for name in ('validation_s', 'prehash_s', 'pairing_s', 'transfer_s', 'verification_s',
+                 'commit_s', 'socket_read_s', 'socket_write_s', 'frame_auth_s', 'wall_s'):
+        assert metrics[name] >= 0
+    encoded = json.dumps(metrics)
+    assert token not in encoded and str(built_package) not in encoded
+    line = next(line for line in receiver.diagnostics[-1].splitlines() if line.startswith('receiver_metrics '))
+    counters = dict(item.split('=') for item in line.split()[1:])
+    assert int(counters['bytes']) == result.bytes_copied
+    assert int(counters['files']) == result.files
+    assert int(counters['published']) == 1
+    assert int(counters['fsyncs']) >= result.files
+    # Two handshake sends, then one syscall per metadata frame; no three-part replies.
+    assert int(counters['send_calls']) < result.files * 3 + 60
+
+
+@pytest.mark.parametrize('options', [{'chunk_size': 0}, {'chunk_size': 65537},
+                                    {'socket_buffer': 0}, {'socket_buffer': 4194305}])
+def test_invalid_performance_options_fail_before_connect(tmp_path, options):
+    with patch('socket.socket') as connect, pytest.raises(ValueError):
+        NetworkRequest(tmp_path, '127.0.0.1', 'ab' * 32, **options).run()
+    connect.assert_not_called()
+
+
+def test_diagnostics_are_emitted_on_preflight_failure_without_secrets(tmp_path):
+    logs = []
+    with pytest.raises(ValueError):
+        NetworkRequest(tmp_path, '127.0.0.1', 'ab' * 32, chunk_size=0).run(diagnostics=logs.append)
+    assert len(logs) == 1 and logs[0]['wall_s'] >= 0
+    assert 'published' not in logs[0]
+
+
+def test_socket_buffer_option_failure_is_reported_and_keeps_os_defaults():
+    from minecraft_playden.network_metrics import NetworkMetrics
+    from minecraft_playden.network_protocol import configure_socket
+    from unittest.mock import Mock
+    stream = Mock()
+    stream.setsockopt.side_effect = OSError('unsupported')
+    stream.getsockopt.return_value = 16384
+    metrics = NetworkMetrics(True)
+    configure_socket(stream, 524288, metrics)
+    assert metrics.values['socket_buffer_errors'] == 2
+    assert metrics.values['socket_receive_effective'] == 16384

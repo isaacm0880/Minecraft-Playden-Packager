@@ -79,8 +79,12 @@ def licenses(root: Path, stage: Path) -> None:
 
 def bundle_documentation(root: Path, destination: Path, macos: bool = False) -> None:
     """Retain the installation guide's local links and licence/credit notices."""
-    for name in ('INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md', 'TROUBLESHOOTING.md', 'PS5_LAN_TRANSFER.md'):
+    for name in ('INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md', 'TROUBLESHOOTING.md',
+                 'PS5_LAN_TRANSFER.md', 'PS5_LAN_PERFORMANCE.md', 'PS5_RECEIVER_SHUTDOWN.md'):
         shutil.copyfile(root / 'docs' / name, destination / name)
+    (destination / 'benchmarks').mkdir()
+    shutil.copyfile(root / 'docs/benchmarks/lan-loopback-2026-11-16.jsonl',
+                    destination / 'benchmarks/lan-loopback-2026-11-16.jsonl')
     shutil.copyfile(root / 'docs/INSTALLATION.md', destination / 'README.md')
     for name in ('CHANGELOG.md', 'THIRD_PARTY.md', 'LICENSE'):
         shutil.copyfile(root / name, destination / name)
