@@ -276,7 +276,7 @@ static int count_tree(int root, unsigned depth, size_t *count, Wire *wire, uint6
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
             continue;
         struct stat st;
-        if (++*count > ENTRY_MAX || fstatat(root, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) < 0) {
+        if (++*count > ENTRY_MAX || stat_nofollow_at(root, entry->d_name, &st, NULL) < 0) {
             ok = 0;
             break;
         }

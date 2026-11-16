@@ -19,3 +19,7 @@ PLAYDEN_RECEIVER_SANITIZE=1 python -m pytest -q tests/test_network_receiver.py t
 ```
 
 The SHA-256 implementation is pinned and credited in `vendor/README.md`.
+
+For “already exists” errors where no destination is visible, see the
+[stat/errno compatibility investigation and manual redeployment guide](STAT_COMPATIBILITY.md).
+The rebuilt payload identifies itself as `v0.4-stat-errno-1` in console output.

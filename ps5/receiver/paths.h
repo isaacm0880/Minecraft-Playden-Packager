@@ -1,5 +1,6 @@
 #ifndef PDLAN_PATHS_H
 #define PDLAN_PATHS_H
+#include "sdk_fs.h"
 #include "wire.h"
 #include <ctype.h>
 #include <dirent.h>
@@ -8,6 +9,66 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+typedef struct {
+    int result;
+    int raw_errno;
+    int error;
+    int carry;
+} StatDiagnostic;
+
+#ifdef HOST_TEST
+/* One-shot failure injection; the dot probe can be selected explicitly. */
+static int test_stat_pending, test_stat_result = -1, test_stat_errno, test_stat_dot;
+#endif
+
+/* The PS5 SDK v0.45 fstatat stub returns the raw syscall value: zero on
+   success, a positive FreeBSD errno on failure, without updating libc errno.
+   Linux/POSIX libc instead returns -1 and sets errno. Normalize both contracts
+   before any caller can inspect the output struct or decide a name is free. */
+static int stat_nofollow_at(int directory, const char *name, struct stat *info,
+                            StatDiagnostic *diagnostic) {
+    int result;
+    int carry = -1; /* POSIX libc does not expose the native CPU carry flag. */
+    errno = 0;
+#ifdef HOST_TEST
+    if (test_stat_pending && ((!strcmp(name, ".")) == !!test_stat_dot)) {
+        test_stat_pending = 0;
+        result = test_stat_result;
+        errno = test_stat_errno;
+    } else
+#endif
+    {
+#ifdef PS5_RECEIVER
+        ReceiverSyscall call = receiver_syscall4(SYS_fstatat, directory, (uintptr_t)name,
+                                                 (uintptr_t)info, AT_SYMLINK_NOFOLLOW);
+        result = (int)call.value;
+        carry = call.failed;
+#else
+        result = fstatat(directory, name, info, AT_SYMLINK_NOFOLLOW);
+#endif
+    }
+    int raw_errno = errno;
+    int error = 0;
+    if (carry == 1)
+        error = result > 0 && result <= 4095 ? result : EIO;
+    else if (carry == 0)
+        error = result == 0 ? 0 : EIO;
+    else if (result > 0)
+        error = result;
+    else if (result == -1)
+        error = raw_errno ? raw_errno : EIO;
+    else if (result != 0)
+        error = EIO;
+    if (diagnostic) {
+        diagnostic->result = result;
+        diagnostic->raw_errno = raw_errno;
+        diagnostic->error = error;
+        diagnostic->carry = carry;
+    }
+    errno = error;
+    return result == 0 && !error ? 0 : -1;
+}
 
 static int utf8_valid(const unsigned char *s, size_t n) {
     for (size_t i = 0; i < n;) {
@@ -98,9 +159,12 @@ static int open_dirs(int base, const char *path, int create) {
             return -1;
         }
         int next = openat(fd, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        int saved_error = errno;
         close(fd);
-        if (next < 0)
+        if (next < 0) {
+            errno = saved_error;
             return -1;
+        }
         fd = next;
         component = strtok_r(NULL, "/", &save);
     }
@@ -113,7 +177,10 @@ static int open_absolute(const char *path, int create) {
     if (root < 0)
         return -1;
     int fd = open_dirs(root, path, create);
+    int saved_error = errno;
     close(root);
+    if (fd < 0)
+        errno = saved_error;
     return fd;
 }
 static int parent_fd(int root, const char *path, char leaf[256]) {
@@ -179,7 +246,7 @@ static int remove_contents(int root) {
         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
             continue;
         struct stat st;
-        if (fstatat(root, e->d_name, &st, AT_SYMLINK_NOFOLLOW) < 0) {
+        if (stat_nofollow_at(root, e->d_name, &st, NULL) < 0) {
             ok = 0;
             continue;
         }
@@ -202,7 +269,7 @@ static int remove_contents(int root) {
 }
 static int same_inode(int fd, int parent, const char *name) {
     struct stat a, b;
-    return fstat(fd, &a) == 0 && fstatat(parent, name, &b, AT_SYMLINK_NOFOLLOW) == 0 &&
+    return fstat(fd, &a) == 0 && stat_nofollow_at(parent, name, &b, NULL) == 0 &&
            S_ISDIR(b.st_mode) && a.st_dev == b.st_dev && a.st_ino == b.st_ino;
 }
 #endif

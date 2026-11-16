@@ -9,7 +9,7 @@ CFLAGS += -std=c11 -DPS5_RECEIVER -Wall -Wextra -Werror -O2
 .PHONY: all clean
 all: $(ELF)
 
-$(ELF): main.c wire.h paths.h package.h vendor/sha-256.c vendor/sha-256.h ../diagnostic/recipe_check.h
+$(ELF): main.c wire.h paths.h package.h sdk_fs.h vendor/sha-256.c vendor/sha-256.h ../diagnostic/recipe_check.h
 	$(CC) $(CFLAGS) -o $@ main.c vendor/sha-256.c
 
 clean:

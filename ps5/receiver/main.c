@@ -26,6 +26,7 @@
 
 static volatile sig_atomic_t stopping;
 static const char *roots[] = {"/data/playden-import", "/mnt/usb0/playden/import"};
+#define RECEIVER_BUILD "v0.4-stat-errno-1"
 #ifdef HOST_TEST
 static char test_root[1024];
 static uint64_t test_free = UINT64_MAX;
@@ -69,6 +70,13 @@ static void hex(const uint8_t *bytes, size_t n, char *out) {
 }
 static void show_pairing(const char *address, unsigned port, const char *token) {
     printf("PDLAN/1 address=%s port=%u token=%s\n", address, port, token);
+    printf("receiver_build=%s stat_backend=%s\n", RECEIVER_BUILD,
+#ifdef PS5_RECEIVER
+           "freebsd-carry"
+#else
+           "posix-host"
+#endif
+    );
 #ifdef PS5_RECEIVER
     /* Same ABI used by upstream ps5-payload-dev/elfldr's notification helper. */
     typedef struct {
@@ -120,7 +128,10 @@ static int destination_root(int destination, char path[2048]) {
         if (data < 0)
             return -1;
         int fd = open_dirs(data, "playden-import", 1);
+        int saved_error = errno;
         close(data);
+        if (fd < 0)
+            errno = saved_error;
         return fd;
     }
     int usb = open_absolute("/mnt/usb0", 0);
@@ -128,14 +139,23 @@ static int destination_root(int destination, char path[2048]) {
         return -1;
 #ifdef PS5_RECEIVER
     struct statfs fs;
-    if (fstatfs(usb, &fs) < 0 || strcmp(fs.f_mntonname, "/mnt/usb0")) {
+    if (fstatfs(usb, &fs) < 0) {
+        int saved_error = errno;
+        close(usb);
+        errno = saved_error;
+        return -1;
+    }
+    if (strcmp(fs.f_mntonname, "/mnt/usb0")) {
         close(usb);
         errno = ENODEV;
         return -1;
     }
 #endif
     int fd = open_dirs(usb, "playden/import", 1);
+    int saved_error = errno;
     close(usb);
+    if (fd < 0)
+        errno = saved_error;
     return fd;
 }
 static int enough_space(int fd, uint64_t bytes, uint32_t entries) {
@@ -206,6 +226,26 @@ static int publish(int root, int stage, const char *name, const char *absolute_r
     return ok && sync_dir(root);
 }
 
+static void log_stat(const char *name, const StatDiagnostic *diagnostic) {
+    printf("receiver_stat operation=fstatat flags=AT_SYMLINK_NOFOLLOW(0x%x) name=%s "
+           "raw_result=%d carry=%d raw_errno=%d errno=%d (%s)\n",
+           AT_SYMLINK_NOFOLLOW, name, diagnostic->result, diagnostic->carry, diagnostic->raw_errno,
+           diagnostic->error, strerror(diagnostic->error));
+}
+
+/* Read-only alternative-API probe. Its result is diagnostic only: never use an
+   absolute-path lookup to override a failed descriptor-relative security check. */
+static void log_lstat_comparison(const char *root, const char *name) {
+    char path[2300];
+    snprintf(path, sizeof(path), "%s/%s", root, name);
+    struct stat info;
+    errno = 0;
+    int result = lstat(path, &info);
+    int error = errno;
+    printf("receiver_stat comparison=lstat name=%s raw_result=%d errno=%d (%s)\n", name, result,
+           error, strerror(error));
+}
+
 static void connection(int client, const uint8_t key[32]) {
     Wire wire = {.fd = client, .sent = 0, .received = 0};
     if (!handshake(&wire, key)) {
@@ -217,6 +257,7 @@ static void connection(int client, const uint8_t key[32]) {
     Inventory inventory = {0};
     char stage_name[64] = {0}, package_name[121] = {0}, root_path[2048] = {0};
     char package_path[2300];
+    char diagnostic_error[512];
     const char *error = "Malformed or out-of-order transfer command.";
     uint64_t total = 0, planned = 0, completed = 0, remaining = 0;
     uint32_t expected_entries = 0;
@@ -244,13 +285,54 @@ static void connection(int client, const uint8_t key[32]) {
     package_name[name_length] = 0;
     root = destination_root(destination, root_path);
     if (root < 0) {
-        error = destination ? "USB0 is unavailable or unsafe; no internal fallback."
-                            : "Internal import directory is unavailable or unsafe.";
+        int saved_error = errno;
+        snprintf(diagnostic_error, sizeof(diagnostic_error), "%s errno=%d (%s).",
+                 destination ? "USB0 is unavailable or unsafe; no internal fallback."
+                             : "Internal import directory is unavailable or unsafe.",
+                 saved_error, strerror(saved_error));
+        error = diagnostic_error;
+        goto fail;
+    }
+    struct stat held, probe;
+    StatDiagnostic diagnostic;
+    int probe_result = stat_nofollow_at(root, ".", &probe, &diagnostic);
+    log_stat(".", &diagnostic);
+    if (probe_result != 0) {
+        snprintf(diagnostic_error, sizeof(diagnostic_error),
+                 "Import directory fstatat self-check failed: errno=%d (%s), raw_result=%d, "
+                 "raw_errno=%d. No destination assumed available.",
+                 diagnostic.error, strerror(diagnostic.error), diagnostic.result,
+                 diagnostic.raw_errno);
+        error = diagnostic_error;
+        goto fail;
+    }
+    errno = 0;
+    int held_result = fstat(root, &held);
+    int held_error = errno;
+    if (held_result != 0 || !S_ISDIR(probe.st_mode) || !S_ISDIR(held.st_mode) ||
+        probe.st_dev != held.st_dev || probe.st_ino != held.st_ino) {
+        snprintf(diagnostic_error, sizeof(diagnostic_error),
+                 "Import directory stat identity check failed: fstat result=%d errno=%d (%s). "
+                 "No destination assumed available.",
+                 held_result, held_error, strerror(held_error));
+        error = diagnostic_error;
         goto fail;
     }
     struct stat existing;
-    if (fstatat(root, package_name, &existing, AT_SYMLINK_NOFOLLOW) == 0 || errno != ENOENT) {
+    int exists_result = stat_nofollow_at(root, package_name, &existing, &diagnostic);
+    log_stat(package_name, &diagnostic);
+    log_lstat_comparison(root_path, package_name);
+    if (exists_result == 0) {
         error = "Package name already exists. Choose a new name; overwrite is disabled.";
+        goto fail;
+    }
+    if (diagnostic.error != ENOENT) {
+        snprintf(diagnostic_error, sizeof(diagnostic_error),
+                 "Cannot check destination: fstatat errno=%d (%s), raw_result=%d, raw_errno=%d. "
+                 "No destination assumed available; transfer stopped.",
+                 diagnostic.error, strerror(diagnostic.error), diagnostic.result,
+                 diagnostic.raw_errno);
+        error = diagnostic_error;
         goto fail;
     }
     if (!enough_space(root, total, expected_entries)) {
@@ -403,6 +485,7 @@ static void connection(int client, const uint8_t key[32]) {
     }
     goto cleanup;
 fail:
+    printf("receiver_error %s\n", error);
     frame_send(&wire, ERROR_REPLY, error, strlen(error));
 cleanup:
     if (file >= 0)
@@ -460,6 +543,21 @@ int main(int argc, char **argv) {
             test_write_limit = strtoull(argv[++i], &end, 10);
             if (*end)
                 return 2;
+        } else if (!strcmp(argv[i], "--test-stat-result") && i + 1 < argc) {
+            char *end;
+            long value = strtol(argv[++i], &end, 10);
+            if (*end || value == 0 || value < -4095 || value > 4095)
+                return 2;
+            test_stat_result = (int)value;
+            test_stat_pending = 1;
+        } else if (!strcmp(argv[i], "--test-stat-errno") && i + 1 < argc) {
+            char *end;
+            long value = strtol(argv[++i], &end, 10);
+            if (*end || value < 0 || value > 4095)
+                return 2;
+            test_stat_errno = (int)value;
+        } else if (!strcmp(argv[i], "--test-stat-dot")) {
+            test_stat_dot = 1;
         }
 #endif
         else {

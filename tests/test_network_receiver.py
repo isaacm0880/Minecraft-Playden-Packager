@@ -1,5 +1,6 @@
 """Loopback integration against the actual receiver C sources; no PS5 contacted."""
 import contextlib
+import errno
 import hashlib
 import hmac
 import json
@@ -66,8 +67,10 @@ def receiver(receiver_binary, tmp_path):
                 process.kill()
                 output, error = process.communicate(timeout=3)
             reader.join(1)
+            start.diagnostics.append(output)
             assert 'ERROR: AddressSanitizer' not in error and 'runtime error:' not in error, error
             assert process.returncode == 0, 'Receiver exited abnormally: ' + error
+    start.diagnostics = []
     return start
 
 
@@ -363,3 +366,97 @@ def test_replaced_stage_root_is_rejected_at_commit(receiver, tmp_path):
     wait_clean(sandbox)
     assert (outside / 'sentinel').read_bytes() == b'keep'
     assert sorted(p.name for p in outside.iterdir()) == ['sentinel']
+
+
+@pytest.mark.parametrize('result,raw_errno,expected',
+    [(-1, code, code) for code in (errno.EACCES, errno.EPERM, errno.EINVAL, errno.EIO,
+                                  errno.ENOSYS, errno.ENOTDIR, errno.ELOOP, errno.EBADF)] +
+    [(code, errno.ENOENT, code) for code in (errno.EACCES, errno.EINVAL, errno.EIO, errno.ENOSYS)] +
+    [(-1, 0, errno.EIO), (-2, errno.ENOENT, errno.EIO)])
+def test_stat_errors_are_not_existing_packages_or_available_destinations(receiver, result, raw_errno, expected):
+    with receiver('--test-stat-result', str(result), '--test-stat-errno', str(raw_errno)) as (sandbox, port, token):
+        with paired(port, token) as session, pytest.raises(NetworkTransferError) as failure:
+            begin(session, 1, 1)
+        message = str(failure.value)
+        assert 'Cannot check destination: fstatat' in message
+        assert f'errno={expected} ({os.strerror(expected)})' in message
+        assert f'raw_result={result}' in message and f'raw_errno={raw_errno}' in message
+        assert 'already exists' not in message
+        assert not list((sandbox / 'internal').iterdir())
+    output = receiver.diagnostics[-1]
+    assert f'errno={expected} ({os.strerror(expected)})' in output
+    # The absolute lstat probe sees ENOENT, but must never override fstatat's error.
+    assert f'comparison=lstat name=Package raw_result=-1 errno={errno.ENOENT}' in output
+
+
+def test_sdk_positive_enoent_overrides_stale_errno_and_allows_only_a_new_stage(receiver):
+    with receiver('--test-stat-result', str(errno.ENOENT), '--test-stat-errno', str(errno.EEXIST)) as (sandbox, port, token):
+        with paired(port, token) as session:
+            assert begin(session, 1, 1) == b'ready'
+        wait_clean(sandbox)
+        assert not list((sandbox / 'internal').iterdir())
+    output = receiver.diagnostics[-1]
+    assert f'raw_result={errno.ENOENT}' in output
+    assert f'raw_errno={errno.EEXIST} errno={errno.ENOENT} ({os.strerror(errno.ENOENT)})' in output
+
+
+@pytest.mark.parametrize('result,code', [(errno.ENOSYS, errno.ENOENT), (-1, errno.EINVAL)])
+def test_unsupported_descriptor_stat_probe_stops_before_staging(receiver, result, code):
+    expected = errno.ENOSYS if result > 0 else code
+    with receiver('--test-stat-result', str(result), '--test-stat-errno', str(code), '--test-stat-dot') as (sandbox, port, token):
+        with paired(port, token) as session, pytest.raises(NetworkTransferError) as failure:
+            begin(session, 1, 1)
+        assert 'fstatat self-check failed' in str(failure.value)
+        assert f'errno={expected} ({os.strerror(expected)})' in str(failure.value)
+        assert not list((sandbox / 'internal').iterdir())
+    assert 'name=.' in receiver.diagnostics[-1]
+    assert 'comparison=lstat' not in receiver.diagnostics[-1]
+
+
+@pytest.mark.parametrize('kind', ['directory', 'file', 'symlink', 'dangling-symlink', 'fifo'])
+def test_all_existing_destination_types_are_refused_without_following_links(receiver, tmp_path, kind):
+    outside = tmp_path / 'keep-outside'
+    outside.write_bytes(b'keep')
+    with receiver() as (sandbox, port, token):
+        parent = sandbox / 'internal'
+        parent.mkdir()
+        target = parent / 'Package'
+        if kind == 'directory':
+            target.mkdir()
+        elif kind == 'file':
+            target.write_bytes(b'keep')
+        elif kind == 'fifo':
+            os.mkfifo(target)
+        else:
+            target.symlink_to(outside if kind == 'symlink' else tmp_path / 'absent')
+        with paired(port, token) as session, pytest.raises(NetworkTransferError, match='already exists'):
+            begin(session, 1, 1)
+        assert sorted(path.name for path in parent.iterdir()) == ['Package']
+        assert os.path.lexists(target)
+        assert outside.read_bytes() == b'keep'
+    assert 'raw_result=0' in receiver.diagnostics[-1]
+
+
+def test_sdk_carry_translation_preserves_descriptor_values_and_translates_errors(receiver_binary, tmp_path):
+    source = tmp_path / 'syscall-contract.c'
+    source.write_text(r'''
+#include <assert.h>
+#include <errno.h>
+#include "sdk_fs.h"
+int main(void) {
+    errno = EACCES;
+    assert(receiver_syscall_result(2, 0) == 2); /* a valid fd, not ENOENT */
+    assert(errno == EACCES);
+    assert(receiver_syscall_result(0, 0) == 0);
+    assert(receiver_syscall_result(ENOENT, 1) == -1 && errno == ENOENT);
+    assert(receiver_syscall_result(EACCES, 1) == -1 && errno == EACCES);
+    assert(receiver_syscall_result(ENOSYS, 1) == -1 && errno == ENOSYS);
+    assert(receiver_syscall_result(0, 1) == -1 && errno == EIO);
+    return 0;
+}
+''')
+    binary = tmp_path / 'syscall-contract'
+    include = Path(__file__).resolve().parents[1] / 'ps5/receiver'
+    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-I', str(include),
+                    str(source), '-o', str(binary)], check=True, capture_output=True)
+    subprocess.run([str(binary)], check=True, timeout=5)
