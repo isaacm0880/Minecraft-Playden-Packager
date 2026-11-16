@@ -74,9 +74,6 @@ static void scan_imports(const char *root, const char *label) {
                recipe && args && java ? "structure-present" : "incomplete");
         ++packages;
     }
-    if (errno != 0) {
-        /* readdir errors are not distinguished from other operations here. */
-    }
     closedir(dir);
     printf("import_root=%s packages=%u\n", label, packages);
 }
