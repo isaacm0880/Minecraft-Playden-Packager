@@ -142,7 +142,7 @@ def upload(session, files, *, destination=0, name='Package'):
 
 def wait_clean(sandbox):
     def stages():
-        return list((sandbox / 'internal').glob('.pdlan-*')) + list((sandbox / 'usb0/playden/import').glob('.pdlan-*'))
+        return list((sandbox / 'playden-packager-temp').glob('.pdlan-*')) + list((sandbox / 'usb0/playden-packager-temp').glob('.pdlan-*'))
     deadline = time.monotonic() + 3
     while stages() and time.monotonic() < deadline:
         time.sleep(.01)
@@ -247,13 +247,13 @@ def test_symlinks_and_changed_staging_are_rejected_without_touching_targets(rece
                     upload(session, files)
             elif attack == 'stage-parent':
                 begin(session, 1, 1)
-                stage = next(sandbox.glob('internal/.pdlan-*/package'))
+                stage = next(sandbox.glob('playden-packager-temp/.pdlan-*/package'))
                 (stage / 'linked').symlink_to(outside, target_is_directory=True)
                 with pytest.raises(NetworkTransferError, match='unsafe'):
                     entry(session, 'linked/escape', b'x')
             else:
                 upload(session, files)
-                stage = next(sandbox.glob('internal/.pdlan-*/package'))
+                stage = next(sandbox.glob('playden-packager-temp/.pdlan-*/package'))
                 target = stage / 'playden.args'
                 if attack == 'stage-file':
                     target.unlink()
@@ -357,7 +357,7 @@ def test_replaced_stage_root_is_rejected_at_commit(receiver, tmp_path):
     with receiver() as (sandbox, port, token), paired(port, token) as session:
         upload(session, files)
         verify(session)
-        stage = next(sandbox.glob('internal/.pdlan-*/package'))
+        stage = next(sandbox.glob('playden-packager-temp/.pdlan-*/package'))
         stage.rename(stage.with_name('original'))
         stage.symlink_to(outside, target_is_directory=True)
         session.send(COMMIT)
@@ -460,3 +460,73 @@ int main(void) {
     subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-I', str(include),
                     str(source), '-o', str(binary)], check=True, capture_output=True)
     subprocess.run([str(binary)], check=True, timeout=5)
+
+
+@pytest.mark.parametrize('destination,import_path,temp_path', [
+    (0, 'internal', 'playden-packager-temp'),
+    (1, 'usb0/playden/import', 'usb0/playden-packager-temp'),
+])
+def test_staging_is_outside_import_and_cleanup_preserves_unknown_directories(
+        receiver, destination, import_path, temp_path):
+    with receiver() as (sandbox, port, token):
+        temporary = sandbox / temp_path
+        temporary.mkdir(parents=True)
+        unknown = temporary / '.pdlan-unknown'
+        unknown.mkdir()
+        (unknown / 'keep').write_bytes(b'not owned by this session')
+        with paired(port, token) as session:
+            begin(session, 1, 3, destination=destination)
+            entry(session, 'test', b'abc')
+            assert list((sandbox / import_path).iterdir()) == []
+            stages = list(temporary.glob('.pdlan-*/package'))
+            assert len(stages) == 1
+            assert (stages[0] / 'test').read_bytes() == b'abc'
+        deadline = time.monotonic() + 3
+        while stages[0].parent.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert not stages[0].parent.exists()
+        assert (unknown / 'keep').read_bytes() == b'not owned by this session'
+        assert list((sandbox / import_path).iterdir()) == []
+
+
+@pytest.mark.parametrize('action', ['symlink', 'replacement'])
+def test_temporary_root_changes_fail_closed(receiver, tmp_path, action):
+    outside = tmp_path / 'outside-temp'
+    outside.mkdir()
+    (outside / 'keep').write_bytes(b'untouched')
+    files = contents()
+    files['package.json'] = inventory(files)
+    with receiver() as (sandbox, port, token):
+        temporary = sandbox / 'playden-packager-temp'
+        if action == 'symlink':
+            temporary.symlink_to(outside, target_is_directory=True)
+            with paired(port, token) as session, pytest.raises(NetworkTransferError):
+                begin(session, 1, 0)
+        else:
+            with paired(port, token) as session:
+                upload(session, files)
+                verify(session)
+                temporary.rename(sandbox / 'moved-temp')
+                temporary.mkdir()
+                (temporary / 'keep').write_bytes(b'replacement')
+                session.send(COMMIT)
+                with pytest.raises(NetworkTransferError):
+                    session.ack()
+            assert (temporary / 'keep').read_bytes() == b'replacement'
+        assert (outside / 'keep').read_bytes() == b'untouched'
+        assert not (sandbox / 'internal/Package').exists()
+
+
+@pytest.mark.parametrize('options', [('--test-stage-device-mismatch',),
+    ('--test-rename-errno', str(errno.EXDEV)), ('--test-rename-errno', str(errno.EIO))])
+def test_cross_device_or_failed_rename_does_not_publish(receiver, options):
+    files = contents()
+    files['package.json'] = inventory(files)
+    with receiver(*options) as (sandbox, port, token):
+        with paired(port, token) as session, pytest.raises(NetworkTransferError):
+            upload(session, files)
+            verify(session)
+            session.send(COMMIT)
+            session.ack()
+        wait_clean(sandbox)
+        assert list((sandbox / 'internal').iterdir()) == []

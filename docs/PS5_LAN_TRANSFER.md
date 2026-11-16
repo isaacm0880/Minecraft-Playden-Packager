@@ -2,14 +2,14 @@
 
 The PC sends a validated launch package to an explicitly started custom receiver.
 It does not deploy the payload, execute a game, modify Playden's managed games,
-remove local outputs, or silently overwrite an existing import. No physical PS5
-testing has been performed for this feature. The published v0.1.0 binaries do not
+remove local outputs, or silently overwrite an existing import. Earlier receiver builds were tested on a physical PS5; the changes described
+here still require the manual hardware checks below. The published v0.1.0 binaries do not
 include it; run the development source on `feat/ps5-network-transfer`.
 
-| Selection | Exact receiver root |
-| --- | --- |
-| `internal` (new-user default) | `/data/playden-import/` |
-| `usb0` | `/mnt/usb0/playden/import/` |
+| Selection | Published import root | Private staging root |
+| --- | --- | --- |
+| `internal` (new-user default) | `/data/playden-import/` | `/data/playden-packager-temp/` |
+| `usb0` | `/mnt/usb0/playden/import/` | `/mnt/usb0/playden-packager-temp/` |
 
 USB0 must be mounted; its absence is an error, never an internal-storage fallback.
 The receiver cannot write arbitrary destinations. Only these import roots and
@@ -104,7 +104,15 @@ If no success receipt arrives, inspect the exact import path before retrying.
 The client never automatically retries or deletes either copy. Existing names
 are always refused; choose a fresh `--name` rather than deleting old imports.
 
-A crash/payload kill may leave `.pdlan-*` stages or an empty reserved final name.
+Each transfer uses a random `.pdlan-*` subdirectory in its destination’s staging
+root, outside the import tree. The receiver pins both roots, requires distinct
+directories on the same filesystem, and rechecks their identity before an atomic
+rename of the verified package. Cross-filesystem publication fails closed. Normal
+cancellation and failures remove only the current session’s stage. Shared staging
+roots and unknown directories are never recursively cleared.
+
+A crash/payload kill may leave `.pdlan-*` stages in the staging root or an empty
+reserved final name in the import root.
 While the receiver is stopped, inspect those paths manually before removing
 anything. There is no automatic deletion of abandoned or unrelated directories.
 On platforms without exclusive rename, the receiver reserves a new empty final

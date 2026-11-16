@@ -26,11 +26,14 @@
 
 static volatile sig_atomic_t stopping;
 static const char *roots[] = {"/data/playden-import", "/mnt/usb0/playden/import"};
-#define RECEIVER_BUILD "v0.4-stat-errno-1"
+static const char *temp_roots[] = {"/data/playden-packager-temp",
+                                   "/mnt/usb0/playden-packager-temp"};
+#define RECEIVER_BUILD "v0.4-lan-issues-15-17"
 #ifdef HOST_TEST
 static char test_root[1024];
 static uint64_t test_free = UINT64_MAX;
 static uint64_t test_write_limit = UINT64_MAX, test_written;
+static int test_stage_device_mismatch, test_rename_errno;
 #endif
 static void stop_receiver(int sig) {
     (void)sig;
@@ -106,10 +109,13 @@ static int handshake(Wire *w, const uint8_t key[32]) {
     mac(key, "session", 7, greeting + 8, 32, reply, 32, w->key);
     return 1;
 }
-static int destination_root(int destination, char path[2048]) {
+static int storage_root(int destination, int temporary, char path[2048]) {
 #ifdef HOST_TEST
     if (test_root[0]) {
-        snprintf(path, 2048, "%s/%s", test_root, destination ? "usb0/playden/import" : "internal");
+        const char *relative =
+            destination ? (temporary ? "usb0/playden-packager-temp" : "usb0/playden/import")
+                        : (temporary ? "playden-packager-temp" : "internal");
+        snprintf(path, 2048, "%s/%s", test_root, relative);
         if (destination) {
             char usb[1200];
             snprintf(usb, sizeof(usb), "%s/usb0", test_root);
@@ -121,13 +127,13 @@ static int destination_root(int destination, char path[2048]) {
         return open_absolute(path, 1);
     }
 #endif
-    strcpy(path, roots[destination]);
+    strcpy(path, temporary ? temp_roots[destination] : roots[destination]);
     /* Only create the leaf internal import root, never /data or a USB mount. */
     if (!destination) {
         int data = open_absolute("/data", 0);
         if (data < 0)
             return -1;
-        int fd = open_dirs(data, "playden-import", 1);
+        int fd = open_dirs(data, temporary ? "playden-packager-temp" : "playden-import", 1);
         int saved_error = errno;
         close(data);
         if (fd < 0)
@@ -151,7 +157,7 @@ static int destination_root(int destination, char path[2048]) {
         return -1;
     }
 #endif
-    int fd = open_dirs(usb, "playden/import", 1);
+    int fd = open_dirs(usb, temporary ? "playden-packager-temp" : "playden/import", 1);
     int saved_error = errno;
     close(usb);
     if (fd < 0)
@@ -202,28 +208,65 @@ static int write_all(int fd, const uint8_t *data, size_t n) {
     }
     return 1;
 }
-static int publish(int root, int stage, const char *name, const char *absolute_root) {
+static int root_identity(int fd, const char *absolute_root) {
     int fresh = open_absolute(absolute_root, 0);
     struct stat held, current;
-    int same_root = fresh >= 0 && fstat(root, &held) == 0 && fstat(fresh, &current) == 0 &&
+    int same_root = fresh >= 0 && fstat(fd, &held) == 0 && fstat(fresh, &current) == 0 &&
                     held.st_dev == current.st_dev && held.st_ino == current.st_ino;
     if (fresh >= 0)
         close(fresh);
-    if (!same_root) {
+    if (!same_root)
         errno = ENODEV;
+    return same_root;
+}
+static int storage_pair(int root, int temporary) {
+    struct stat a, b;
+    if (fstat(root, &a) < 0 || fstat(temporary, &b) < 0)
+        return 0;
+    if (!S_ISDIR(a.st_mode) || !S_ISDIR(b.st_mode) ||
+        (a.st_dev == b.st_dev && a.st_ino == b.st_ino)) {
+        errno = EINVAL;
         return 0;
     }
+    if (a.st_dev != b.st_dev) {
+        errno = EXDEV;
+        return 0;
+    }
+#ifdef HOST_TEST
+    if (test_stage_device_mismatch) {
+        errno = EXDEV;
+        return 0;
+    }
+#endif
+    return 1;
+}
+static int publish(int root, int temporary, int stage, const char *stage_name, const char *name,
+                   const char *absolute_root, const char *absolute_temporary) {
+    if (!root_identity(root, absolute_root) || !root_identity(temporary, absolute_temporary) ||
+        !storage_pair(root, temporary) || !same_inode(stage, temporary, stage_name))
+        return 0;
     if (mkdirat(root, name, 0700) < 0)
         return 0;
     int reservation = openat(root, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (reservation < 0)
         return 0;
-    int ok = sync_dir(stage) && same_inode(reservation, root, name) &&
-             renameat(stage, "package", root, name) == 0;
+    int ok = sync_dir(stage) && same_inode(reservation, root, name);
+    if (ok) {
+#ifdef HOST_TEST
+        if (test_rename_errno) {
+            errno = test_rename_errno;
+            ok = 0;
+        } else
+#endif
+            ok = renameat(stage, "package", root, name) == 0;
+    }
+    int saved_error = errno;
     if (!ok && same_inode(reservation, root, name))
         unlinkat(root, name, AT_REMOVEDIR);
     close(reservation);
-    return ok && sync_dir(root);
+    if (!ok)
+        errno = saved_error;
+    return ok && sync_dir(stage) && sync_dir(root) && sync_dir(temporary);
 }
 
 static void log_stat(const char *name, const StatDiagnostic *diagnostic) {
@@ -253,9 +296,10 @@ static void connection(int client, const uint8_t key[32]) {
         return;
     }
     uint8_t *body = malloc(FRAME_MAX);
-    int root = -1, stage = -1, package = -1, file = -1;
+    int root = -1, temporary = -1, stage = -1, package = -1, file = -1;
     Inventory inventory = {0};
     char stage_name[64] = {0}, package_name[121] = {0}, root_path[2048] = {0};
+    char temporary_path[2048] = {0};
     char package_path[2300];
     char diagnostic_error[512];
     const char *error = "Malformed or out-of-order transfer command.";
@@ -283,7 +327,7 @@ static void connection(int client, const uint8_t key[32]) {
         goto fail;
     memcpy(package_name, body + 15, name_length);
     package_name[name_length] = 0;
-    root = destination_root(destination, root_path);
+    root = storage_root(destination, 0, root_path);
     if (root < 0) {
         int saved_error = errno;
         snprintf(diagnostic_error, sizeof(diagnostic_error), "%s errno=%d (%s).",
@@ -335,7 +379,18 @@ static void connection(int client, const uint8_t key[32]) {
         error = diagnostic_error;
         goto fail;
     }
-    if (!enough_space(root, total, expected_entries)) {
+    temporary = storage_root(destination, 1, temporary_path);
+    if (temporary < 0 || !storage_pair(root, temporary) || !root_identity(root, root_path) ||
+        !root_identity(temporary, temporary_path)) {
+        int saved_error = errno;
+        snprintf(diagnostic_error, sizeof(diagnostic_error),
+                 "Unsafe or unavailable staging/import roots: errno=%d (%s). Same filesystem "
+                 "required; no copy fallback.",
+                 saved_error, strerror(saved_error));
+        error = diagnostic_error;
+        goto fail;
+    }
+    if (!enough_space(temporary, total, expected_entries)) {
         error = "Insufficient storage for the complete package and staging overhead.";
         goto fail;
     }
@@ -344,14 +399,15 @@ static void connection(int client, const uint8_t key[32]) {
     arc4random_buf(random, 16);
     hex(random, 16, random_hex);
     snprintf(stage_name, sizeof(stage_name), ".pdlan-%s", random_hex);
-    if (mkdirat(root, stage_name, 0700) < 0 ||
-        (stage = openat(root, stage_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0 ||
+    if (mkdirat(temporary, stage_name, 0700) < 0 ||
+        (stage = openat(temporary, stage_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) <
+            0 ||
         mkdirat(stage, "package", 0700) < 0 ||
         (package = openat(stage, "package", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0) {
         error = "Cannot create a private import stage. Check storage and permissions.";
         goto fail;
     }
-    snprintf(package_path, sizeof(package_path), "%s/%s/package", root_path, stage_name);
+    snprintf(package_path, sizeof(package_path), "%s/%s/package", temporary_path, stage_name);
     inventory.capacity = 1;
     while (inventory.capacity < (size_t)expected_entries * 2)
         inventory.capacity *= 2;
@@ -471,9 +527,14 @@ static void connection(int client, const uint8_t key[32]) {
             if (!verified || file >= 0 || length)
                 goto fail;
             if (!same_inode(package, stage, "package") || !sync_dir(package) ||
-                !publish(root, stage, package_name, root_path)) {
-                error = "Publication failed or its durability is uncertain; inspect the import "
-                        "folder before retrying.";
+                !publish(root, temporary, stage, stage_name, package_name, root_path,
+                         temporary_path)) {
+                int saved_error = errno;
+                snprintf(diagnostic_error, sizeof(diagnostic_error),
+                         "Publication failed or its durability is uncertain: errno=%d (%s); "
+                         "inspect the import folder before retrying.",
+                         saved_error, strerror(saved_error));
+                error = diagnostic_error;
                 goto fail;
             }
             char receipt[256];
@@ -493,14 +554,16 @@ cleanup:
     if (package >= 0)
         close(package);
     if (stage >= 0) {
-        if (root >= 0 && same_inode(stage, root, stage_name)) {
+        if (temporary >= 0 && same_inode(stage, temporary, stage_name)) {
             remove_contents(stage);
-            unlinkat(root, stage_name, AT_REMOVEDIR);
+            unlinkat(temporary, stage_name, AT_REMOVEDIR);
         }
         close(stage);
     }
     if (root >= 0)
         close(root);
+    if (temporary >= 0)
+        close(temporary);
     if (inventory.items)
         for (size_t i = 0; i < inventory.count; i++)
             free(inventory.items[i].path);
@@ -558,6 +621,14 @@ int main(int argc, char **argv) {
             test_stat_errno = (int)value;
         } else if (!strcmp(argv[i], "--test-stat-dot")) {
             test_stat_dot = 1;
+        } else if (!strcmp(argv[i], "--test-stage-device-mismatch")) {
+            test_stage_device_mismatch = 1;
+        } else if (!strcmp(argv[i], "--test-rename-errno") && i + 1 < argc) {
+            char *end;
+            long value = strtol(argv[++i], &end, 10);
+            if (*end || value <= 0 || value > 4095)
+                return 2;
+            test_rename_errno = (int)value;
         }
 #endif
         else {
