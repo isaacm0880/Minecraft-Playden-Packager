@@ -1,6 +1,7 @@
 """Loopback integration against the actual receiver C sources; no PS5 contacted."""
 import contextlib
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -329,3 +330,36 @@ def test_c_receiver_checks_frame_authentication_order_and_bounds(receiver, attac
         with pytest.raises(NetworkTransferError):
             session.ack()
     wait_clean(sandbox)
+
+
+def test_recorded_frame_cannot_be_replayed_in_a_new_paired_session(receiver):
+    with receiver() as (sandbox, port, token):
+        with paired(port, token) as first:
+            body = BEGIN_INFO.pack(0, 7, 1, 0) + b'Package'
+            header = HEADER.pack(BEGIN, len(body), 0)
+            recorded = header + body + hmac.digest(first.key, b'C' + header + body, 'sha256')
+        with paired(port, token) as second:
+            second.write(recorded)
+            with pytest.raises(NetworkTransferError):
+                second.ack()
+        assert not (sandbox / 'internal').exists()
+
+
+def test_replaced_stage_root_is_rejected_at_commit(receiver, tmp_path):
+    files = contents()
+    files['package.json'] = inventory(files)
+    outside = tmp_path / 'outside-stage'
+    outside.mkdir()
+    (outside / 'sentinel').write_bytes(b'keep')
+    with receiver() as (sandbox, port, token), paired(port, token) as session:
+        upload(session, files)
+        verify(session)
+        stage = next(sandbox.glob('internal/.pdlan-*/package'))
+        stage.rename(stage.with_name('original'))
+        stage.symlink_to(outside, target_is_directory=True)
+        session.send(COMMIT)
+        with pytest.raises(NetworkTransferError, match='Publication failed'):
+            session.ack()
+    wait_clean(sandbox)
+    assert (outside / 'sentinel').read_bytes() == b'keep'
+    assert sorted(p.name for p in outside.iterdir()) == ['sentinel']
