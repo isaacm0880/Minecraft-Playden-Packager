@@ -71,9 +71,9 @@ def test_current_guides_have_exact_configuration_and_no_obsolete_workflows():
     root = Path(__file__).resolve().parents[1]
     guides = ['README.md', 'docs/INSTALLATION.md', 'docs/USAGE.md']
     for guide in guides:
-        assert EXPECTED in (root / guide).read_text(), guide
+        assert EXPECTED in (root / guide).read_text(encoding="utf-8"), guide
     for guide in [root / 'README.md', *sorted((root / 'docs').glob('*.md'))]:
-        text = guide.read_text().casefold()
+        text = guide.read_text(encoding="utf-8").casefold()
         for removed in ('import recipe', 'recipe → import', 'recipe > import', 'web recipe import',
                         '--source microsoft', '--client-id', '--auth-method', 'authentication.md'):
             assert removed not in text, (guide, removed)
