@@ -30,6 +30,7 @@ jobs:
           python - <<'PYTHON'
           import sys, time, unittest
           from unittest.mock import patch
+          sys.stdout.reconfigure(errors="backslashreplace")
           sys.path.insert(0, 'tests')
           from test_gui_release import ReleaseGuiTests
           from minecraft_playden.transfer import flush_file
