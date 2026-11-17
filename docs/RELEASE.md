@@ -1,4 +1,33 @@
-# v0.1.0 release provenance and maintenance
+# Release provenance and maintenance
+
+## v0.4.0-beta.2: source-only publication
+
+This experimental pre-release is tagged from `feat/ps5-network-transfer` and has
+no uploaded assets; GitHub supplies the source ZIP and tar.gz archives. Release
+notes are in [v0.4.0-beta.2](../release/notes/v0.4.0-beta.2.md). Python metadata,
+CLI/GUI and generated launcher identity use PEP 440 `0.4.0b2`; the release/tag use
+`v0.4.0-beta.2`. Future macOS metadata uses short version `0.4.0` and build
+version `0.4.0b2`. No desktop or receiver build is part of this publication.
+
+Reviewed workflows already isolate desktop candidates to manual dispatch and
+stable asset publication to `v0.1.0`. No workflow subscribes to this beta tag or
+release publication, so no workflow modification is necessary. The preparation
+commit uses `[skip ci]` to avoid the branch-push C receiver integration build;
+lightweight version/source/documentation/configuration checks run locally.
+Compilation, cross-build, full host-receiver tests and artifact generation are
+intentionally skipped for this release. The implementation's preceding commit
+`870bac1` passed its development tests and receiver CI; that historical evidence
+is not a new build or a claim of exhaustive physical PS5 acceptance.
+
+Create an annotated tag at the pushed release commit, then publish explicitly
+with `--verify-tag --prerelease --latest=false --target EXACT_COMMIT` and the
+tracked notes file. Supply no asset arguments. Verify that the tag resolves to
+the release commit, uploaded assets are empty, the pre-release flag is enabled
+and the latest stable release is unchanged. Existing tags/releases must never be
+moved or replaced without approval. Stable source-review and binary provenance
+policy files remain unchanged.
+
+## v0.1.0 provenance and maintenance
 
 This repository builds its own candidates. Application source is the reviewed GUI
 snapshot identified in `release/source-policy.json`; its complete application

@@ -1,4 +1,20 @@
-# Installation — v0.1.0
+# Installation
+
+## v0.4.0-beta.2: source-only beta
+
+The beta contains only GitHub's automatically generated source archives; no
+Windows/Linux/macOS application or PS5 receiver ELF is included. Use the source
+installation below. The Python application/package reports `0.4.0b2`, the
+normalised Python form of `0.4.0-beta.2`.
+
+LAN deployment requires an installed PS5 Payload SDK, local deployment utilities
+and a compatible, already-running PS5 ELF loader. Explicit GUI Start Receiver or
+CLI `--start-receiver` can build a missing/stale source-tree receiver with those
+local tools and use encrypted automatic pairing when loader output is forwarded.
+This local user action is separate from publishing this source-only release.
+See [receiver setup](PS5_RECEIVER_MANAGER.md#automatic-cli-startup).
+
+## v0.1.0: existing stable binaries
 
 Download the Windows/Linux binaries and `SHA256SUMS` from the
 [v0.1.0 release](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases/tag/v0.1.0).

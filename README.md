@@ -1,7 +1,7 @@
 # Minecraft Playden Packager
 
-[![Release status](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases)
-![Platform targets](https://img.shields.io/badge/binaries-Windows%20%7C%20Linux-blue)
+[![Beta status](https://img.shields.io/badge/beta-v0.4.0--beta.2-orange)](https://github.com/isaacm0880/Minecraft-Playden-Packager/releases/tag/v0.4.0-beta.2)
+![Stable binary targets](https://img.shields.io/badge/stable%20binaries-Windows%20%7C%20Linux-blue)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 
 Package your locally installed **Minecraft Java Edition** instances for use with
@@ -11,11 +11,19 @@ Package your locally installed **Minecraft Java Edition** instances for use with
 and source-only. Automated build checks passed; manual desktop, physical USB and
 PS5 acceptance testing has not been verified.
 
-**This development branch is v0.4.0.dev0.** It adds paired LAN transfers to a
-custom PS5 receiver, targeting internal import storage or USB0. The receiver
-builds with the PS5 Payload SDK and passes host integration tests. The owner has
-successfully transferred and launched packages on a physical PS5. GUI integration
-and desktop usability are the current focus. See
+**v0.4.0-beta.2 is an experimental, source-only beta** from
+`feat/ps5-network-transfer` (Python application/package version `0.4.0b2`).
+**No downloadable application builds or receiver ELF are included.** GitHub
+provides only its automatic source ZIP and tar.gz archives. Existing v0.1.0
+application downloads remain the stable release and lack these beta features.
+
+This beta adds metadata-driven Minecraft packaging, automatic native Fabric
+preparation, simpler build/transfer controls and automatic CLI receiver startup
+with `transfer-ps5 --start-receiver`. LAN transfers target internal import storage
+or USB0 with authenticated verification and safe publication. The owner reports
+successful transfers and launches on a physical PS5; this does not certify every
+Minecraft/loader/mod combination or every firmware and ELF loader.
+See the [beta release notes](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/v0.4.0-beta.2/release/notes/v0.4.0-beta.2.md),
 [Receiver Manager and loader limitations](docs/PS5_RECEIVER_MANAGER.md) and
 [PS5 LAN setup](docs/PS5_LAN_TRANSFER.md).
 
@@ -27,11 +35,11 @@ and desktop usability are the current focus. See
 - Shows compatibility warnings and blocks known-broken or technically unsupported builds.
 - Cleans known private data from package copies by default in the GUI; original instances stay untouched.
 - Copies every successful queue output to USB, with progress, cancellation and checksum verification enabled by default.
-- Sends newly built or existing validated packages over paired LAN, with editable import names, progress, speed, ETA and cancellation.
-- Manages the receiver through explicit Start/Stop controls, encrypted automatic startup pairing or a six-digit PAKE code. The PS5 ELF loader must already be running.
+- Sends newly built or existing validated packages over paired LAN, using the current output folder name, progress, smoothed speed/ETA and cancellation; CLI `--name` is an explicit override.
+- Manages the receiver through explicit Start/Stop controls, encrypted automatic startup pairing or a six-digit PAKE code. CLI `--start-receiver` uses the same secure startup path. The PS5 ELF loader must already be running.
 
 It does **not** sign in, download a replacement Minecraft client, collect console
-logs or deploy a payload without an explicit Start Receiver action. Public metadata, dependencies,
+logs or deploy a payload without an explicit GUI Start Receiver action or CLI `--start-receiver`. Public metadata, dependencies,
 assets may still need downloads. Windows Java downloads are enabled when needed; matching verified local/cached runtimes are preferred. Advanced offline/no-download controls remain available. You need your own Minecraft files
 and a working Playden installation.
 
@@ -83,7 +91,8 @@ glibc 2.36+; musl/Alpine and Windows/Linux ARM builds are not targets. See the
 1. Finish installing your instance in its normal launcher, then open the packager.
 2. Select an instance, or use **Add source folder**. Ctrl/Cmd-click or Shift-click selects several.
 3. Check the version, loader and compatibility status. Any blocked selected instance disables the whole Build action.
-4. Choose an output location.
+4. Choose an output folder, then click **Build Playden package**. Its folder name becomes the default PS5 destination name. Required Fabric preparation runs automatically.
+   Choose **Send to PS5 (LAN)** for a receiver transfer, or use USB copying below.
 5. Use **Copy to USB** in the completion popup or main window. Both copy all successful, available outputs from the latest queue. Check the destination preview and keep the drive connected through verification.
 6. Review individual USB results. Retry copies only failed/cancelled/pending items; a new Copy action uses fresh destination names. Safely eject before unplugging.
 

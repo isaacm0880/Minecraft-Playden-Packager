@@ -1,6 +1,42 @@
 # Changelog
 
-## v0.4.0.dev0 — unreleased
+## v0.4.0-beta.2 — 2026-11-17
+
+Experimental source-only beta from `feat/ps5-network-transfer`. Python version:
+`0.4.0b2`. No application builds or receiver ELF are included. v0.1.0 remains
+stable. Changes since v0.2.0-beta.1:
+
+- Metadata-driven Vanilla/Fabric packaging across supported Java/Minecraft
+  generations, with exact Windows x64 runtime selection and inheritance handling.
+  Verified local/cache runtimes are preferred; missing runtimes may download by
+  default, with explicit offline/no-download controls.
+- Native headless Fabric preparation, automatic when required in GUI builds,
+  native JDK discovery and a separate-copy preparation action for existing packages.
+  Vanilla 1.20.1 and natively prepared Fabric 1.20.1 / Loader 0.20.1 are confirmed
+  reaching the PS5 main menu; this is not proof of world/mod compatibility.
+- CLI `transfer-ps5 --start-receiver` reuses GUI SDK deployment and encrypted
+  automatic pairing. Missing/stale source-tree receiver ELFs can be built locally
+  with the installed SDK; no SDK or receiver binary is downloaded or bundled.
+  Existing services are never silently restarted or replaced.
+- Simpler GUI with collapsed advanced groups, current output-folder naming across
+  LAN transfers, explicit CLI name overrides and clearer destination/conflict logs.
+- Shared smoothed transfer speed/ETA, detailed transfer/verification statistics
+  and completion confirmation returning to the main GUI while retaining packages.
+- Correct first-show PS5 button sizing, divider-only hover tooltip and removal of
+  duplicate Fabric preparation text. Compatibility labels are Works, Untested and
+  Broken with retained evidence; mod tracking records known issues only.
+- Authenticated internal/USB0 transfers retain private staging, inventory/hash
+  validation, conflict refusal and explicit atomic publication receipts. Physical
+  PS5 transfer success is owner-reported, not exhaustive firmware/loader acceptance.
+- LAN performance remains under investigation. FTP feasibility is documented;
+  FTP transfer is not enabled and no FTP speed improvement is claimed.
+
+Receiver lifecycle, pairing and transfer foundations included in the previous beta:
+
+## v0.2.0-beta.1 — 2026-11-17
+
+Source-only milestone at `ca8539b`; its retained development snapshot reported
+`0.4.0.dev0`. The following foundations were already available in that beta:
 
 - PS5 Receiver Manager with explicit SDK deployment, authenticated session status,
   independent idle-only graceful shutdown and five-second liveness checks.
@@ -21,7 +57,7 @@
   reports successful transfer and launch on a physical PS5; durability across
   unexpected power loss is not established.
 - GUI build-completion LAN handoff, existing-package validation, editable recorded
-  instance names, optional file pipelining, speed/ETA and explicit publication states.
+  instance names (subsequently replaced by folder-name defaults), optional file pipelining, speed/ETA and explicit publication states.
 - Fix #14: frozen Linux/AppImage folder opening uses the system desktop handler
   without bundled library paths, with asynchronous error reporting. Multi-build
   output selection opens the selected successful package and clears stale paths.

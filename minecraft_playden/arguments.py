@@ -2,6 +2,7 @@
 import re
 from pathlib import Path
 from typing import Any
+from . import __version__
 from .dependencies import allowed
 from .profiles import DEFAULT_PROFILE, REFERENCE_PROFILE, check_profile, game_directory
 
@@ -32,7 +33,7 @@ def generate(metadata: dict[str, Any], classpath: list[str], prefix: str, userna
         'user_type': 'legacy', 'user_properties': '{}',
         'auth_access_token': '0', 'clientid': '0', 'auth_xuid': '0',
         'version_type': metadata.get('type', 'release'), 'natives_directory': prefix + 'natives',
-        'launcher_name': 'minecraft-playden', 'launcher_version': '0.1.0',
+        'launcher_name': 'minecraft-playden', 'launcher_version': __version__,
         'classpath': ';'.join(prefix + p for p in classpath), 'classpath_separator': ';',
         'library_directory': prefix + 'libraries',
     }
