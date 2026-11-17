@@ -177,8 +177,9 @@ def test_lost_completion_receipt_reports_uncertainty_and_keeps_files(receiver, b
             raise NetworkTransferError('synthetic lost receipt')
         return original_ack(session)
     with receiver() as (sandbox, port, token), patch.object(Session, 'send', send), patch.object(Session, 'ack', ack):
-        with pytest.raises(NetworkTransferError, match='receipt was lost'):
+        with pytest.raises(NetworkTransferError, match='receipt was lost') as error:
             NetworkRequest(built_package, '127.0.0.1', token, port=port).run()
+        assert '/data/playden-import/' in str(error.value)
         assert built_package.exists()
 
 

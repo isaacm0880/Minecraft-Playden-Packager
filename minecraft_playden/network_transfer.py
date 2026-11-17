@@ -12,7 +12,7 @@ import sys
 from typing import BinaryIO
 
 from .cleanup import linked, plain_directory, snapshot
-from .operations import CancellationToken
+from .operations import CancellationToken, OperationCancelled
 from .progress import Progress, ProgressCallback
 from .network_metrics import NetworkMetrics, MetricsCallback, decode_receiver_metrics, decode_receiver_profile
 from .validator import validate
@@ -72,6 +72,33 @@ def _open_local_file(source: Path, relative: str, expected: tuple[int, int, int,
     except BaseException:
         handle.close()
         raise
+
+
+def recorded_instance_name(source: Path, before: dict[str, tuple[int, int, int, int, int]],
+                           override: str | None = None) -> str:
+    """Use recorded display metadata with the sender's no-follow identity checks."""
+    if override is None:
+        # The display title survives a renamed output directory. Older
+        # packages predate this metadata and keep their folder-name default.
+        name_path = 'metadata/instance-name.json'
+        if name_path in before:
+            if before[name_path][3] > 4096:
+                raise ValueError('Instance name metadata is too large; use --name to override it.')
+            try:
+                with _open_local_file(source, name_path, before[name_path]) as manifest:
+                    metadata = json.load(manifest)
+            except (ValueError, RecursionError) as exc:
+                raise ValueError('Invalid instance name metadata; use --name to override it.') from exc
+            if not isinstance(metadata, dict) or type(metadata.get('schema')) is not int or metadata['schema'] != 1:
+                raise ValueError('Invalid instance name metadata; use --name to override it.')
+            name = metadata.get('name')
+        else:
+            name = source.name
+    else:
+        name = override
+    if not isinstance(name, str):
+        raise ValueError('Package instance name must be a string; use --name to override it.')
+    return name
 
 
 @dataclass(frozen=True)
@@ -137,27 +164,7 @@ class NetworkRequest:
             raise ValueError('Package validation failed: ' + '\n'.join(errors))
         if not (source / 'recipe.json').is_file():
             raise ValueError('PS5 transfer requires a launch package with recipe.json.')
-        if self.package_name is None:
-            # The display title survives a renamed output directory. Older
-            # packages predate this metadata and keep their folder-name default.
-            name_path = 'metadata/instance-name.json'
-            if name_path in before:
-                if before[name_path][3] > 4096:
-                    raise ValueError('Instance name metadata is too large; use --name to override it.')
-                try:
-                    with _open_local_file(source, name_path, before[name_path]) as manifest:
-                        metadata = json.load(manifest)
-                except (ValueError, RecursionError) as exc:
-                    raise ValueError('Invalid instance name metadata; use --name to override it.') from exc
-                if not isinstance(metadata, dict) or type(metadata.get('schema')) is not int or metadata['schema'] != 1:
-                    raise ValueError('Invalid instance name metadata; use --name to override it.')
-                name = metadata.get('name')
-            else:
-                name = source.name
-        else:
-            name = self.package_name
-        if not isinstance(name, str):
-            raise ValueError('Package instance name must be a string; use --name to override it.')
+        name = recorded_instance_name(source, before, self.package_name)
         encoded_name = safe_relative(name, package=True)
         entries: list[tuple[str, int, int, bytes]] = []
         hashing_started = metrics.tick()
@@ -315,7 +322,7 @@ class NetworkRequest:
                 report('network-complete', f'Package received and verified: {remote}', total, total)
                 return NetworkResult(source, remote, files, total, receiver_metrics)
         except OSError as exc:
-            state = ('Publication receipt was lost; check the PS5 import folder before retrying under a new name.'
+            state = (f'Publication receipt was lost; check the PS5 import folder {ROOTS[self.destination]}/{name} before retrying under a new name.'
                      if committed else 'Transfer not confirmed; local output retained. Check the receiver, pairing token and LAN.')
             raise NetworkTransferError(f'{state} {exc}') from exc
 
@@ -323,10 +330,16 @@ class NetworkRequest:
 def run_network_queue(requests: tuple[NetworkRequest, ...], progress: ProgressCallback,
                       cancellation: CancellationToken) -> tuple[NetworkResult, ...]:
     results = []
-    for request in requests:
-        cancellation.check()
+    for index, request in enumerate(requests, 1):
+        def report(event: Progress) -> None:
+            progress(Progress(event.stage, f'PS5 package {index}/{len(requests)}: {event.message}',
+                              event.completed, event.total, event.current_file, event.bytes_copied, event.bytes_total))
         try:
-            results.append(request.run(progress, cancellation))
+            cancellation.check()
+            results.append(request.run(report, cancellation))
+        except OperationCancelled as exc:
+            raise OperationCancelled(f'{len(results)}/{len(requests)} packages confirmed on PS5. '
+                                     f'Queue cancelled; local outputs retained. {exc}') from exc
         except (OSError, ValueError) as exc:
             raise NetworkTransferError(f'{len(results)}/{len(requests)} packages confirmed on PS5. '
                                        f'Queue stopped at {request.source.name}; local outputs retained. {exc}') from exc

@@ -8,8 +8,14 @@
   verification, constrained recipe/inventory checks and refusal of existing names.
 - GUI send button, progress and cancellation; remembered IP/destination and
   memory-only pairing token. CLI `transfer-ps5` supports a fresh remote name.
-- Host protocol/security integration tests and PS5 SDK build validation. Physical
-  PS5 transfer, filesystem durability and Playden launch testing remain pending.
+- Host protocol/security integration tests and PS5 SDK build validation. The owner
+  reports successful transfer and launch on a physical PS5; durability across
+  unexpected power loss is not established.
+- GUI build-completion LAN handoff, existing-package validation, editable recorded
+  instance names, optional file pipelining, speed/ETA and explicit publication states.
+- Fix #14: frozen Linux/AppImage folder opening uses the system desktop handler
+  without bundled library paths, with asynchronous error reporting. Multi-build
+  output selection opens the selected successful package and clears stale paths.
 - Local USB transfer and local-output retention remain independent of LAN sends.
 
 ## v0.1.0 — 2026-11-16

@@ -2,8 +2,9 @@
 
 The PC sends a validated launch package to an explicitly started custom receiver.
 It does not deploy the payload, execute a game, modify Playden's managed games,
-remove local outputs, or silently overwrite an existing import. Earlier receiver builds were tested on a physical PS5; the changes described
-here still require the manual hardware checks below. The published v0.1.0 binaries do not
+remove local outputs, or silently overwrite an existing import. The owner has successfully transferred and launched packages on a physical PS5.
+The current work focuses on GUI integration and bug fixes; the manual commands
+below remain reference instructions, not a requirement to repeat hardware testing. The published v0.1.0 binaries do not
 include it; run the development source on `feat/ps5-network-transfer`.
 
 | Selection | Published import root | Private staging root |
@@ -72,7 +73,7 @@ does not. The existing local USB-copy feature continues to work independently.
 After transfer, inspect the exact package paths printed in the success receipts, then manually select the corresponding
 folder in Playden's **Play from Import Folder** flow. Do not move files into or
 modify Playden-managed game directories. Launch compatibility is separate from
-file-transfer validation and remains unverified.
+file-transfer validation; owner-reported successful launches do not guarantee every instance will work.
 
 For an owner-approved interruption test, send a fresh name and cancel in the GUI
 or interrupt the CLI before the publication step. Confirm that local files remain
@@ -243,3 +244,69 @@ now buffers bounded incoming bytes by default; frame authentication and package
 validation still precede writes/publication. `--pipeline-files` is an optional
 CLI experiment with at most two file ACKs pending; it is off by default and does
 not change GUI sending. See the performance guide for controlled manual trials.
+
+## GUI build and send workflow
+
+Physical PS5 transfer and Playden launch have been reported successful by the
+owner. This GUI update is validated with automated desktop and host receiver
+tests; no further performance runs or physical benchmarks are required.
+
+1. Select a Minecraft instance and choose **Build Playden package**. The build
+   creates and validates a local package; it does not contact the console.
+2. In the completion dialog choose **Send to PS5 (LAN)…** to reveal the connection
+   settings for that package. Its folder is already selected. Alternatively use
+   **Validate existing package…** to load a previously built package.
+3. Start the receiver ELF manually on the PS5. Enter its private IPv4 address and
+   fresh pairing token. Select **Internal storage** or **USB0 storage** on the PS5.
+   The app never deploys or starts the receiver. USB0 here means the PS5's drive;
+   **Copy to USB** separately writes to a drive attached to this computer.
+4. Check **PS5 instance name**. It defaults to the recorded instance name, even
+   if the local package folder was renamed. Edit it to use a fresh import name;
+   existing names are refused. A multi-build queue sends all successful launch
+   packages using their individual recorded names; the name field is disabled
+   for a queue. Selecting a results row changes which local folder is opened.
+5. Click **Send to PS5 (LAN)**. Validation, sending, receiver verification and
+   publication are distinct stages. Transfer speed and ETA describe the sending
+   stage only; the progress bar reaches completion after the publication receipt.
+   **Cancel Operation** requests cancellation while the worker keeps the UI
+   responsive. Once COMMIT is sent, publication may finish despite cancellation.
+6. On confirmed success, copy the final PS5 import path shown in the log and open
+   it through Playden's **Play from Import Folder** flow. Local outputs remain.
+   If the GUI says **publication uncertain**, inspect the PS5 import folder before
+   retrying: a lost receipt does not prove that publication failed.
+
+IP, destination and the advanced pipeline preference are remembered locally.
+The pairing token is never saved. Name edits apply to the current package during
+this session. Buffered receiver reads are enabled by default in the normal ELF
+build. **Advanced: pipeline files (--pipeline-files)** is off by default and is
+optional; it does not replace pairing, validation or receiver verification.
+
+### CachyOS / KDE regression check
+
+Run the development GUI using `python -m minecraft_playden gui` after installing
+`.[dev,gui]`. Published v0.1.0 binaries do not contain these fixes. The historical
+v0.1 release source-approval gate deliberately blocks a new AppImage from this
+unreleased branch; it has not been changed. AppImage folder-launch environment
+and helper failures have regression coverage, but native acceptance of a new
+AppImage awaits a separately approved desktop build.
+
+- Build one package into a path containing spaces. Use **Open Output Folder**
+  in both the completion dialog and main window; Dolphin should open the exact
+  package folder. The next build must remain available with a fresh output path.
+- Build two selected instances. The queue dialog opens the common output parent;
+  selecting a successful row and using the main window button opens that package.
+  Selecting a failed row must disable the button instead of opening a stale path.
+- Validate an existing package, then check that opening and sending refer to it.
+  Repeat a build, validation and cancelled transfer without restarting the app.
+- Check a source launch and AppImage launch under your usual KDE session. Frozen
+  Linux builds use an asynchronous system `xdg-open` with bundled Python/Qt library
+  paths removed. Missing handlers or nonzero exits must show a message containing
+  the folder path and recovery instructions, and write the same error to the log.
+  Ensure `dolphin` and `xdg-utils` are installed and the desktop's default folder
+  handler is configured if opening fails. Desktop acceptance is not established
+  by an offscreen test; check the actual file manager window.
+- Enter IP/token and an edited name; check internal/USB0 selection, disabled
+  controls while sending, cancellation, separate verification/publication states
+  and the final import path. Close and reopen: IP/destination remain, token is
+  blank. Start the receiver yourself when doing an actual send; no benchmark or
+  additional physical transfer is needed to test the local build/folder controls.

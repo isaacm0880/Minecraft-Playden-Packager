@@ -132,8 +132,8 @@ def test_gui_uses_the_same_recorded_instance_name_and_receives_metrics(ready, tm
     with receiver('--diagnostics') as (sandbox, port, token):
         window.ps5_host.setText('127.0.0.1')
         window.ps5_token.setText(token)
-        with patch('minecraft_playden.gui_app.NetworkRequest', side_effect=lambda source, host, pairing, destination:
-                   NetworkRequest(source, host, pairing, destination, port)):
+        with patch('minecraft_playden.gui_app.NetworkRequest', side_effect=lambda source, host, pairing, destination, **options:
+                   NetworkRequest(source, host, pairing, destination, port, **options)):
             window.copy_to_ps5()
             wait(window)
         assert window.outcome == 'succeeded', window.log.toPlainText()
@@ -141,3 +141,109 @@ def test_gui_uses_the_same_recorded_instance_name_and_receives_metrics(ready, tm
         assert window.network_results[0].receiver_metrics['published'] == 1
         assert 'Receiver:' in window.log.toPlainText()
         assert (sandbox / 'internal/Shared GUI Instance Name/recipe.json').is_file()
+
+
+def test_name_override_and_pipeline_are_passed_to_worker_and_survive_repeat(ready):
+    window, package, create, read = ready
+    assert window.ps5_name.text() == package.name
+    assert not window.ps5_pipeline.isChecked()
+    window.ps5_name.setText('My PS5 Instance')
+    window.ps5_pipeline.setChecked(True)
+    calls = []
+    def run(request, progress, cancellation):
+        calls.append(request)
+        return NetworkResult(package.resolve(), '/data/playden-import/My PS5 Instance', 1, 10)
+    with patch.object(NetworkRequest, 'run', autospec=True, side_effect=run):
+        for _ in range(2):
+            window.copy_ps5_button.click()
+            wait(window)
+    assert all(r.package_name == 'My PS5 Instance' and r.pipeline_files for r in calls)
+    assert window.ps5_name.isEnabled()
+    assert 'publication confirmed' in window.status.text()
+    assert '/data/playden-import/My PS5 Instance' in window.status.text()
+    assert create().ps5_pipeline.isChecked()
+    assert create().ps5_token.text() == ''
+    window.ps5_name.setText('../escape')
+    assert not window.copy_ps5_button.isEnabled()
+
+
+def test_publication_receipt_loss_is_uncertain_and_never_complete(ready):
+    from minecraft_playden.network_protocol import NetworkTransferError
+    window, package, *_ = ready
+    with patch.object(NetworkRequest, 'run', side_effect=NetworkTransferError(
+            'Publication receipt was lost; check the PS5 import folder before retrying under a new name.')), \
+         patch('minecraft_playden.gui_app.QMessageBox.warning'):
+        window.copy_to_ps5()
+        wait(window)
+    assert window.outcome == 'uncertain'
+    assert 'publication uncertain' in window.status.text()
+    assert window.progress_bar.value() == 0
+    assert not window.network_results
+    assert window.copy_ps5_button.isEnabled()
+
+
+def test_eta_and_verification_have_distinct_progress_labels(ready):
+    window, *_ = ready
+    with patch('minecraft_playden.gui_app.time.monotonic', side_effect=[10., 12.]):
+        window.task_progress(Progress('network-send', 'Sending', 0, 1000, '', 0, 1000))
+        assert 'ETA pending' in window.status.text()
+        window.task_progress(Progress('network-send', 'Sending', 500, 1000, 'file.jar', 500, 1000))
+    assert '250 B/s' in window.status.text()
+    assert 'ETA 2s' in window.status.text()
+    assert window.progress_bar.value() == 500
+    window.task_progress(Progress('network-verify', 'Verifying', 800, 1000, '', 800, 1000))
+    assert 'verified' in window.status.text()
+    assert 'ETA' not in window.status.text()
+    window.task_progress(Progress('network-commit', 'Publishing'))
+    assert window.progress_bar.maximum() == 0
+
+
+def test_build_completion_reuses_package_and_reveals_lan_settings(ready):
+    window, package, *_ = ready
+    window.show_completion(package, False)
+    dialog = window.completion_dialog
+    dialog.ps5_button.click()
+    assert not dialog.isVisible()
+    assert window.completed_package.path == package
+    assert 'receiver manually' in window.status.text()
+    assert window.copy_ps5_button.isEnabled()
+
+
+def test_validated_existing_package_becomes_the_transfer_source(ready):
+    window, package, *_ = ready
+    existing = package.parent / 'Existing package'
+    existing.mkdir()
+    with patch('minecraft_playden.gui_app.QFileDialog.getExistingDirectory', return_value=str(existing)), \
+         patch('minecraft_playden.gui_app.check_package', return_value=ValidatedPackage(existing)):
+        window.validate_existing()
+        wait(window)
+    assert window.completed_package.path == existing
+    assert window.ps5_name.text() == existing.name
+    assert window.usb_candidates()[0].source == existing
+    assert window.copy_ps5_button.isEnabled()
+
+
+def test_cancelled_queue_reports_earlier_confirmed_packages(ready):
+    window, package, *_ = ready
+    second = package.parent / 'Second'
+    second.mkdir()
+    candidates = [TransferCandidate('First', package), TransferCandidate('Second', second)]
+    def run(request, progress, cancellation):
+        cancellation.cancel()
+        return NetworkResult(package.resolve(), '/data/playden-import/First', 1, 10)
+    with patch.object(window, 'usb_candidates', return_value=candidates), \
+         patch.object(NetworkRequest, 'run', autospec=True, side_effect=run) as send:
+        window.copy_to_ps5()
+        wait(window)
+    assert send.call_count == 1
+    assert window.outcome == 'cancelled'
+    assert '1/2 packages confirmed on PS5' in window.log.toPlainText()
+    assert package.is_dir() and second.is_dir()
+
+
+
+def test_lan_errors_preserve_recovery_advice_without_local_rebuild_suggestion():
+    from minecraft_playden.gui_components import error_message
+    from minecraft_playden.network_protocol import NetworkTransferError
+    detail = 'Publication receipt was lost; check /data/playden-import/Instance before retrying.'
+    assert error_message(NetworkTransferError(detail)) == detail

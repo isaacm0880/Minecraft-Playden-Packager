@@ -1,6 +1,8 @@
 """PySide6 desktop frontend for read-only local import and the shared exporter."""
 import sys
 import re
+import time
+import stat
 from collections.abc import Callable
 from pathlib import Path
 
@@ -25,11 +27,12 @@ from .branding import application_icon, configure_desktop_identity, DESKTOP_ID
 from .gui_components import Task, CompletionDialog, DriveDialog, SpaceDialog, QueueCompletionDialog
 from .operations import CancellationToken
 from .cleanup import GeneratedOutput
+from .desktop_integration import open_system_folder, needs_system_opener
 from .usb_queue import UsbRecord, TransferCandidate, transfer_candidates, plan_transfers, usb_summary
 from .volumes import DriveTarget
 from .transfer import TransferRequest, TransferResult, InsufficientSpace
-from .network_transfer import NetworkRequest, NetworkResult, run_network_queue
-from .network_protocol import ROOTS, lan_address, pairing_key
+from .network_transfer import NetworkRequest, NetworkResult, run_network_queue, recorded_instance_name
+from .network_protocol import ROOTS, lan_address, pairing_key, safe_relative
 
 
 class PathDelegate(QStyledItemDelegate):
@@ -90,6 +93,9 @@ class MainWindow(QMainWindow):
         self.last_transfer: TransferRequest | None = None
         self.transfer_verified = True
         self.network_results: tuple[NetworkResult, ...] = ()
+        self.ps5_name_source: Path | None = None
+        self.network_started: float | None = None
+        self.folder_openers: list[object] = []
         self.space_dialog: SpaceDialog | None = None
         self.transfer_retry_available = False
         self.pending_dialog: tuple[Path, bool] | None = None
@@ -225,6 +231,19 @@ class MainWindow(QMainWindow):
         self.ps5_token.setPlaceholderText('Pairing token displayed by the receiver')
         self.ps5_token.setToolTip('Session token. Kept in memory only; never saved in settings or logs.')
         form.addRow('PS5 pairing token', self.ps5_token)
+        self.ps5_name = QLineEdit()
+        self.ps5_name.setPlaceholderText('Recorded instance name (one package at a time)')
+        self.ps5_name.setToolTip('Edit the final PS5 import folder name. For a queue, each package uses its own recorded name.')
+        form.addRow('PS5 instance name', self.ps5_name)
+        self.ps5_pipeline = QCheckBox('Advanced: pipeline files (--pipeline-files)')
+        self.ps5_pipeline.setChecked(bool(self.settings.value('transfer/pipelineFiles', False, type=bool)))
+        self.ps5_pipeline.setToolTip('Optional file pipelining. Disabled by default; buffered receiver reads are the normal protocol.')
+        form.addRow('PS5 LAN protocol', self.ps5_pipeline)
+        receiver_note = QLabel('Build locally → Send to PS5 (LAN) → Playden: Play from Import Folder. '
+                              'Start the receiver ELF manually on the PS5 before sending; this app does not deploy or start it. '
+                              'Copy to USB writes to a drive attached to this computer.')
+        receiver_note.setWordWrap(True)
+        form.addRow(receiver_note)
         details_layout.addLayout(form)
         self.cleanup_after_usb = QCheckBox('Remove local generated package after verified USB copy (ask first)')
         self.cleanup_after_usb.setChecked(False)
@@ -238,7 +257,7 @@ class MainWindow(QMainWindow):
         self.queue_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.queue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.queue_table.setMaximumHeight(140)
-        self.queue_table.setToolTip('Select a successful result to open or copy that package using the buttons below.')
+        self.queue_table.setToolTip('Select a successful result to open that package. Copy/send processes all successful packages in this build queue.')
         self.queue_table.itemSelectionChanged.connect(self.select_queue_result)
         self.queue_table.setMinimumHeight(60)
         self.queue_table.hide()
@@ -328,6 +347,8 @@ class MainWindow(QMainWindow):
         self.ps5_destination.currentIndexChanged.connect(self.save_ps5_destination)
         self.ps5_host.textChanged.connect(self.save_ps5_host)
         self.ps5_token.textChanged.connect(self.update_build_button)
+        self.ps5_name.textChanged.connect(self.update_build_button)
+        self.ps5_pipeline.toggled.connect(lambda checked: self.settings.setValue('transfer/pipelineFiles', checked))
         self.username.textChanged.connect(self.offline_name_changed)
         self.username.editingFinished.connect(self.normalise_offline_name)
         self.update_build_button()
@@ -437,10 +458,32 @@ class MainWindow(QMainWindow):
         self.open_output_button.setEnabled(not self.busy() and open_path is not None and open_path.is_dir())
         transferable = any(not candidate.skip_reason for candidate in self.usb_candidates())
         self.copy_usb_button.setEnabled(not self.busy() and transferable)
+        candidates = [c for c in self.usb_candidates() if not c.skip_reason]
+        source = candidates[0].source if len(candidates) == 1 else None
+        if source != self.ps5_name_source:
+            self.ps5_name_source = source
+            name = ''
+            if source is not None:
+                try:
+                    manifest = source / 'metadata/instance-name.json'
+                    before = {}
+                    if manifest.exists() or manifest.is_symlink():
+                        info = manifest.lstat()
+                        if not stat.S_ISREG(info.st_mode):
+                            raise ValueError('Instance name metadata must be a regular file.')
+                        before['metadata/instance-name.json'] = (info.st_mode, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+                    name = recorded_instance_name(source, before)
+                except (OSError, ValueError, RecursionError):
+                    pass  # The worker reports invalid metadata; the user can override the name.
+            with QSignalBlocker(self.ps5_name):
+                self.ps5_name.setText(name)
+        self.ps5_name.setEnabled(not self.busy() and len(candidates) == 1)
         network_ready = False
         try:
             lan_address(self.ps5_host.text().strip())
             pairing_key(self.ps5_token.text())
+            if len(candidates) == 1 and self.ps5_name.text():
+                safe_relative(self.ps5_name.text(), package=True)
             network_ready = True
         except ValueError:
             pass
@@ -489,10 +532,14 @@ class MainWindow(QMainWindow):
             self.use_build_queue = True
             if len(self.build_records) > 1:
                 self.completed_label.setText(queue_summary(self.build_records))
-                self.output_view = self.build_records[0].request.output.parent
+                self.output_view = package.path
             else:
                 self.completed_label.setText(f'Validated package: {package.path}')
                 self.output_view = package.path
+            self.update_build_button()
+        else:
+            self.output_view = None
+            self.completed_package = None
             self.update_build_button()
 
     def queue_status(self, text: str, package: ValidatedPackage | None = None) -> None:
@@ -507,12 +554,13 @@ class MainWindow(QMainWindow):
     def operation_controls(self) -> tuple[QWidget, ...]:
         return (self.scan_button, self.folder_button, self.validate_button, self.output_button,
                 self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.username,
-                self.cleanup_after_usb, self.ps5_destination, self.ps5_host, self.ps5_token)
+                self.cleanup_after_usb, self.ps5_destination, self.ps5_host, self.ps5_token, self.ps5_name, self.ps5_pipeline)
 
     def start_task(self, operation: str, work: Callable[[ProgressCallback], object]) -> None:
         if self.busy():
             return
         self.operation = operation
+        self.network_started = None
         self.outcome = 'running'
         self.pending_dialog = None
         self.worker_thread = QThread(self)
@@ -646,7 +694,21 @@ class MainWindow(QMainWindow):
             fraction = event.completed / event.total if event.total else 0
             percent = min(100, max(0, int(fraction * 100)))
             percentage = f' {percent}%' if event.total is not None else ''
-            self.status.setText(f'{event.message}{percentage} — {format_size(event.bytes_copied)} / {format_size(event.bytes_total)} copied — {event.current_file}')
+            unit = 'verified' if event.stage == 'network-verify' else 'sent' if event.stage.startswith('network-') else 'copied'
+            timing = ''
+            if event.stage == 'network-send':
+                now = time.monotonic()
+                if self.network_started is None or self.last_stage != 'network-send':
+                    self.network_started = now
+                elapsed = now - self.network_started
+                rate = (event.bytes_copied or 0) / elapsed if elapsed > 0 else 0
+                if rate > 0:
+                    remaining = max(0, event.bytes_total - (event.bytes_copied or 0)) / rate
+                    timing = f' — {format_size(int(rate))}/s — ETA {int(remaining)}s'
+                else:
+                    timing = ' — speed / ETA pending'
+            message = re.sub(r' — [0-9.]+ MiB/s$', '', event.message) if event.stage == 'network-send' else event.message
+            self.status.setText(f'{message}{percentage} — {format_size(event.bytes_copied)} / {format_size(event.bytes_total)} {unit}{timing} — {event.current_file}')
             if self.usb_batch_active and usb_record is not None:
                 self.status.setText(f'{usb_record.candidate.name}: ' + self.status.text())
             self.status.setToolTip(self.status.text())
@@ -683,7 +745,7 @@ class MainWindow(QMainWindow):
                 return
             self.network_results = result
             self.outcome = 'succeeded'
-            summary = f'PS5 LAN: {len(result)} package(s) received and verified. Local outputs retained.\n' + '\n'.join(item.destination for item in result)
+            summary = f'PS5 LAN: {len(result)} package(s) verified and publication confirmed. Local outputs retained. Open Playden → Play from Import Folder:\n\n' + '\n'.join(item.destination for item in result)
             self.status.setText(summary)
             self.log.appendPlainText(summary)
         elif self.operation == 'scan':
@@ -849,7 +911,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def task_error(self, message: str) -> None:
-        self.outcome = 'failed'
+        self.outcome = 'uncertain' if self.operation == 'network' and 'Publication receipt was lost' in message else 'failed'
         self.reset_progress()
         if self.operation == 'transfer':
             self.transfer_retry_available = True
@@ -867,6 +929,8 @@ class MainWindow(QMainWindow):
                              'network': 'PS5 LAN transfer failed. Local outputs retained; see the log for completed packages and errors.',
                              'transfer': 'USB transfer failed. Retry is available; no success was reported.',
                              'cleanup': 'Local cleanup failed; the verified USB copy was not deleted.'}.get(self.operation, 'Build failed. No completed output was published.'))
+        if self.operation == 'network':
+            self.status.setText(('PS5 publication uncertain. Check the import path before retrying. ' if self.outcome == 'uncertain' else 'PS5 LAN transfer failed. ') + message)
         self.log.appendPlainText(message)
         if self.operation in ('transfer', 'cleanup'):
             self.record_copy_problem(('USB copy failed: ' if self.operation == 'transfer' else 'Cleanup incomplete; inspect local output: ') + message)
@@ -950,6 +1014,8 @@ class MainWindow(QMainWindow):
                                                   has_packages=any(record.package for record in self.build_records),
                                                   copy_usb=self.copy_to_usb if any(not c.skip_reason for c in self.usb_candidates()) else None)
         self.queue_dialog.finished.connect(lambda: setattr(self, 'queue_dialog', None))
+        if any(not c.skip_reason for c in self.usb_candidates()):
+            self.queue_dialog.add_ps5_action(self.prepare_ps5_transfer)
         self.queue_dialog.open()
 
     def remember_sources(self, installation: Installation) -> None:
@@ -1000,19 +1066,42 @@ class MainWindow(QMainWindow):
                                                   None if transferred or (self.completed_package and self.completed_package.kind == 'instance-import') else self.copy_to_usb,
                                                   transferred=transferred, file_only=bool(self.completed_package and self.completed_package.kind == 'instance-import'),
                                                   verified=self.transfer_verified)
+        if not transferred and self.completed_package and self.completed_package.kind != 'instance-import':
+            self.completion_dialog.add_ps5_action(self.prepare_ps5_transfer)
         self.completion_dialog.open()
 
+    def prepare_ps5_transfer(self) -> None:
+        """Reveal connection settings for the package just built; no folder repicking."""
+        self.details_scroll.ensureWidgetVisible(self.ps5_host)
+        self.ps5_host.setFocus()
+        self.status.setText('Start the PS5 receiver manually, enter its IP and fresh pairing token, then click Send to PS5 (LAN).')
+
     def open_directory(self, path: Path) -> None:
-        if not path.is_dir():
-            QMessageBox.warning(self, 'Folder unavailable', f'The folder no longer exists or the drive is unavailable: {path}')
-        elif not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve()))):
-            QMessageBox.warning(self, 'Could not open folder', f'Your desktop could not open this folder: {path}')
+        def failed(detail: str) -> None:
+            message = (f'Could not open folder: {path}\n{detail}\n'
+                       'Open your file manager and paste this path into its location bar. '
+                       'On KDE, check that Dolphin and xdg-utils are installed and a default folder handler is configured.')
+            self.log.appendPlainText(message)
+            QMessageBox.warning(self, 'Could not open folder', message)
+        try:
+            if not path.is_dir():
+                failed('The folder no longer exists or the drive is unavailable.')
+            elif needs_system_opener():
+                opener = open_system_folder(path.resolve(), self, failed)
+                self.folder_openers.append(opener)
+                opener.destroyed.connect(lambda: self.folder_openers.remove(opener))
+            elif not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve()))):
+                failed('Qt could not hand the folder to the desktop service.')
+        except (OSError, RuntimeError) as exc:
+            failed(str(exc))
 
     @Slot()
     def open_output_folder(self) -> None:
         path = self.output_view or (self.completed_package.path if self.completed_package else None)
         if path is not None:
             self.open_directory(path)
+        else:
+            QMessageBox.warning(self, 'No output selected', 'Build or validate a package, or select a successful output in the results table.')
 
     def usb_candidates(self) -> list[TransferCandidate]:
         return transfer_candidates(self.build_records, self.completed_package, self.use_build_queue)
@@ -1063,7 +1152,15 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             QMessageBox.warning(self, 'PS5 connection settings', str(exc))
             return
-        requests = tuple(NetworkRequest(item.source, host, self.ps5_token.text(), destination) for item in candidates)
+        name = self.ps5_name.text() if len(candidates) == 1 else ''
+        try:
+            if name:
+                safe_relative(name, package=True)
+        except ValueError as exc:
+            QMessageBox.warning(self, 'PS5 instance name', str(exc))
+            return
+        requests = tuple(NetworkRequest(item.source, host, self.ps5_token.text(), destination,
+                                        package_name=name or None, pipeline_files=self.ps5_pipeline.isChecked()) for item in candidates)
         self.network_results = ()
         self.cancellation = CancellationToken()
         self.last_stage = ''

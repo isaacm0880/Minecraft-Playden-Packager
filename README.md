@@ -13,8 +13,9 @@ PS5 acceptance testing has not been verified.
 
 **This development branch is v0.4.0.dev0.** It adds paired LAN transfers to a
 custom PS5 receiver, targeting internal import storage or USB0. The receiver
-builds with the PS5 Payload SDK and passes host integration tests; physical PS5
-transfer and Playden launch testing are still required. See
+builds with the PS5 Payload SDK and passes host integration tests. The owner has
+successfully transferred and launched packages on a physical PS5. GUI integration
+and desktop usability are the current focus. See
 [PS5 LAN setup and physical test commands](docs/PS5_LAN_TRANSFER.md).
 
 ## What it does
@@ -25,7 +26,7 @@ transfer and Playden launch testing are still required. See
 - Shows compatibility warnings and blocks known-broken or technically unsupported builds.
 - Cleans known private data from package copies by default in the GUI; original instances stay untouched.
 - Copies every successful queue output to USB, with progress, cancellation and checksum verification enabled by default.
-- Sends validated packages over a paired LAN connection to the PS5 import receiver, with progress and cancellation.
+- Sends newly built or existing validated packages over paired LAN, with editable import names, progress, speed, ETA and cancellation. The receiver must be started manually.
 
 It does **not** sign in, download a replacement Minecraft client, collect console
 logs or install a payload automatically. Public metadata, dependencies,

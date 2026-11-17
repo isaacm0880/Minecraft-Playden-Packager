@@ -13,12 +13,15 @@ from .drive_discovery import external_mounts
 from .formatting import format_drive_space, format_size
 from .exporter import INSTRUCTIONS
 from .transfer import InsufficientSpace
+from .network_protocol import NetworkTransferError
 from .usb_queue import destination_paths
 
 
 def error_message(exc: Exception) -> str:
     """Actionable desktop errors without Python tracebacks or exception prefixes."""
     detail = str(exc) or 'The operation could not finish.'
+    if isinstance(exc, NetworkTransferError):
+        return detail  # The sender includes receiver/recovery advice and publication certainty.
     if isinstance(exc, PermissionError):
         return f'{detail}\nChoose a writable output/cache folder and check file permissions.'
     if isinstance(exc, FileNotFoundError):
@@ -79,7 +82,7 @@ class CompletionDialog(QDialog):
                 'Safely eject the drive in your operating system before unplugging it.' if transferred else
                 ('Instance files were preserved and their import metadata validated. This is not a launch-ready package; '
                  'it has no generated Java command or Playden launch recipe.' if file_only else
-                 'Export validation passed. Your package is ready to copy to USB. Console/mod testing is still required.\n\n' + INSTRUCTIONS))
+                 'Export validation passed. Your package is ready to send over LAN or copy to USB. Console/mod testing is still required.\n\n' + INSTRUCTIONS))
         self.detail = QPlainTextEdit(text)
         self.detail.setReadOnly(True)
         self.detail.setMinimumHeight(120)
@@ -102,6 +105,14 @@ class CompletionDialog(QDialog):
         available = screen.availableGeometry() if screen is not None else None
         self.resize(min(680, available.width() - 32) if available is not None else 680,
                     min(440, available.height() - 48) if available is not None else 440)
+
+    def add_ps5_action(self, callback: Callable[[], None]) -> None:
+        self.ps5_button = QPushButton('Send to PS5 (LAN)…')
+        self.ps5_button.clicked.connect(self.accept)
+        self.ps5_button.clicked.connect(callback)
+        layout = self.layout()
+        assert layout is not None
+        layout.addWidget(self.ps5_button)
 
 
 class QueueCompletionDialog(QDialog):
@@ -142,6 +153,14 @@ class QueueCompletionDialog(QDialog):
         available = screen.availableGeometry() if screen is not None else None
         self.resize(min(720, available.width() - 32) if available is not None else 720,
                     min(480, available.height() - 48) if available is not None else 480)
+
+    def add_ps5_action(self, callback: Callable[[], None]) -> None:
+        self.ps5_button = QPushButton('Send to PS5 (LAN)…')
+        self.ps5_button.clicked.connect(self.accept)
+        self.ps5_button.clicked.connect(callback)
+        layout = self.layout()
+        assert layout is not None
+        layout.addWidget(self.ps5_button)
 
 
 def drive_label(storage: QStorageInfo) -> str:

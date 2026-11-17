@@ -509,6 +509,9 @@ class GuiTests(unittest.TestCase):
         self.completion.assert_called_once_with(self.root / 'new-package', False)
         self.assertTrue(self.window.open_output_button.isEnabled())
         self.assertTrue(self.window.copy_usb_button.isEnabled())
+        with patch('minecraft_playden.gui_app.QDesktopServices.openUrl', return_value=True) as opened:
+            self.window.open_output_button.click()
+        self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), (self.root / 'new-package').resolve())
 
     def test_build_failure_shows_error_and_never_reports_success(self):
         self.select_source()
@@ -969,7 +972,7 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.progress_bar.text(), '0%')
         self.assertTrue(self.window.build_button.isEnabled())
 
-    def test_queue_summary_and_open_folder_use_common_parent_for_partial_results(self):
+    def test_queue_summary_opens_parent_then_selected_successful_package(self):
         self.populate([self.sorting_installation(str(i), f'Instance {i}') for i in range(3)])
         self.window.table.selectAll()
         parent = self.root / 'shared'
@@ -1000,7 +1003,9 @@ class GuiTests(unittest.TestCase):
             self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), parent.resolve())
             self.window.queue_table.setCurrentCell(1, 1)
             self.window.open_output_button.click()
-            self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), parent.resolve())
+            self.assertEqual(Path(opened.call_args.args[0].toLocalFile()), calls[1].output.resolve())
+            self.window.queue_table.setCurrentCell(0, 1)
+            self.assertFalse(self.window.open_output_button.isEnabled())
 
     def test_zero_success_queue_does_not_open_an_old_package(self):
         old = self.root / 'previous'
