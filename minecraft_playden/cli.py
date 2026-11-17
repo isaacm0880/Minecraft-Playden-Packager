@@ -30,7 +30,8 @@ def main() -> int:
     package.add_argument('--adapter', choices=['auto', 'portable', 'official', 'prism', 'multimc'], default='auto')
     package.add_argument('--libraries-root', type=Path, help='Read-only installed Fabric library cache override (local mode)')
     package.add_argument('--java-runtime', type=Path, help='Existing matching Windows x64 Java home (never host Java)')
-    package.add_argument('--allow-runtime-download', action='store_true', help='Permit downloading missing Windows Java; local/cache preferred')
+    package.add_argument('--allow-runtime-download', action='store_true', default=True, help='Allow missing Windows Java downloads (default); verified local/cache preferred')
+    package.add_argument('--no-runtime-download', dest='allow_runtime_download', action='store_false', help='Use local/cached Windows Java only')
     package.add_argument('--offline', action='store_true', default=argparse.SUPPRESS, help='Use installed files and cached metadata/dependencies only')
     package.add_argument('--output', type=Path, required=True)
     package.add_argument('--username', default='Player')
@@ -57,7 +58,7 @@ def main() -> int:
     transfer.add_argument('--port', type=int, default=9025)
     transfer.add_argument('--pair', action='store_true', help='Pair with a management-v2 receiver using a hidden six-digit code prompt')
     transfer.add_argument('--control-port', type=int, default=9026, help='Management-v2 control port, used with --pair (default 9026)')
-    transfer.add_argument('--name', help='Optional package name override; defaults to the recorded instance name, or package folder name for older packages')
+    transfer.add_argument('--name', help='Optional package name override; defaults to the current local package folder name')
     transfer.add_argument('--token-env', default='PLAYDEN_PS5_TOKEN',
                           help='Legacy receiver token environment variable; otherwise prompt without echo (not used with --pair)')
     transfer.add_argument('--diagnostics', action='store_true', help='Print numeric timing counters to stderr (no token or file paths)')

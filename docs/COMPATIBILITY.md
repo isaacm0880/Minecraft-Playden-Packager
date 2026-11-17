@@ -92,9 +92,10 @@ previously verified runtime archive. A Linux, macOS, ARM64 or different-major Ja
 installation is not a substitute. These structural checks do not establish that
 Temurin or its graphics/native dependencies run through Playden.
 
-Runtime downloads are off by default. Use CLI `--java-runtime PATH`, a Java home
-under `CACHE/runtimes/java-MAJOR-windows-x64`, or explicitly enable
-`--allow-runtime-download` / the GUI Windows Java download checkbox. The download
+Missing runtime downloads are enabled by default. Matching verified local/cache
+runtimes are preferred. Use CLI `--java-runtime PATH`, a Java home under
+`CACHE/runtimes/java-MAJOR-windows-x64`, or disable downloads with
+`--no-runtime-download` / Build advanced options. The download
 path verifies the archive's SHA-256 and checks its extracted target and major.
 The runtime archive and catalog remain cached. `--offline` forbids all HTTP;
 metadata and any public files absent from both the installed launcher and cache

@@ -125,7 +125,7 @@ def test_partial_queue_stops_on_error_and_reports_previously_confirmed_packages(
     assert package.exists() and second.exists()
 
 
-def test_gui_uses_the_same_recorded_instance_name_and_receives_metrics(ready, tmp_path, request):
+def test_gui_uses_folder_name_and_receives_metrics(ready, tmp_path, request):
     # Opt into the actual loopback receiver fixture lazily; Windows still runs
     # the other Qt lifecycle tests without requiring a POSIX payload process.
     receiver = request.getfixturevalue('receiver')
@@ -142,34 +142,36 @@ def test_gui_uses_the_same_recorded_instance_name_and_receives_metrics(ready, tm
         window.copy_to_ps5()
         wait(window)
         assert window.outcome == 'succeeded', window.log.toPlainText()
-        assert window.network_results[0].destination.endswith('/Shared GUI Instance Name')
+        assert window.network_results[0].destination.endswith('/' + package.name)
         assert window.network_results[0].receiver_metrics['published'] == 1
         assert 'Receiver:' in window.log.toPlainText()
-        assert (sandbox / 'internal/Shared GUI Instance Name/recipe.json').is_file()
+        assert (sandbox / 'internal' / package.name / 'recipe.json').is_file()
 
 
-def test_name_override_and_pipeline_are_passed_to_worker_and_survive_repeat(ready):
+def test_folder_default_and_pipeline_survive_repeat_with_completion_return(ready):
     window, package, create, read = ready
-    assert window.ps5_name.text() == package.name
+    assert not hasattr(window, "ps5_name")
     assert not window.ps5_pipeline.isChecked()
-    window.ps5_name.setText('My PS5 Instance')
     window.ps5_pipeline.setChecked(True)
     calls = []
     def run(request, progress, cancellation):
         calls.append(request)
-        return NetworkResult(package.resolve(), '/data/playden-import/My PS5 Instance', 1, 10)
+        return NetworkResult(package.resolve(), '/data/playden-import/' + package.name, 1, 10)
     with patch.object(NetworkRequest, 'run', autospec=True, side_effect=run):
         for _ in range(2):
             window.copy_ps5_button.click()
             wait(window)
-    assert all(r.package_name == 'My PS5 Instance' and r.pipeline_files for r in calls)
-    assert window.ps5_name.isEnabled()
-    assert 'publication confirmed' in window.status.text()
-    assert '/data/playden-import/My PS5 Instance' in window.status.text()
+            assert 'publication confirmed' in window.status.text()
+            assert '/data/playden-import/' + package.name in window.status.text()
+            window.network_confirmation.accept()
+            assert not window.network_results
+            assert window.operation == ''
+    assert all(r.package_name is None and r.pipeline_files for r in calls)
     assert create().ps5_pipeline.isChecked()
     assert create().receiver_manager.paired is None
-    window.ps5_name.setText('../escape')
-    assert not window.copy_ps5_button.isEnabled()
+    assert window.operation == ''
+    assert window.completed_package.path == package
+    assert window.copy_ps5_button.isEnabled()
 
 
 def test_publication_receipt_loss_is_uncertain_and_never_complete(ready):
@@ -189,13 +191,14 @@ def test_publication_receipt_loss_is_uncertain_and_never_complete(ready):
 
 def test_eta_and_verification_have_distinct_progress_labels(ready):
     window, *_ = ready
-    with patch('minecraft_playden.gui_app.time.monotonic', side_effect=[10., 12.]):
+    with patch('minecraft_playden.gui_app.time.monotonic', side_effect=[10., 11., 12., 13.]):
         window.task_progress(Progress('network-send', 'Sending', 0, 1000, '', 0, 1000))
-        assert 'ETA pending' in window.status.text()
-        window.task_progress(Progress('network-send', 'Sending', 500, 1000, 'file.jar', 500, 1000))
+        assert 'ETA estimating…' in window.status.text()
+        for done in (250, 500, 750):
+            window.task_progress(Progress('network-send', 'Sending', done, 1000, 'file.jar', done, 1000))
     assert '250 B/s' in window.status.text()
-    assert 'ETA 2s' in window.status.text()
-    assert window.progress_bar.value() == 500
+    assert 'ETA about 5s' in window.status.text()
+    assert window.progress_bar.value() == 750
     window.task_progress(Progress('network-verify', 'Verifying', 800, 1000, '', 800, 1000))
     assert 'verified' in window.status.text()
     assert 'ETA' not in window.status.text()
@@ -223,7 +226,7 @@ def test_validated_existing_package_becomes_the_transfer_source(ready):
         window.validate_existing()
         wait(window)
     assert window.completed_package.path == existing
-    assert window.ps5_name.text() == existing.name
+    assert not hasattr(window, "ps5_name")
     assert window.usb_candidates()[0].source == existing
     assert window.copy_ps5_button.isEnabled()
 

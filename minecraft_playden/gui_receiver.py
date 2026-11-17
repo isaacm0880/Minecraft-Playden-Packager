@@ -7,7 +7,7 @@ from dataclasses import replace
 from PySide6.QtCore import QSettings, QThread, QTimer, Signal, Slot, Qt
 from PySide6.QtWidgets import QCheckBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget
 
-from .gui_components import Task
+from .gui_components import Task, AdvancedSection
 from .network_protocol import lan_address, PORT, NetworkTransferError
 from .operations import CancellationToken
 from .receiver_manager import CONTROL_PORT, LOADER_PORT, Deployment, PairedReceiver, ReceiverInfo, ReceiverError, identify, pair_receiver, receiver_status, stop_receiver
@@ -18,7 +18,7 @@ class ReceiverManager(QGroupBox):
     state_changed = Signal(str)
 
     def __init__(self, settings: QSettings, parent: QWidget | None = None):
-        super().__init__('PS5 LAN Receiver Manager', parent)
+        super().__init__('Connect to PS5', parent)
         self.settings = settings
         self.state = 'Unknown'
         self.paired: PairedReceiver | None = None
@@ -56,6 +56,7 @@ class ReceiverManager(QGroupBox):
             display.setWordWrap(True)
             display.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             form.addRow(display)
+        self.advanced = AdvancedSection('Transfer advanced options')
         self.code = QLineEdit()
         self.code.setMaxLength(6)
         self.code.setMaximumWidth(150)
@@ -63,16 +64,14 @@ class ReceiverManager(QGroupBox):
         self.code.setToolTip('Expires after five minutes or five attempts. Kept in memory only, never saved or logged.')
         self.pair_button = QPushButton('Pair')
         pair = QHBoxLayout(); pair.addWidget(self.code); pair.addWidget(self.pair_button); pair.addStretch()
-        form.addRow('Pairing code', pair)
+        self.advanced.form.addRow('Manual pairing code', pair)
         layout.addLayout(form)
         note = QLabel('Select a package → Start Receiver → Pair if required → Send to PS5. '
                       'Start uses an already running ELF loader (normally TCP 9021). '
                       'Stop applies only to this authenticated, idle receiver; it never restarts the PS5. '
                       'Closing this app does not stop the receiver.')
         note.setWordWrap(True)
-        layout.addWidget(note)
-        advanced = QCheckBox('Receiver paths and ports…')
-        layout.addWidget(advanced)
+        self.advanced.form.addRow(note)
         self.configuration = QWidget()
         configuration = QFormLayout(self.configuration)
         self.sdk = QLineEdit(str(settings.value('receiver/sdk', os.environ.get('PS5_PAYLOAD_SDK', ''))))
@@ -93,9 +92,8 @@ class ReceiverManager(QGroupBox):
                 box.setValue(default)
             box.valueChanged.connect(lambda value, key=key: settings.setValue('receiver/' + key, value))
             configuration.addRow(label, box)
-        self.configuration.hide()
-        advanced.toggled.connect(self.configuration.setVisible)
-        layout.addWidget(self.configuration)
+        self.advanced.form.addRow(self.configuration)
+        layout.addWidget(self.advanced)
         self.start_button.clicked.connect(self.start_receiver)
         self.stop_button.clicked.connect(self.stop_receiver)
         self.pair_button.clicked.connect(self.pair)
@@ -275,6 +273,7 @@ class ReceiverManager(QGroupBox):
             else:
                 self.info = result
                 self.version.setText(f'Version: {result.version} (unverified) • Listening port: {result.port} • Control port: {result.control_port}')
+                self.advanced.set_expanded(True)
                 self.set_state('Unknown', 'Receiver found. Enter its six-digit PS5 code to authenticate before sending or stopping.')
         elif self.operation == 'stop':
             stopped = self.paired

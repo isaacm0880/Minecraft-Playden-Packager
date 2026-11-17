@@ -42,9 +42,10 @@ class LocalBuildRequest:
     username: str = 'Player'
     file_only: bool = False
     privacy_cleanup: bool = True
-    allow_runtime_download: bool = False
+    allow_runtime_download: bool = True
     prepare_fabric: bool = True
     remap_java: Path | None = None
+    offline: bool = False
 
     def validate(self) -> None:
         if self.installation.build_problem and not self.file_only:
@@ -115,7 +116,7 @@ class LocalBuildRequest:
                             self.exclude_saves, cancellation=cancellation, progress=progress)
             return ValidatedPackage(self.output, 'instance-import')
         source = ClientSource('local', version=self.installation.version, instance=self.installation.instance, client_jar=self.installation.client, libraries_root=self.installation.libraries_root, launcher_root=self.installation.launcher_root)
-        build(self.output, Downloader(self.cache, cancellation, allow_runtime_download=self.allow_runtime_download), source, self.username,
+        build(self.output, Downloader(self.cache, cancellation, allow_runtime_download=self.allow_runtime_download, offline=self.offline), source, self.username,
               progress=progress, cancellation=cancellation, exclude_saves=self.exclude_saves,
               launch_profile=self.launch_profile, privacy_cleanup=self.privacy_cleanup,
               instance_name=self.installation.name, prepare_fabric='auto' if self.prepare_fabric else False,
@@ -212,7 +213,7 @@ def unique_output(base: Path, reserved: set[Path] | None = None) -> Path:
 
 def selection_readiness(installations: list[Installation], output: str, cache: str,
                         busy: bool = False, *, username: str = 'Player',
-                        privacy_cleanup: bool = True, allow_runtime_download: bool = False,
+                        privacy_cleanup: bool = True, allow_runtime_download: bool = True, offline: bool = False,
                         prepare_fabric: bool = True, remap_java: Path | None = None) -> tuple[list[LocalBuildRequest], str]:
     """Capture every selected row; no partial queue if any input is blocked."""
     from dataclasses import replace
@@ -237,7 +238,7 @@ def selection_readiness(installations: list[Installation], output: str, cache: s
                 problems.append(f'{installation.name} ({installation.loader_label}, {installation.version}): {reason}')
             else:
                 requests.append(replace(request, privacy_cleanup=privacy_cleanup, allow_runtime_download=allow_runtime_download,
-                                        prepare_fabric=prepare_fabric, remap_java=remap_java))
+                                        prepare_fabric=prepare_fabric, remap_java=remap_java, offline=offline))
         except (OSError, ValueError, RuntimeError) as exc:
             problems.append(f'{installation.name}: {exc}')
     if problems:

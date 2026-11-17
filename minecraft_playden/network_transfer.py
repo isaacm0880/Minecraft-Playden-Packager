@@ -74,30 +74,11 @@ def _open_local_file(source: Path, relative: str, expected: tuple[int, int, int,
         raise
 
 
-def recorded_instance_name(source: Path, before: dict[str, tuple[int, int, int, int, int]],
-                           override: str | None = None) -> str:
-    """Use recorded display metadata with the sender's no-follow identity checks."""
-    if override is None:
-        # The display title survives a renamed output directory. Older
-        # packages predate this metadata and keep their folder-name default.
-        name_path = 'metadata/instance-name.json'
-        if name_path in before:
-            if before[name_path][3] > 4096:
-                raise ValueError('Instance name metadata is too large; use --name to override it.')
-            try:
-                with _open_local_file(source, name_path, before[name_path]) as manifest:
-                    metadata = json.load(manifest)
-            except (ValueError, RecursionError) as exc:
-                raise ValueError('Invalid instance name metadata; use --name to override it.') from exc
-            if not isinstance(metadata, dict) or type(metadata.get('schema')) is not int or metadata['schema'] != 1:
-                raise ValueError('Invalid instance name metadata; use --name to override it.')
-            name = metadata.get('name')
-        else:
-            name = source.name
-    else:
-        name = override
+def package_destination_name(source: Path, override: str | None = None) -> str:
+    """Destination defaults to the current folder; metadata remains display-only."""
+    name = source.name if override is None else override
     if not isinstance(name, str):
-        raise ValueError('Package instance name must be a string; use --name to override it.')
+        raise ValueError('Package destination name must be a string; use --name for an explicit override.')
     return name
 
 
@@ -108,6 +89,8 @@ class NetworkResult:
     files: int
     bytes_copied: int
     receiver_metrics: dict[str, int | float] | None = field(default=None, repr=False)
+    duration_s: float = 0.
+    average_bytes_per_second: float = 0.
 
 
 @dataclass(frozen=True)
@@ -142,6 +125,7 @@ class NetworkRequest:
             raise ValueError('Chunk size must be between 4096 and 65536 bytes.')
         if self.socket_buffer is not None and not 4096 <= self.socket_buffer <= 4 * 1024 * 1024:
             raise ValueError('Socket buffer must be between 4096 and 4194304 bytes.')
+        wall_started = time.monotonic()
         validation_started = metrics.tick()
         token = cancellation if cancellation is not None else CancellationToken()
         host, key = lan_address(self.host.strip()), pairing_key(self.pairing_token)
@@ -164,8 +148,9 @@ class NetworkRequest:
             raise ValueError('Package validation failed: ' + '\n'.join(errors))
         if not (source / 'recipe.json').is_file():
             raise ValueError('PS5 transfer requires a launch package with recipe.json.')
-        name = recorded_instance_name(source, before, self.package_name)
+        name = package_destination_name(source, self.package_name)
         encoded_name = safe_relative(name, package=True)
+        report('network-details', f'Local package: {source.name}\nPS5 destination: {name}\nStorage: {self.destination.upper()}\nTransfer method: Playden Receiver\nDestination path: {ROOTS[self.destination]}/{name}')
         entries: list[tuple[str, int, int, bytes]] = []
         hashing_started = metrics.tick()
         total = files = 0
@@ -202,6 +187,7 @@ class NetworkRequest:
                 session = Session(connection, token, metrics=metrics)
                 session.authenticate(key)
                 metrics.elapsed('pairing_s', pairing_started)
+                report('network-authenticated', 'Receiver connection authenticated; starting transfer.')
                 session.send(BEGIN, BEGIN_INFO.pack(int(self.destination == 'usb0'), len(encoded_name),
                                                    len(entries), total) + encoded_name)
                 receiver_capabilities = session.ack()
@@ -319,11 +305,13 @@ class NetworkRequest:
                     except (OSError, ValueError):
                         metrics.add('receiver_metrics_unavailable')
                         report('network-metrics', 'Publication confirmed; optional receiver metrics unavailable.', total, total)
-                report('network-complete', f'Package received and verified: {remote}', total, total)
-                return NetworkResult(source, remote, files, total, receiver_metrics)
+                elapsed = max(0., time.monotonic() - wall_started)
+                average = total / elapsed if elapsed > 0 else 0.
+                report('network-complete', f'Package received and verified: {remote}\nBytes transferred: {total}\nTransfer duration: {elapsed:.1f}s\nAverage transfer speed: {average / 1048576:.1f} MiB/s\nVerification: file hashes and publication receipt confirmed.', total, total)
+                return NetworkResult(source, remote, files, total, receiver_metrics, elapsed, average)
         except OSError as exc:
             state = (f'Publication receipt was lost; check the PS5 import folder {ROOTS[self.destination]}/{name} before retrying under a new name.'
-                     if committed else 'Transfer not confirmed; local output retained. Check the receiver, pairing token and LAN.')
+                     if committed else 'Transfer not confirmed; local output retained.')
             raise NetworkTransferError(f'{state} {exc}') from exc
 
 

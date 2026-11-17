@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 
 from PySide6.QtCore import QObject, Signal, Slot, Qt, QStorageInfo
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton, QMenu, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton, QMenu, QVBoxLayout, QWidget, QToolButton, QFormLayout
 
 from .operations import CancellationToken, OperationCancelled
 from .progress import ProgressCallback
@@ -15,6 +15,31 @@ from .exporter import INSTRUCTIONS
 from .transfer import InsufficientSpace
 from .network_protocol import NetworkTransferError
 from .usb_queue import destination_paths
+
+
+class AdvancedSection(QWidget):
+    """Disclosure groups always start collapsed; their option values live separately."""
+    def __init__(self, title: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.toggle = QToolButton()
+        self.toggle.setText(title)
+        self.toggle.setCheckable(True)
+        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toggle.setArrowType(Qt.ArrowType.RightArrow)
+        layout.addWidget(self.toggle)
+        self.content = QWidget()
+        self.form = QFormLayout(self.content)
+        self.content.hide()
+        layout.addWidget(self.content)
+        self.toggle.toggled.connect(self.set_expanded)
+
+    def set_expanded(self, expanded: bool) -> None:
+        self.content.setVisible(expanded)
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        if self.toggle.isChecked() != expanded:
+            self.toggle.setChecked(expanded)
 
 
 def error_message(exc: Exception) -> str:

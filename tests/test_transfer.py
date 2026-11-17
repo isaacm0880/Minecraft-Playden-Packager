@@ -65,6 +65,9 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(result.files, len(self.original))
         self.assertEqual(result.bytes_copied, sum(len(v) for v in self.original.values()))
         self.assertEqual(events[-1].stage, 'transfer-complete')
+        log = '\n'.join(event.message for event in events)
+        for text in ('Local package: Minecraft Package', 'PS5 destination: Minecraft Package', 'Transfer method: USB copy', 'Destination path:', 'Bytes transferred:', 'Transfer duration:', 'Average transfer speed:', 'Verification: SHA-256 verified'):
+            self.assertIn(text, log)
         self.assertGreaterEqual(self.flush.call_count, 3)
         self.assertTrue(any(e.stage == 'transfer-copy' and e.current_file and e.bytes_total for e in events))
         self.assertTrue(any(e.stage == 'transfer-verify' and e.current_file for e in events))

@@ -331,8 +331,8 @@ def set_instance_name(package, name):
     (package / 'package.json').write_text(json.dumps(inventory))
 
 
-@pytest.mark.parametrize('override,expected', [(None, 'My Fabric World'), ('Custom Name', 'Custom Name')])
-def test_default_instance_name_survives_output_rename_and_override_is_optional(receiver, built_package, override, expected):
+@pytest.mark.parametrize('override,expected', [(None, 'Generic Export Folder'), ('Custom Name', 'Custom Name')])
+def test_current_folder_name_overrides_recorded_name_and_override_is_optional(receiver, built_package, override, expected):
     set_instance_name(built_package, 'My Fabric World')
     renamed = built_package.with_name('Generic Export Folder')
     built_package.rename(renamed)
@@ -347,7 +347,7 @@ def test_default_instance_name_survives_output_rename_and_override_is_optional(r
 
 
 @pytest.mark.parametrize('name', ['', '../escape', 'CON', '.hidden', 'x' * 121, 123])
-@pytest.mark.parametrize('override', [False, True])
+@pytest.mark.parametrize('override', [True])
 def test_invalid_instance_names_or_overrides_fail_before_network(built_package, name, override):
     if not override:
         set_instance_name(built_package, name)
@@ -374,8 +374,8 @@ def test_cli_uses_recorded_instance_name_without_name_argument(receiver, built_p
         monkeypatch.setenv('PLAYDEN_PS5_TOKEN', token)
         monkeypatch.setattr('sys.argv', ['packager', 'transfer-ps5', str(built_package), '--host', '127.0.0.1', '--port', str(port)])
         assert main() == 0
-        assert (sandbox / 'internal/CLI Instance').is_dir()
-    assert '/data/playden-import/CLI Instance' in capsys.readouterr().out
+        assert (sandbox / 'internal' / built_package.name).is_dir()
+    assert '/data/playden-import/' + built_package.name in capsys.readouterr().out
 
 
 def test_receiver_metrics_arrive_on_authenticated_connection(receiver, built_package):
@@ -517,3 +517,29 @@ def test_prepared_fabric_cache_survives_actual_receiver_publication(receiver, tm
         assert validate(remote) == []
         record = json.loads((remote / RECORD).read_text())
         assert all((remote / name).is_file() for name in record['outputs'])
+
+
+def test_transfer_logs_actual_folder_destination_stats_and_specific_conflict(receiver, built_package):
+    set_instance_name(built_package, 'Old display name')
+    events = []
+    with receiver() as (_, port, token):
+        result = NetworkRequest(built_package, '127.0.0.1', token, 'usb0', port=port).run(events.append)
+        logs = '\n'.join(event.message for event in events)
+        for expected in (f'Local package: {built_package.name}', f'PS5 destination: {built_package.name}',
+                         'Storage: USB0', 'Transfer method: Playden Receiver', 'Destination path:',
+                         'authenticated', 'Bytes transferred:', 'Transfer duration:',
+                         'Average transfer speed:', 'Verification: file hashes and publication receipt confirmed.'):
+            assert expected in logs
+        assert 'Old display name' not in logs and token not in logs
+        assert result.duration_s > 0 and result.average_bytes_per_second > 0
+        with pytest.raises(NetworkTransferError, match='already exists') as failure:
+            NetworkRequest(built_package, '127.0.0.1', token, 'usb0', port=port).run()
+        assert 'pairing token' not in str(failure.value)
+        assert 'Check the receiver' not in str(failure.value)
+
+
+@pytest.mark.parametrize('invalid', ['', '../escape', 'CON', '.hidden', 'x' * 121, 123])
+def test_recorded_metadata_never_substitutes_a_destination(built_package, invalid):
+    from minecraft_playden.network_transfer import package_destination_name
+    set_instance_name(built_package, invalid)
+    assert package_destination_name(built_package) == built_package.name

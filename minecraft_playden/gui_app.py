@@ -2,7 +2,6 @@
 import sys
 import re
 import time
-import stat
 from collections.abc import Callable
 from pathlib import Path
 
@@ -15,24 +14,25 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from .desktop import ValidatedPackage, LocalBuildRequest, suggest_output, check_package, selection_readiness, offline_player_name, BuildRecord, queue_summary, prepare_existing_package, unique_output
+from .desktop import ValidatedPackage, LocalBuildRequest, suggest_output, check_package, selection_readiness, offline_player_name, BuildRecord, queue_summary, prepare_existing_package, unique_output, sanitise_name
 from .compatibility import Status, UNTESTED_WARNING
 from . import __version__
 from .discovery import DiscoveryResult, Installation, discover
 from .exporter import INSTRUCTIONS
 from .progress import Progress, ProgressCallback
 from .formatting import format_size
+from .transfer_timing import ThroughputEstimator, eta_text
 from .branding import application_icon, configure_desktop_identity, DESKTOP_ID
 
 from .gui_receiver import ReceiverManager
-from .gui_components import Task, CompletionDialog, DriveDialog, SpaceDialog, QueueCompletionDialog
+from .gui_components import AdvancedSection, Task, CompletionDialog, DriveDialog, SpaceDialog, QueueCompletionDialog
 from .operations import CancellationToken
 from .cleanup import GeneratedOutput
 from .desktop_integration import open_system_folder, needs_system_opener
 from .usb_queue import UsbRecord, TransferCandidate, transfer_candidates, plan_transfers, usb_summary
 from .volumes import DriveTarget
 from .transfer import TransferRequest, TransferResult, InsufficientSpace
-from .network_transfer import NetworkRequest, NetworkResult, run_network_queue, recorded_instance_name
+from .network_transfer import NetworkRequest, NetworkResult, run_network_queue
 from .network_protocol import ROOTS, lan_address, safe_relative
 
 
@@ -94,8 +94,9 @@ class MainWindow(QMainWindow):
         self.last_transfer: TransferRequest | None = None
         self.transfer_verified = True
         self.network_results: tuple[NetworkResult, ...] = ()
-        self.ps5_name_source: Path | None = None
-        self.network_started: float | None = None
+        self._output_selection: tuple[Path, str] | None = None
+        self.network_confirmation: QMessageBox | None = None
+        self.transfer_estimator = ThroughputEstimator()
         self._last_receiver_log = ''
         self.folder_openers: list[object] = []
         self.space_dialog: SpaceDialog | None = None
@@ -103,6 +104,11 @@ class MainWindow(QMainWindow):
         self.pending_dialog: tuple[Path, bool] | None = None
         self.completion_dialog: CompletionDialog | None = None
         self.last_stage = ''
+        self._last_transfer_event: Progress | None = None
+        self.eta_timer = QTimer(self)
+        self.eta_timer.setInterval(1000)
+        self.eta_timer.timeout.connect(self.refresh_transfer_estimate)
+        self.eta_timer.start()
         self.build_output: Path | None = None
         self._suggested_output = ''
         self._output_is_manual = False
@@ -113,13 +119,11 @@ class MainWindow(QMainWindow):
         body = QWidget()
         layout = QVBoxLayout(body)
         layout.setSpacing(4)
-        title = QLabel('Package a local Minecraft Java installation for Playden')
+        title = QLabel('Minecraft → Playden')
         title.setStyleSheet('font-size: 20px; font-weight: bold;')
         title.setWordWrap(True)
         layout.addWidget(title)
-        description = QLabel('Package a local Vanilla or Fabric installation for Windows x64 on Playden. '
-                             'Mods, custom files and worlds are preserved by default. Public dependencies and Windows Java '
-                             'may need downloads. Your source stays untouched. Select multiple rows with Ctrl/Cmd or Shift to build in sequence.')
+        description = QLabel('Select an instance, choose a package folder, then build and transfer to PS5. Your original instance stays untouched.')
         description.setWordWrap(True)
         layout.addWidget(description)
         buttons = QHBoxLayout()
@@ -136,6 +140,8 @@ class MainWindow(QMainWindow):
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(['Instance', 'Launcher', 'Version', 'Source folder', 'Client JAR', 'Mod loader', 'Status'])
         self.table.setMinimumHeight(220)
+        self.table.setColumnHidden(3, True)
+        self.table.setColumnHidden(4, True)
         self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -184,16 +190,21 @@ class MainWindow(QMainWindow):
         details_layout.setContentsMargins(0, 0, 0, 0)
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.build_advanced = AdvancedSection('Build advanced options')
+        self.show_paths = QCheckBox('Show source and client paths in the instance list')
+        self.show_paths.toggled.connect(self.show_technical_paths)
+        self.build_advanced.form.addRow(self.show_paths)
+        self.local_management = AdvancedSection('Local package management')
         self.source_path = QLineEdit()
         self.version = QLineEdit()
         self.client_path = QLineEdit()
         self.loader = QLineEdit()
         for field in (self.source_path, self.version, self.client_path, self.loader):
             field.setReadOnly(True)
-        form.addRow('Selected source', self.source_path)
-        form.addRow('Base Minecraft version', self.version)
-        form.addRow('Local client JAR', self.client_path)
-        form.addRow('Mod loader', self.loader)
+        self.build_advanced.form.addRow('Selected source', self.source_path)
+        self.build_advanced.form.addRow('Base Minecraft version', self.version)
+        self.build_advanced.form.addRow('Local client JAR', self.client_path)
+        self.build_advanced.form.addRow('Mod loader', self.loader)
         self.output = QLineEdit()
         self.output.setPlaceholderText('Choose a new, non-existing package folder')
         self.output_button = QPushButton('Choose output…')
@@ -206,17 +217,21 @@ class MainWindow(QMainWindow):
         cache_row = QHBoxLayout()
         cache_row.addWidget(self.cache)
         cache_row.addWidget(self.cache_button)
-        form.addRow('Download cache', cache_row)
+        self.build_advanced.form.addRow('Download cache', cache_row)
         self.allow_runtime_download = QCheckBox('Allow Windows Java runtime download if missing')
-        self.allow_runtime_download.setToolTip('Off by default. Prefer an installed or cached matching Windows x64 runtime. '
+        self.allow_runtime_download.setToolTip('Prefer an installed or cached matching Windows x64 runtime. '
                                               'Enabling this permits a verified Temurin runtime download for this build queue.')
-        form.addRow(self.allow_runtime_download)
+        self.allow_runtime_download.setChecked(bool(self.settings.value("build/runtimeDownload", True, type=bool)))
+        self.build_advanced.form.addRow(self.allow_runtime_download)
+        self.offline = QCheckBox("Offline: use local and cached files only")
+        self.offline.setChecked(bool(self.settings.value("build/offline", False, type=bool)))
+        self.build_advanced.form.addRow(self.offline)
         self.prepare_fabric = QCheckBox('Prepare Fabric for Playden')
         self.prepare_fabric.setToolTip("Prepares Fabric's game files before transfer to avoid first-launch remapping issues on Playden.")
-        form.addRow(self.prepare_fabric)
+        self.build_advanced.form.addRow(self.prepare_fabric)
         self.fabric_explanation = QLabel("Prepares Fabric's game files before transfer to avoid first-launch remapping issues on Playden.")
         self.fabric_explanation.setWordWrap(True)
-        form.addRow(self.fabric_explanation)
+        self.build_advanced.form.addRow(self.fabric_explanation)
         self.remap_java = QLineEdit(str(self.settings.value('preparation/java', '')))
         self.remap_java.setPlaceholderText('Automatic: host-native JDK 17+ with compiler module')
         self.remap_java.setToolTip('Host preparation Java executable. Separate from the Windows runtime packaged for PS5; no Wine or downloads.')
@@ -224,15 +239,17 @@ class MainWindow(QMainWindow):
         java_row = QHBoxLayout()
         java_row.addWidget(self.remap_java)
         java_row.addWidget(self.remap_java_button)
-        form.addRow('Host preparation JDK', java_row)
+        self.build_advanced.form.addRow('Host preparation JDK', java_row)
         self.privacy_cleanup = QCheckBox('Privacy cleanup (recommended)')
-        self.privacy_cleanup.setChecked(True)
+        self.privacy_cleanup.setChecked(bool(self.settings.value("build/privacyCleanup", True, type=bool)))
+        self.build_advanced.form.addRow(self.privacy_cleanup)
         self.privacy_cleanup.setToolTip('Remove known credentials, sessions and personal identifiers from the package copy. '
                                         'Worlds and ordinary mod settings are preserved. Unknown secrets need manual review.')
         self.username = QLineEdit(offline_player_name(self.settings.value('player/offlineName', 'Player')))
         self.save_offline_name(self.username.text())
         self.username.setToolTip('Remembered for this user on this device. Offline display name only; this does not sign in or enable authenticated services.')
         form.addRow('Offline player name', self.username)
+        form.addRow(self.build_advanced)
         self.receiver_manager = ReceiverManager(self.settings, self)
         self.ps5_host = self.receiver_manager.host
         form.addRow(self.receiver_manager)
@@ -244,14 +261,12 @@ class MainWindow(QMainWindow):
         self.ps5_destination.setCurrentIndex(max(0, destination_index))
         self.ps5_destination.setToolTip('LAN destination remembered per user. USB0 never falls back to internal storage.')
         form.addRow('PS5 transfer destination', self.ps5_destination)
-        self.ps5_name = QLineEdit()
-        self.ps5_name.setPlaceholderText('Recorded instance name (one package at a time)')
-        self.ps5_name.setToolTip('Edit the final PS5 import folder name. For a queue, each package uses its own recorded name.')
-        form.addRow('PS5 instance name', self.ps5_name)
-        self.ps5_pipeline = QCheckBox('Advanced: pipeline files (--pipeline-files)')
+        self.ps5_pipeline = QCheckBox('Pipeline files (experimental)')
         self.ps5_pipeline.setChecked(bool(self.settings.value('transfer/pipelineFiles', False, type=bool)))
         self.ps5_pipeline.setToolTip('Optional file pipelining. Disabled by default; buffered receiver reads are the normal protocol.')
-        form.addRow('PS5 LAN protocol', self.ps5_pipeline)
+        self.transfer_advanced = self.receiver_manager.advanced
+        self.transfer_advanced.toggle.setText('Transfer advanced options')
+        self.transfer_advanced.form.addRow('LAN protocol', self.ps5_pipeline)
         receiver_note = QLabel('Build locally → Send to PS5 (LAN) → Playden: Play from Import Folder. '
                               'Start Receiver requires an already running PS5 ELF loader. '
                               'Copy to USB writes to a drive attached to this computer.')
@@ -261,10 +276,8 @@ class MainWindow(QMainWindow):
         self.cleanup_after_usb = QCheckBox('Remove local generated package after verified USB copy (ask first)')
         self.cleanup_after_usb.setChecked(False)
         self.cleanup_after_usb.setToolTip('Off by default each session. Requires full checksum verification and explicit path confirmation. Original instances are never removed.')
-        details_layout.addWidget(self.cleanup_after_usb)
-        options_row = QHBoxLayout()
-        options_row.addWidget(self.privacy_cleanup)
-        layout.addLayout(options_row)
+        details_layout.addWidget(self.local_management)
+        self.local_management.form.addRow(self.cleanup_after_usb)
         self.queue_table = QTableWidget(0, 3)
         self.queue_table.setHorizontalHeaderLabels(['Instance', 'Progress / result / error', 'Output'])
         self.queue_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -301,7 +314,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(actions)
         self.prepare_existing_button = QPushButton('Prepare Fabric…')
         self.prepare_existing_button.setEnabled(False)
-        actions.addWidget(self.prepare_existing_button)
+        self.local_management.form.addRow(self.prepare_existing_button)
         self.fabric_package_status = QLabel()
         self.fabric_package_status.setWordWrap(True)
         details_layout.addWidget(self.fabric_package_status)
@@ -332,7 +345,7 @@ class MainWindow(QMainWindow):
         instructions = QLabel(INSTRUCTIONS)
         instructions.setTextFormat(Qt.TextFormat.PlainText)
         instructions.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        details_layout.addWidget(instructions)
+        self.local_management.form.addRow(instructions)
         details_layout.addStretch()
         self.details_scroll.setWidget(details)
         self.splitter.addWidget(self.details_scroll)
@@ -371,12 +384,18 @@ class MainWindow(QMainWindow):
         self.ps5_host.textChanged.connect(self.save_ps5_host)
         self.receiver_manager.credentials_changed.connect(self.update_build_button)
         self.receiver_manager.state_changed.connect(self.receiver_state_changed)
-        self.ps5_name.textChanged.connect(self.update_build_button)
+        self.allow_runtime_download.toggled.connect(lambda value: self.settings.setValue('build/runtimeDownload', value))
+        self.offline.toggled.connect(lambda value: self.settings.setValue('build/offline', value))
+        self.privacy_cleanup.toggled.connect(lambda value: self.settings.setValue('build/privacyCleanup', value))
         self.ps5_pipeline.toggled.connect(lambda checked: self.settings.setValue('transfer/pipelineFiles', checked))
         self.username.textChanged.connect(self.offline_name_changed)
         self.username.editingFinished.connect(self.normalise_offline_name)
         self.update_build_button()
         QTimer.singleShot(0, self.scan)
+
+    def show_technical_paths(self, shown: bool) -> None:
+        for column in (3, 4):
+            self.table.setColumnHidden(column, not shown)
 
     @Slot(str)
     def receiver_state_changed(self, state: str) -> None:
@@ -454,9 +473,16 @@ class MainWindow(QMainWindow):
         self.source_path.setToolTip(self.source_path.text())
         self.client_path.setToolTip(self.client_path.text())
         self.loader.setText(installation.loader_label if installation else '')
-        if installation and not self._output_is_manual and (not self.output.text().strip() or self.output.text() == self._suggested_output):
+        selection_key = (installation.instance, installation.version) if installation else None
+        changed_instance = installation is not None and selection_key != self._output_selection
+        if installation and (changed_instance or (not self._output_is_manual and (not self.output.text().strip() or self.output.text() == self._suggested_output))):
             try:
-                self._suggested_output = str(suggest_output(installation))
+                suggested = suggest_output(installation)
+                if self.output.text().strip():
+                    suggested = unique_output(Path(self.output.text()).expanduser().parent / sanitise_name(installation.name))
+                self._suggested_output = str(suggested)
+                self._output_selection = selection_key
+                self._output_is_manual = False
                 self.output.setText(self._suggested_output)
             except (OSError, ValueError, RuntimeError):
                 # Keep manual output selection available if no safe suggestion can be made.
@@ -507,32 +533,13 @@ class MainWindow(QMainWindow):
         transferable = any(not candidate.skip_reason for candidate in self.usb_candidates())
         self.copy_usb_button.setEnabled(not self.busy() and transferable)
         candidates = [c for c in self.usb_candidates() if not c.skip_reason]
-        source = candidates[0].source if len(candidates) == 1 else None
-        if source != self.ps5_name_source:
-            self.ps5_name_source = source
-            name = ''
-            if source is not None:
-                try:
-                    manifest = source / 'metadata/instance-name.json'
-                    before = {}
-                    if manifest.exists() or manifest.is_symlink():
-                        info = manifest.lstat()
-                        if not stat.S_ISREG(info.st_mode):
-                            raise ValueError('Instance name metadata must be a regular file.')
-                        before['metadata/instance-name.json'] = (info.st_mode, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
-                    name = recorded_instance_name(source, before)
-                except (OSError, ValueError, RecursionError):
-                    pass  # The worker reports invalid metadata; the user can override the name.
-            with QSignalBlocker(self.ps5_name):
-                self.ps5_name.setText(name)
-        self.ps5_name.setEnabled(not self.busy() and len(candidates) == 1)
         network_ready = False
         try:
             lan_address(self.ps5_host.text().strip())
             if not self.receiver_manager.ready:
                 raise ValueError('Receiver is busy; finish its active transfer first.' if self.receiver_manager.state == 'Running' else 'Start or pair with the receiver first.')
-            if len(candidates) == 1 and self.ps5_name.text():
-                safe_relative(self.ps5_name.text(), package=True)
+            for candidate in candidates:
+                safe_relative(candidate.source.name, package=True)
             network_ready = True
         except ValueError:
             pass
@@ -550,7 +557,7 @@ class MainWindow(QMainWindow):
     def build_requests(self) -> tuple[list[LocalBuildRequest], str]:
         return selection_readiness(self.selected_installations(), self.output.text(), self.cache.text(), self.busy(),
                                    username=offline_player_name(self.username.text()), privacy_cleanup=self.privacy_cleanup.isChecked(),
-                                   allow_runtime_download=self.allow_runtime_download.isChecked(), prepare_fabric=self._prepare_fabric_requested,
+                                   allow_runtime_download=self.allow_runtime_download.isChecked(), offline=self.offline.isChecked(), prepare_fabric=self._prepare_fabric_requested,
                                    remap_java=Path(self.remap_java.text().strip()).expanduser() if self.remap_java.text().strip() else None)
 
     def confirm_untested(self, requests: list[LocalBuildRequest]) -> bool:
@@ -608,13 +615,13 @@ class MainWindow(QMainWindow):
         return (self.scan_button, self.folder_button, self.validate_button, self.output_button,
                 self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.allow_runtime_download, self.username,
                 self.prepare_fabric, self.remap_java, self.remap_java_button, self.prepare_existing_button,
-                self.cleanup_after_usb, self.ps5_destination, self.receiver_manager, self.ps5_name, self.ps5_pipeline)
+                self.cleanup_after_usb, self.ps5_destination, self.receiver_manager, self.offline, self.ps5_pipeline)
 
     def start_task(self, operation: str, work: Callable[[ProgressCallback], object]) -> None:
         if self.busy():
             return
         self.operation = operation
-        self.network_started = None
+        self.transfer_estimator = ThroughputEstimator()
         self.outcome = 'running'
         self.pending_dialog = None
         self.worker_thread = QThread(self)
@@ -786,8 +793,13 @@ class MainWindow(QMainWindow):
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         return answer == QMessageBox.StandardButton.Yes
 
+    def refresh_transfer_estimate(self) -> None:
+        if self.busy() and self._last_transfer_event is not None and self.last_stage in ('network-send', 'transfer-copy'):
+            self.task_progress(self._last_transfer_event)
+
     @Slot(object)
     def task_progress(self, event: Progress) -> None:
+        self._last_transfer_event = event
         usb_record = self.current_usb_record()
         if self.usb_batch_active and usb_record is not None:
             usb_record.detail = event.message + (f' ({event.completed}/{event.total})' if event.total else '')
@@ -799,17 +811,12 @@ class MainWindow(QMainWindow):
             percentage = f' {percent}%' if event.total is not None else ''
             unit = 'verified' if event.stage == 'network-verify' else 'sent' if event.stage.startswith('network-') else 'copied'
             timing = ''
-            if event.stage == 'network-send':
-                now = time.monotonic()
-                if self.network_started is None or self.last_stage != 'network-send':
-                    self.network_started = now
-                elapsed = now - self.network_started
-                rate = (event.bytes_copied or 0) / elapsed if elapsed > 0 else 0
-                if rate > 0:
-                    remaining = max(0, event.bytes_total - (event.bytes_copied or 0)) / rate
-                    timing = f' — {format_size(int(rate))}/s — ETA {int(remaining)}s'
-                else:
-                    timing = ' — speed / ETA pending'
+            if event.stage in ('network-send', 'transfer-copy'):
+                if self.last_stage != event.stage:
+                    self.transfer_estimator = ThroughputEstimator()
+                estimate = self.transfer_estimator.update(event.bytes_copied or 0, event.bytes_total, time.monotonic())
+                speed = f'{format_size(int(estimate.rate))}/s' if estimate.rate is not None else 'measuring speed'
+                timing = ' — stalled; waiting for data' if estimate.stalled else f' — {speed} — ETA {eta_text(estimate.eta)}'
             message = re.sub(r' — [0-9.]+ MiB/s$', '', event.message) if event.stage == 'network-send' else event.message
             self.status.setText(f'{message}{percentage} — {format_size(event.bytes_copied)} / {format_size(event.bytes_total)} {unit}{timing} — {event.current_file}')
             if self.usb_batch_active and usb_record is not None:
@@ -1111,10 +1118,31 @@ class MainWindow(QMainWindow):
         if self.usb_summary_pending:
             self.usb_summary_pending = False
             self.show_usb_completion()
+        if self.operation == 'network' and self.outcome == 'succeeded':
+            self.show_network_completion()
         if self.pending_dialog is not None:
             path, transferred = self.pending_dialog
             self.pending_dialog = None
             self.show_completion(path, transferred)
+
+    def show_network_completion(self) -> None:
+        dialog = QMessageBox(QMessageBox.Icon.Information, 'Sent to PS5',
+                             'Transfer verified and published on PS5. Your local package has been kept.',
+                             QMessageBox.StandardButton.Ok, self)
+        self.network_confirmation = dialog
+        dialog.finished.connect(self.finish_network_completion)
+        dialog.open()
+
+    def finish_network_completion(self, _result: int) -> None:
+        self.network_confirmation = None
+        self.network_results = ()
+        self.operation = ''
+        self.outcome = ''
+        self.last_stage = ''
+        self.reset_progress()
+        self.status.setText('Ready. Select another instance to build, or transfer your saved package again.')
+        self.update_build_button()
+        self.table.setFocus()
 
     def show_queue_completion(self) -> None:
         parent = self.build_records[0].request.output.parent
@@ -1177,10 +1205,14 @@ class MainWindow(QMainWindow):
                                                   verified=self.transfer_verified)
         if not transferred and self.completed_package and self.completed_package.kind != 'instance-import':
             self.completion_dialog.add_ps5_action(self.prepare_ps5_transfer)
+        self.completion_dialog.finished.connect(lambda: setattr(self, "completion_dialog", None))
         self.completion_dialog.open()
 
     def prepare_ps5_transfer(self) -> None:
         """Reveal connection settings for the package just built; no folder repicking."""
+        for dialog in (self.completion_dialog, self.queue_dialog):
+            if dialog is not None:
+                dialog.accept()
         self.details_scroll.ensureWidgetVisible(self.ps5_host)
         self.ps5_host.setFocus()
         self.status.setText('Select the PS5 IP, choose Start Receiver, or enter its six-digit code and Pair, then Send to PS5 (LAN). The PS5 ELF loader must already be running.')
@@ -1262,19 +1294,18 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             QMessageBox.warning(self, 'PS5 connection settings', str(exc))
             return
-        name = self.ps5_name.text() if len(candidates) == 1 else ''
         try:
-            if name:
-                safe_relative(name, package=True)
+            for candidate in candidates:
+                safe_relative(candidate.source.name, package=True)
         except ValueError as exc:
-            QMessageBox.warning(self, 'PS5 instance name', str(exc))
+            QMessageBox.warning(self, 'Invalid package folder name', str(exc))
             return
         paired = self.receiver_manager.paired
         if paired is None:
             QMessageBox.warning(self, 'Receiver not paired', 'Start Receiver or enter the six-digit PS5 code and Pair first.')
             return
         requests = tuple(NetworkRequest(item.source, host, paired.key.hex(), destination, port=paired.info.port,
-                                        package_name=name or None, pipeline_files=self.ps5_pipeline.isChecked()) for item in candidates)
+                                        pipeline_files=self.ps5_pipeline.isChecked()) for item in candidates)
         if not self.confirm_unprepared_transfer([request.source for request in requests]):
             return
         self.network_results = ()

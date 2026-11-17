@@ -11,7 +11,10 @@ source paths, version, loader and status. Ctrl/Cmd/Shift allows multiple selecti
 Every selected instance must be eligible before Build enables. Deselect Broken or
 Cannot package rows; untested rows may build after the compatibility warning.
 
-Outputs default to sanitised instance names, with collision suffixes. A single
+Outputs default to sanitised instance names, with collision suffixes. Switching
+instances resets the output folder name to the newly selected instance while
+keeping the output parent. Rename the folder before building if desired; that
+folder name is also the default PS5 destination name. A single
 build uses the displayed output path; a multi-build creates named directories
 under its parent. Existing outputs are not replaced. Keep source, cache and output
 separate. Public metadata, assets and dependencies may require internet access;
@@ -20,15 +23,17 @@ local Minecraft clients are never downloaded.
 
 The development source selects the exact Java major required by Minecraft/Fabric
 metadata and requires a Windows x64 runtime, even when building on Linux/macOS.
-Windows Java runtime downloads are off by default. To permit one, enable **Allow
-Windows Java runtime download if missing** for the build queue. Otherwise provide
+Windows Java runtime downloads are enabled by default and used only when no
+matching verified local or cached runtime is available. **Build advanced options**
+contains **Allow Windows Java runtime download if missing** and an **Offline**
+option to forbid all downloads. You can also provide
 a matching Java home at `CACHE/runtimes/java-MAJOR-windows-x64`; known local launcher
 runtime locations are also checked. Java 8 remains blocked because the preserved
 Playden launch command uses Java launcher argument files, introduced in Java 9.
 See [compatibility](COMPATIBILITY.md) for the tested metadata matrix and limitations.
 
 For CLI builds, `--java-runtime PATH` selects an existing Windows Java home and
-`--allow-runtime-download` permits a missing runtime download. Add `--offline` to
+`--no-runtime-download` disables missing runtime downloads (the default permits them). Add `--offline` to
 forbid HTTP, including public metadata/dependencies. A first build may need the
 public manifest and missing Windows files; subsequent builds can reuse verified
 installed/cached files. `python -m minecraft_playden versions` explicitly refreshes
@@ -154,3 +159,31 @@ Note: Online play limited to offline mode servers, authentication is not yet imp
 
 Internal recipes remain part of validation, not a promised Playden UI feature.
 [Tested configurations and limits](COMPATIBILITY.md) · [Troubleshooting](TROUBLESHOOTING.md)
+
+## Main window and advanced settings
+
+The normal workflow is select an instance → choose its output folder →
+**Build Playden package** → **Copy to USB** or **Send to PS5 (LAN)**.
+The instance list shows the essential version, loader and compatibility status.
+Source paths remain in tooltips/details and can be shown as columns.
+
+Three disclosure groups start collapsed on every launch:
+
+- **Build advanced options**: source details, path columns, download cache,
+  runtime downloads/offline mode, privacy cleanup, Fabric preparation and host JDK.
+- **Transfer advanced options**, inside **Connect to PS5**: manual pairing,
+  receiver paths/ports and experimental file pipelining.
+- **Local package management**: existing-package Fabric preparation, optional
+  generated-output removal after verified USB copy and detailed instructions.
+
+Runtime-download, offline, privacy, Java and pipeline choices are remembered.
+Build/output paths and destructive removal consent are not carried into later
+sessions. Receiver status and errors, progress and logs remain visible.
+Fabric preparation remains automatic by default when required; it completes
+before transfer becomes available. Vanilla and Fabric without remapping bypass it.
+
+Sending and USB copying share a smoothed speed/ETA estimate. ETA waits for at
+least three throughput samples and two seconds, updates about once a second,
+rounds to five seconds/minutes/hours, and clears during a five-second data stall.
+Byte counts and percentages remain based on actual progress. Verification and
+finalisation still must finish after copying reaches 100%.

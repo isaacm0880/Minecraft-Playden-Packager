@@ -80,7 +80,7 @@ def licenses(root: Path, stage: Path) -> None:
 def bundle_documentation(root: Path, destination: Path, macos: bool = False) -> None:
     """Retain the installation guide's local links and licence/credit notices."""
     for name in ('INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md', 'TROUBLESHOOTING.md',
-                 'PS5_LAN_TRANSFER.md', 'PS5_LAN_PERFORMANCE.md', 'PS5_RECEIVER_SHUTDOWN.md', 'PS5_RECEIVER_MANAGER.md'):
+                 'PS5_LAN_TRANSFER.md', 'PS5_LAN_PERFORMANCE.md', 'FTP_FEASIBILITY.md', 'PS5_RECEIVER_SHUTDOWN.md', 'PS5_RECEIVER_MANAGER.md'):
         text = (root / 'docs' / name).read_text(encoding='utf-8')
         text = text.replace('../ps5/receiver/PROTOCOL.md', 'receiver/PROTOCOL.md')
         (destination / name).write_text(text, encoding='utf-8')

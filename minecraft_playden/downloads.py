@@ -8,6 +8,7 @@ import time
 import urllib.request
 from pathlib import Path
 from typing import Any
+from .progress import Progress, ProgressCallback
 from .operations import CancellationToken, OperationCancelled
 
 
@@ -43,6 +44,7 @@ class Downloader:
     def __init__(self, cache: Path, cancellation: CancellationToken | None = None, *,
                  offline: bool = False, allow_runtime_download: bool = False,
                  runtime_paths: tuple[Path, ...] = ()):
+        self.progress: ProgressCallback | None = None
         self.offline = offline
         self.allow_runtime_download = allow_runtime_download
         self.runtime_paths = list(runtime_paths)
@@ -64,7 +66,7 @@ class Downloader:
                 return
             target.write(block)
 
-    def fetch(self, spec: dict[str, Any], target: Path | None = None, refresh: bool = False, *, cached_only: bool = False) -> Path:
+    def fetch(self, spec: dict[str, Any], target: Path | None = None, refresh: bool = False, *, cached_only: bool = False, progress: ProgressCallback | None = None) -> Path:
         self.check_cancelled()
         url = spec['url']
         if not url.startswith('https://'):
@@ -110,7 +112,20 @@ class Downloader:
                         temp = Path(out.name)
                         req = urllib.request.Request(url, headers={'User-Agent': 'Minecraft-Playden-Packager/0.1'})
                         with urllib.request.urlopen(req, timeout=60) as response:
-                            self._copy(response, out)
+                            if progress is None:
+                                self._copy(response, out)
+                            else:
+                                done, last = 0, 0.
+                                total = spec.get('size')
+                                progress(Progress('runtime-download', 'Downloading Windows Java runtime...', 0, total, bytes_copied=0, bytes_total=total))
+                                while block := response.read(1024 * 1024):
+                                    self.check_cancelled()
+                                    out.write(block)
+                                    done += len(block)
+                                    now = time.monotonic()
+                                    if now - last >= .1 or (total is not None and done >= total):
+                                        progress(Progress('runtime-download', 'Downloading Windows Java runtime...', done, total, bytes_copied=done, bytes_total=total))
+                                        last = now
                     if not valid(temp):
                         raise ValueError(f"Hash or size mismatch: {url}")
                     temp.replace(cached)

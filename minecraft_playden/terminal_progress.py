@@ -7,6 +7,7 @@ import time
 from typing import Callable, TextIO
 
 from .progress import Progress
+from .transfer_timing import ThroughputEstimator, eta_text
 
 
 def size(value: float) -> str:
@@ -37,9 +38,9 @@ class TransferProgress:
         self.clock = clock
         self.stage = ''
         self.last_render = float('-inf')
-        self.last_sample = self.started = clock()
-        self.last_bytes = 0
+        self.started = clock()
         self.rate: float | None = None
+        self.estimator = ThroughputEstimator()
         self.active = False
         self.previous_width = 0
 
@@ -64,14 +65,11 @@ class TransferProgress:
         if changed:
             self.finish_line()
             self.stage = event.stage
-            self.started = self.last_sample = now
-            self.last_bytes, self.rate = 0, None
-        dt = now - self.last_sample
-        if dt >= .1 and event.stage == 'network-send':
-            sample = max(0, done - self.last_bytes) / dt
-            weight = 1 - math.exp(-dt / 2)
-            self.rate = sample if self.rate is None else self.rate + weight * (sample - self.rate)
-            self.last_sample, self.last_bytes = now, done
+            self.started = now
+            self.rate = None
+            self.estimator = ThroughputEstimator()
+        estimate = self.estimator.update(done, total, now)
+        self.rate = estimate.rate
         final = event.stage == 'network-complete'
         if final and not changed:
             return
@@ -79,22 +77,27 @@ class TransferProgress:
         if not changed and not final and not boundary and now - self.last_render < (.1 if self.interactive else 30):
             return
         elapsed = max(0, now - self.started)
-        message = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', event.message)
+        message = re.sub(r'[\x00-\x09\x0b-\x1f\x7f-\x9f]', '', event.message)
         if event.stage in ('network-send', 'network-verify'):
             percent = min(100., 100 * done / total) if total else 0.
             count = f'{size(done)}/{size(total)}' if total is not None else size(done)
             if event.stage == 'network-send':
                 current = f'{size(self.rate)}/s' if self.rate is not None else '--/s'
                 average = f'{size(done / elapsed)}/s' if elapsed > 0 else '--/s'
-                eta = (max(0, total - done) / self.rate
-                       if total is not None and self.rate is not None and self.rate > 0 else None)
+                eta = estimate.eta
                 message = (f'Transferring {percent:5.1f}% {count} {current} '
-                           f'ETA {duration(eta)} avg {average} elapsed {duration(elapsed)}')
+                           f'ETA {eta_text(eta)} avg {average} elapsed {duration(elapsed)}')
             else:
                 message = f'Verifying {percent:5.1f}% {count}'
             if self.interactive:
                 filled = int(percent / 10)
                 message = '[' + '#' * filled + '-' * (10 - filled) + '] ' + message
+        if self.interactive and '\n' in message:
+            self.finish_line()
+            self.stream.write(message + '\n')
+            self.stream.flush()
+            self.last_render = now
+            return
         if self.interactive:
             width = max(1, shutil.get_terminal_size((120, 24)).columns - 1)
             message = message[:width]

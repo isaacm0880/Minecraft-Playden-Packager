@@ -64,9 +64,10 @@ def install(metadata: dict[str, Any], downloader: Downloader, root: Path) -> dic
         entry = entries[0]
         package = entry['binary']['package']
         archive = downloader.fetch({'url': package['link'], 'sha256': package['checksum'], 'size': package['size']},
-                                   cached_only=not downloader.allow_runtime_download)
-    except ValueError as exc:
-        raise ValueError(f'Missing compatible Windows x64 Java {major}. Supply --java-runtime PATH, place it in '
+                                   cached_only=not downloader.allow_runtime_download, progress=downloader.progress)
+    except (OSError, ValueError) as exc:
+        action = 'Runtime download failed; retry the build or supply a local verified runtime.' if downloader.allow_runtime_download and not downloader.offline else 'Downloads are disabled/offline.'
+        raise ValueError(f'Missing compatible Windows x64 Java {major}. {action} Supply --java-runtime PATH, place it in '
                          f'the cache runtimes/java-{major}-windows-x64 directory, or explicitly allow runtime downloads. {exc}') from exc
     with zipfile.ZipFile(archive) as zip:
         prefixes = {i.filename.split('/')[0] for i in zip.infolist() if '/' in i.filename}

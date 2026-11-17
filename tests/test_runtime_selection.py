@@ -85,3 +85,23 @@ def test_corrupt_runtime_archive_is_not_used_or_silently_repaired_without_permis
     with patch('urllib.request.urlopen', side_effect=AssertionError('No permission to repair runtime')):
         with pytest.raises(ValueError, match='Missing compatible Windows x64 Java 17'):
             runtime.install({'javaVersion': {'majorVersion': 17}}, downloader, tmp_path / 'selected')
+
+
+def test_runtime_download_progress_and_cached_rebuild_are_preserved(tmp_path):
+    data = archive({'jdk/bin/java.exe': pe(), 'jdk/bin/server/jvm.dll': pe(),
+                    'jdk/release': b'JAVA_VERSION="21.0.1"\nOS_NAME="Windows"\nOS_ARCH="x86_64"'})
+    package = {'link': 'https://fixture/runtime.zip', 'checksum': hashlib.sha256(data).hexdigest(), 'size': len(data)}
+    catalog = json.dumps([{'binary': {'package': package}}]).encode()
+    downloader = Downloader(tmp_path / 'cache', allow_runtime_download=True)
+    events = []
+    downloader.progress = events.append
+    def request(req, **kwargs):
+        return io.BytesIO(catalog if req.full_url.startswith('https://api.adoptium.net/') else data)
+    with patch('urllib.request.urlopen', side_effect=request):
+        runtime.install({'javaVersion': {'majorVersion': 21}}, downloader, tmp_path / 'selected')
+    assert events[0].stage == 'runtime-download' and events[0].bytes_copied == 0
+    assert events[-1].bytes_copied == events[-1].bytes_total == len(data)
+    events.clear()
+    with patch('urllib.request.urlopen', side_effect=AssertionError('Cache must be preferred')):
+        runtime.install({'javaVersion': {'majorVersion': 21}}, downloader, tmp_path / 'rebuild')
+    assert not events

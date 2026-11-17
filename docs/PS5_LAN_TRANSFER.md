@@ -155,20 +155,26 @@ requirement for new benchmarking. Mandatory verification remains enabled.
 
 ## Instance names and import access
 
-`--name` is optional. Both GUI and CLI now read the recorded instance display
-name from the hashed `metadata/instance-name.json` (schema 1, string `name`) in
-new builds. GUI builds preserve the selected installation's name; CLI builds
-resolve the local installation name when available, otherwise the chosen output
-folder name. Transfer reads this metadata without changing local files. Renaming
-an export folder keeps the recorded default. Older packages without the metadata
-use their package folder name, matching the existing standalone GUI default.
-The recipe's generic Minecraft version title is not used as an instance name.
+GUI and CLI LAN transfers use the package's **current folder name** as the
+PS5 destination name. Renaming `1.20.1 Fabric Loader` to
+`1.20.1 Fabric Loader-new` therefore sends it to
+`/data/playden-import/1.20.1 Fabric Loader-new` (or the selected USB0 import root).
+Recorded `metadata/instance-name.json` is preserved for instance information but
+never chooses a transfer destination. Existing packages follow the same rule.
+The GUI has no separate destination-name field. CLI `--name My-New-Instance`
+provides an explicit override without renaming the local package.
 
-The same 120-byte portable single-folder validation applies to defaults and
-`--name`. Invalid recorded names are refused; choose an explicit valid override.
-An existing remote name is always refused, including an empty directory. A
-custom `--name My-New-Instance` selects a different name without changing the
-local package or enabling overwrite. No dates or LAN test prefixes are generated.
+Defaults and overrides must pass the same portable single-folder validation.
+An existing remote name is refused, including an empty directory. Rename the
+local folder or choose an explicit CLI override, then retry; nothing overwrites
+an existing PS5 package. USB queue copying also starts with the folder name and
+shows any allocated collision suffix in its destination preview.
+
+Logs identify the local folder, actual destination name/path, storage and method,
+then authentication, transfer, byte counts, end-to-end duration, average speed
+and verification. Keys and pairing codes are not logged. Average speed includes
+validation, hashing and finalisation; it differs from the smoothed sending rate.
+A receiver-specific error is retained without unrelated pairing advice.
 
 Playden's imported-game repair policy uses 0777 directories and 0666 files so
 its different runtime user can update saves, configs and files beside a program.
@@ -207,15 +213,13 @@ not change GUI sending. See the performance guide for controlled manual trials.
 1. Select a local instance and **Build Playden package**, then choose **Send to
    PS5 (LAN)…** in the completion dialog. No folder selection is repeated.
    **Validate existing package…** loads a previously built package instead.
-2. In **PS5 LAN Receiver Manager**, choose the PS5 IP and configure SDK/ELF paths
-   if needed. Ensure the PS5 ELF loader is running, then click **Start Receiver**.
+2. In **Connect to PS5**, choose the PS5 IP and configure SDK/ELF paths
+   under **Transfer advanced options** if needed. Ensure the PS5 ELF loader is running, then click **Start Receiver**.
    It uses encrypted automatic pairing when loader stdout is available. An
    externally started receiver instead uses its six-digit PS5 code and **Pair**.
-3. Select internal/USB0 and check the editable **PS5 instance name**. The recorded
-   instance name survives a renamed local folder. A multi-build queue sends all
-   successful launch packages with their own names; selecting a result changes
-   which local output folder is opened. **Copy to USB** separately writes to a
-   drive attached to this computer.
+3. Select internal/USB0. The current local output folder name is the PS5
+   destination name. A multi-build queue sends successful launch packages with
+   their own folder names. **Copy to USB** writes to a drive on this computer.
 4. Click **Send to PS5 (LAN)**. Validation, sending, receiver verification and
    publication are separate stages. Speed and ETA describe sending. The progress
    bar completes only after a confirmed publication receipt. Once COMMIT is sent,
@@ -226,8 +230,7 @@ not change GUI sending. See the performance guide for controlled manual trials.
    Closing the app only closes its local SDK connection, not remote shutdown.
 
 Non-sensitive settings are remembered. Session secrets and codes are not.
-Buffered receiver reads remain the default; **Advanced: pipeline files
-(--pipeline-files)** is optional and initially disabled. See the
+Buffered receiver reads remain the default; **Pipeline files (experimental)** under **Transfer advanced options** (`--pipeline-files` in CLI) is optional and initially disabled. See the
 [manager guide](PS5_RECEIVER_MANAGER.md) for states, code expiry, security,
 manual recovery and the limits of the SDK loader's raw TCP transport.
 
@@ -261,3 +264,9 @@ AppImage awaits a separately approved desktop build.
   publication and the final import path. Stop when idle. Close and reopen:
   IP/destination remain, code and credentials are blank. No benchmark or physical
   transfer is needed to test local build/folder controls.
+
+After a verified LAN transfer, dismiss **Sent to PS5** with **OK** to return to
+the main window. The completed transfer state clears; the local package remains
+available for another transfer. Failures retain packages for retry without a
+rebuild. See [FTP feasibility](FTP_FEASIBILITY.md) for the optional transport
+investigation; FTP is not enabled and has no measured PS5 speed claim.

@@ -50,6 +50,7 @@ class GuiTests(unittest.TestCase):
         self.window.task_result(DiscoveryResult(tuple(installations)))
 
     def click_header(self, column):
+        self.window.show_paths.setChecked(True)
         self.window.resize(1280, 900)
         self.window.show()
         self.app.processEvents()
@@ -95,7 +96,7 @@ class GuiTests(unittest.TestCase):
                     self.assertEqual(self.window.selected_installation(), installation)
                     self.assertEqual(self.window.source_path.text(), str(installation.instance))
                     self.assertEqual(self.window.client_path.text(), str(installation.client))
-                    self.assertEqual(self.window.output.text(), custom_output)
+                    self.assertEqual(Path(self.window.output.text()), self.root / installation.name)
 
     def test_names_are_case_insensitive_and_versions_use_numeric_components(self):
         versions = ['1.10.12', '26.3', '1.9', '1.10.2', '1.10', '25w10a', '25w9a', 'Unknown']
@@ -238,6 +239,7 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.table.horizontalScrollBar().maximum(), 0)
         self.assertGreaterEqual(self.window.table.columnWidth(6), 240)
         original = self.window.table.height()
+        self.window.show_paths.setChecked(True)
         self.window.resize(1280, 900)
         self.app.processEvents()
         self.assertGreater(self.window.table.height(), original)
@@ -397,7 +399,7 @@ class GuiTests(unittest.TestCase):
         self.assertFalse(self.window.build_button.isEnabled())
         self.assertIn('Existing folders', self.window.build_reason.text())
 
-    def test_switching_selection_updates_fields_and_preserves_user_output(self):
+    def test_switching_selection_updates_fields_and_output_name(self):
         other = self.root / 'other'
         other.mkdir()
         (other / 'client.jar').write_bytes(b'other client')
@@ -412,7 +414,7 @@ class GuiTests(unittest.TestCase):
         custom = str(self.root / 'my custom output')
         self.window.output.setText(custom)
         self.window.table.selectRow(0)
-        self.assertEqual(self.window.output.text(), custom)
+        self.assertEqual(Path(self.window.output.text()), self.root / 'Minecraft')
         self.assertEqual(self.window.version.text(), '26.3')
         self.assertTrue(self.window.build_button.isEnabled())
 
@@ -579,7 +581,7 @@ class GuiTests(unittest.TestCase):
             warning.assert_called_once()
         self.assertTrue(self.window.copy_usb_button.isEnabled())
 
-    def test_explicit_manual_selection_equal_to_suggestion_is_preserved(self):
+    def test_switching_instance_refreshes_explicit_output_with_collision_suffix(self):
         self.select_source()
         path = self.window.output.text()
         with patch('minecraft_playden.gui_app.QFileDialog.getSaveFileName', return_value=(path, '')):
@@ -588,7 +590,7 @@ class GuiTests(unittest.TestCase):
         (self.root / 'other/client.jar').write_bytes(b'client')
         second = Installation('Other', 'MultiMC', '1.21.1', self.root / 'other', self.root / 'other/client.jar')
         self.window.task_result(DiscoveryResult((second,)))
-        self.assertEqual(self.window.output.text(), path)
+        self.assertEqual(Path(self.window.output.text()), Path(path).parent / 'Other-2')
 
     def test_usb_transfer_worker_reports_bytes_and_can_retry_after_failure(self):
         good = self.root / 'validated-package'

@@ -5,6 +5,7 @@ import os
 import shutil
 import stat
 import uuid
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -170,6 +171,7 @@ class TransferRequest:
             raise TransferError(f'USB transfer failed: {exc}. Incomplete staging data is retained under playden/.packager-transfers for retry; no unrelated files were deleted.') from exc
 
     def _run(self, progress: ProgressCallback | None, token: CancellationToken) -> TransferResult:
+        started = time.monotonic()
         token.check()
         self.drive.check()
         source = self.source.resolve(strict=True)
@@ -182,6 +184,7 @@ class TransferRequest:
                    relative: str = '', copied: int | None = None, size: int | None = None) -> None:
             if progress is not None:
                 progress(Progress(stage, message, completed, total, relative, copied, size))
+        report('transfer-details', f'Local package: {source.name}\nPS5 destination: {self.package_name}\nStorage: {self.drive.root}\nTransfer method: USB copy\nDestination path: {destination}')
         report('transfer-prepare', 'Validating the source package and preparing SHA-256 checksums...')
         errors = validate(source, cancellation=token)
         if errors:
@@ -376,6 +379,10 @@ class TransferRequest:
         state['status'] = 'complete'
         _state(staging / 'state.json', state, self.drive)
         flush_volume(self.drive)
+        elapsed = max(0., time.monotonic() - started)
+        average = total / elapsed if elapsed > 0 else 0.
+        verification = 'SHA-256 verified' if self.verify_after_copy else 'post-copy verification skipped'
+        report('transfer-statistics', f'Bytes transferred: {total}\nTransfer duration: {elapsed:.1f}s\nAverage transfer speed: {average / 1048576:.1f} MiB/s\nVerification: {verification}')
         report('transfer-complete', ('USB copy verified and writes flushed. Safely eject the drive before unplugging.' if self.verify_after_copy else 'USB copy complete; post-copy checksum verification skipped. Writes flushed. Safely eject the drive.'), total, total, copied=total, size=total)
         return TransferResult(source, destination, len(records), total, self.verify_after_copy,
                               tuple((r.relative, r.size, r.sha256) for r in records) if self.verify_after_copy else ())

@@ -26,7 +26,7 @@ def test_interactive_progress_is_single_line_throttled_and_reports_rate_eta():
             report(event(done=i))
         assert stream.getvalue().count('\r') <= 11
         assert '\n' not in stream.getvalue()
-        assert 'ETA 00:00' in stream.getvalue()
+        assert 'ETA finishing…' in stream.getvalue()
         assert 'B/s' in stream.getvalue()
         assert 'avg ' in stream.getvalue() and 'elapsed ' in stream.getvalue()
         report(event('network-verify', 1000))

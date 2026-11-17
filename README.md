@@ -32,7 +32,7 @@ and desktop usability are the current focus. See
 
 It does **not** sign in, download a replacement Minecraft client, collect console
 logs or deploy a payload without an explicit Start Receiver action. Public metadata, dependencies,
-assets may still need downloads. Windows Java downloads require explicit permission; matching local/cached runtimes are preferred. You need your own Minecraft files
+assets may still need downloads. Windows Java downloads are enabled when needed; matching verified local/cached runtimes are preferred. Advanced offline/no-download controls remain available. You need your own Minecraft files
 and a working Playden installation.
 
 ## Compatibility

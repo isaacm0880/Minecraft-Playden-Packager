@@ -120,6 +120,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
                 future.result()
                 report('assets', 'Downloading public Minecraft assets...', number, len(unique))
         report('java', 'Selecting metadata-matched Windows x64 Java runtime (local/cache first)...')
+        downloader.progress = progress
         save('metadata/runtime.json', {**runtime.install(effective, downloader, root / 'java'), 'metadata_adapter': 1})
         (root / profiles.game_directory(launch_profile)).mkdir(parents=True)
         report('instance', 'Preserving instance files' + (' without world saves...' if exclude_saves else ', including world saves...'))

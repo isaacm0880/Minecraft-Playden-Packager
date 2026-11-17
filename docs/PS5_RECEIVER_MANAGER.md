@@ -18,7 +18,7 @@ python -m minecraft_playden gui
 
 Building contacts no console. The GUI does not download an ELF. Select the SDK
 root and this branch's `ps5/receiver/minecraft_playden_receiver.elf` under
-**Receiver paths and ports…**. The POSIX SDK deployer requires `socat` on PATH;
+**Transfer advanced options**. The POSIX SDK deployer requires `socat` on PATH;
 the Windows SDK script requires `plink.exe`. Windows batch-script paths containing
 spaces or shell characters are rejected because the upstream script does not
 quote its payload path safely. Use safe SDK/temp paths or start externally and
@@ -40,7 +40,7 @@ written into either ELF. Keep all services on a trusted private LAN.
 1. Select a Minecraft instance and **Build Playden package**, then choose **Send
    to PS5 (LAN)…** in the completion dialog. The package is already selected.
    Alternatively use **Validate existing package…**.
-2. Enter the PS5 IP in **PS5 LAN Receiver Manager**. Ensure its ELF loader is
+2. Enter the PS5 IP in **Connect to PS5**. Ensure its ELF loader is
    already running, then click **Start Receiver**. Deployment, RSA generation and
    status checks run in workers; the interface remains responsive.
 3. When the loader forwards payload stdout, the GUI decrypts the startup envelope
