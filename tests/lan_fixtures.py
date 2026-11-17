@@ -1,4 +1,5 @@
 """Offline exporter fixture shared by tests and the development LAN benchmark."""
+from runtime_fixtures import install_runtime
 import io
 from dataclasses import replace
 import json
@@ -24,9 +25,7 @@ def build_package(tmp_path):
             return io.BytesIO(json.dumps({'versions': [{'id': metadata['id'], 'url': 'https://fixture/base'}]}).encode())
         return io.BytesIO(payloads[url])
     def runtime(metadata, downloader, java):
-        for path in ['bin/java.exe', 'bin/server/jvm.dll', 'release']:
-            save(java, path, b'Windows-x64-fixture')
-        return {'fixture': 'windows x64'}
+        return install_runtime(metadata, downloader, java)
     source = discover([instance], include_defaults=False).installations[0]
     output = tmp_path / 'Minecraft Package'
     with patch('urllib.request.urlopen', side_effect=request), patch('minecraft_playden.runtime.install', side_effect=runtime):

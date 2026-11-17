@@ -79,6 +79,30 @@ class ClientSource:
         self._local = installation.client
         return installation.version
 
+    def configure_downloads(self, downloader: Downloader, version: str) -> None:
+        """Bounded local lookup; only checksum-matching files seed downloads."""
+        owners = []
+        if self.launcher_root is not None:
+            owners.append(self.launcher_root)
+        if self.instance is not None:
+            owners.append(self.instance)
+            if self.instance.parent.name.casefold() in ('instances', 'versions'):
+                owners.append(self.instance.parent.parent)
+        if self.fabric is not None:
+            downloader.local_roots.append(self.fabric.libraries)
+            if self.fabric.launcher_root is not None:
+                owners.append(self.fabric.launcher_root)
+        if self.libraries_root is not None:
+            downloader.local_roots.append(self.libraries_root)
+        for owner in dict.fromkeys(owners):
+            downloader.local_roots.extend((owner, owner / 'libraries', owner / 'assets'))
+            candidate = owner / 'versions' / version / f'{version}.json'
+            if candidate.is_file():
+                downloader.version_files[version] = candidate
+            # Only known launcher/cache layouts, never a recursive drive scan.
+            for pattern in ('runtime/*/windows-x64/*', 'runtime/*/*', 'java/*'):
+                downloader.runtime_paths.extend(sorted(owner.glob(pattern))[:64])
+
     def check(self, metadata: dict[str, Any]) -> None:
         if self._local is None:
             raise ValueError('Local source has not been prepared')

@@ -49,7 +49,44 @@ def resolve(metadata: dict[str, Any]) -> list[tuple[dict[str, Any], bool, list[s
         if native:
             native = native.replace('${arch}', '64')
             result.append((downloads['classifiers'][native], True, excludes))
-    return result
+    unique: dict[str, tuple[dict[str, Any], bool, list[str]]] = {}
+    for entry in result:
+        path = entry[0]['path']
+        if path in unique and unique[path] != entry:
+            raise ValueError(f'Conflicting Windows dependency artifact: {path}')
+        unique.setdefault(path, entry)
+    return list(unique.values())
+
+
+def coalesce(libraries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Old Mojang metadata repeats a Java artifact beside its native map."""
+    import copy
+    result: dict[str, dict[str, Any]] = {}
+    for raw in libraries:
+        if not allowed(raw):
+            continue
+        name = raw['name']
+        if name not in result:
+            result[name] = copy.deepcopy(raw)
+            continue
+        previous = result[name]
+        if previous == raw:
+            continue
+        old = previous.get('downloads', {})
+        new = raw.get('downloads', {})
+        if old.get('artifact') != new.get('artifact'):
+            raise ValueError(f'Conflicting Windows library: {name}')
+        for field in ('natives', 'extract'):
+            if field in previous and field in raw and previous[field] != raw[field]:
+                raise ValueError(f'Conflicting Windows {field}: {name}')
+            if field in raw:
+                previous[field] = copy.deepcopy(raw[field])
+        classifiers = old.setdefault('classifiers', {})
+        for classifier, spec in new.get('classifiers', {}).items():
+            if classifier in classifiers and classifiers[classifier] != spec:
+                raise ValueError(f'Conflicting native classifier: {name} {classifier}')
+            classifiers[classifier] = copy.deepcopy(spec)
+    return list(result.values())
 
 
 def extract_natives(jar: Path, root: Path, excludes: list[str]) -> None:

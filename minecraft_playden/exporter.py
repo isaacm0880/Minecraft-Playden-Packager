@@ -3,9 +3,10 @@ import json
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from . import arguments, dependencies, runtime, profiles, recipe, fabric
+from . import arguments, dependencies, runtime, profiles, recipe, fabric, assets
 from .downloads import Downloader, digest, safe_path
 from .versions import VersionResolver
+from .metadata import logging_spec
 from .validator import validate
 from .sources import ClientSource
 from .instance_content import check_separate
@@ -38,6 +39,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
         raise ValueError(f'Refusing to overwrite existing output: {output}')
     report('source', 'Checking selected client source...')
     version = source.prepare()
+    source.configure_downloads(downloader, version)
     from .compatibility import assess, Status, UNTESTED_WARNING
     compatibility = assess(version, source.content.loaders if source.content else ())
     if not compatibility.permits_build:
@@ -76,7 +78,14 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             save('metadata/fabric.json', fabric_data)
             effective = fabric.derive(metadata, fabric_data)
             classpath = dependencies.classpath(effective)
+        from .compatibility import assess_metadata
+        capability = assess_metadata(effective)
+        if not capability.can_package:
+            raise ValueError(capability.problem)
         libraries = dependencies.resolve(effective)
+        logging = None if '_fabric_logging' in effective else logging_spec(effective)
+        if logging is not None:
+            downloader.fetch(logging, safe_path(root, logging['path']))
         report('libraries', 'Downloading public Windows x64 libraries...', 0, len(libraries))
         local_artifacts = {record['path'] for record in fabric_data['artifacts']} if fabric_data is not None else set()
         if source.fabric is not None and fabric_data is not None:
@@ -91,17 +100,16 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
         report('client', 'Acquiring verified client from the selected source...')
         (root / client).parent.mkdir(parents=True, exist_ok=True)
         source.acquire(metadata, downloader, root / client)
-        index_spec = metadata['assetIndex']
+        index_spec = {**metadata['assetIndex'], 'path': f'assets/indexes/{metadata["assetIndex"]["id"]}.json'}
         index = downloader.json(index_spec)
         downloader.fetch(index_spec, safe_path(root, f'assets/indexes/{index_spec["id"]}.json'))
-        if index.get('virtual') or index.get('map_to_resources'):
-            raise ValueError('Legacy virtual/resource asset layouts are not supported')
+        asset_files = assets.files(index, index_spec['id'], profiles.game_directory(launch_profile))
         def asset(item: dict) -> None:
             check_cancelled()
             sha = item['hash']
             relative = f'assets/objects/{sha[:2]}/{sha}'
             downloader.fetch({'url': f'https://resources.download.minecraft.net/{sha[:2]}/{sha}',
-                              'sha1': sha, 'size': item['size']}, safe_path(root, relative))
+                              'sha1': sha, 'size': item['size'], 'path': relative}, safe_path(root, relative))
         unique = {v['hash']: v for v in index['objects'].values()}
         report('assets', 'Downloading public Minecraft assets...', 0, len(unique))
         with ThreadPoolExecutor(max_workers=12) as pool:
@@ -109,11 +117,12 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             for number, future in enumerate(as_completed(futures), 1):
                 future.result()
                 report('assets', 'Downloading public Minecraft assets...', number, len(unique))
-        report('java', 'Downloading and extracting Windows x64 Java runtime...')
-        save('metadata/runtime.json', runtime.install(metadata, downloader, root / 'java'))
+        report('java', 'Selecting metadata-matched Windows x64 Java runtime (local/cache first)...')
+        save('metadata/runtime.json', {**runtime.install(effective, downloader, root / 'java'), 'metadata_adapter': 1})
         (root / profiles.game_directory(launch_profile)).mkdir(parents=True)
         report('instance', 'Preserving instance files' + (' without world saves...' if exclude_saves else ', including world saves...'))
         source.copy_instance(root, profiles.game_directory(launch_profile), exclude_saves, cancellation)
+        assets.materialize(root, index, index_spec['id'], profiles.game_directory(launch_profile), cancellation)
         if privacy_cleanup:
             from .privacy import cleanup
             report('privacy', 'Removing known private data from the staged copy...')
@@ -126,7 +135,8 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             save('metadata/instance-name.json', {'schema': 1, 'name': instance_name})
         (root / 'PLAYDEN.txt').write_text(f'Game title: Minecraft {version}\n\n' + INSTRUCTIONS, encoding='utf-8')
         report('hashing', 'Hashing immutable package files...')
-        paths = [p for p in root.rglob('*') if p.is_file() and not p.is_relative_to(root / 'instances')]
+        mapped = {root / name for name, _ in asset_files}
+        paths = [p for p in root.rglob('*') if p.is_file() and (not p.is_relative_to(root / 'instances') or p in mapped)]
         files = {}
         for number, path in enumerate(paths, 1):
             files[path.relative_to(root).as_posix()] = digest(path, 'sha256', cancellation)

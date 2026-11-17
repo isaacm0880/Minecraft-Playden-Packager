@@ -15,6 +15,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description='Build portable Windows Minecraft packages for Playden')
     parser.add_argument('--version', action='version', version=f'Minecraft Playden Packager {__version__}')
     parser.add_argument('--cache', type=Path, default=default_cache())
+    parser.add_argument('--offline', action='store_true', help='Use only installed files and verified cached downloads')
     commands = parser.add_subparsers(dest='command', required=True)
     gui = commands.add_parser('gui', help='Open the optional PySide6 desktop app (local imports only)')
     gui.add_argument('--path', type=Path, action='append', default=[], help='Additional launcher/instance folder to scan; repeatable')
@@ -28,6 +29,9 @@ def main() -> int:
     package.add_argument('--client-jar', type=Path, help='Existing vanilla client JAR; requires --version, local mode only')
     package.add_argument('--adapter', choices=['auto', 'portable', 'official', 'prism', 'multimc'], default='auto')
     package.add_argument('--libraries-root', type=Path, help='Read-only installed Fabric library cache override (local mode)')
+    package.add_argument('--java-runtime', type=Path, help='Existing matching Windows x64 Java home (never host Java)')
+    package.add_argument('--allow-runtime-download', action='store_true', help='Permit downloading missing Windows Java; local/cache preferred')
+    package.add_argument('--offline', action='store_true', default=argparse.SUPPRESS, help='Use installed files and cached metadata/dependencies only')
     package.add_argument('--output', type=Path, required=True)
     package.add_argument('--username', default='Player')
     package.add_argument('--launch-profile', choices=PROFILES, default=DEFAULT_PROFILE,
@@ -115,9 +119,11 @@ def main() -> int:
                     if installed.launcher_root is not None:
                         check_separate(installed.launcher_root, args.cache)
                         check_separate(installed.launcher_root, args.output)
-            downloader = Downloader(args.cache)
+            downloader = Downloader(args.cache, offline=args.offline,
+                                    allow_runtime_download=getattr(args, 'allow_runtime_download', False),
+                                    runtime_paths=(args.java_runtime,) if getattr(args, 'java_runtime', None) else ())
             if args.command == 'versions':
-                for version in VersionResolver(downloader).versions():
+                for version in VersionResolver(downloader).versions(refresh=not args.offline):
                     if args.all or version['type'] == 'release':
                         print(f'{version["id"]}\t{version["type"]}')
             else:

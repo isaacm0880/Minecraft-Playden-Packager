@@ -22,6 +22,8 @@ from minecraft_playden.volumes import DriveTarget, VolumeIdentity
 from minecraft_playden.desktop import LocalBuildRequest
 from minecraft_playden.discovery import Installation, discover
 
+from runtime_fixtures import pe
+
 FIXTURE = json.loads((Path(__file__).parent / 'fixtures/version.json').read_text())
 
 
@@ -119,8 +121,8 @@ class PackagerTests(unittest.TestCase):
 
     def _full_build_validate_tamper_and_preserve(self, mode, missing_floatlist=False, cancel_stage=None, exclude_saves=False):
         native = archive({'windows/x64/lwjgl.dll': b'MZnative', 'META-INF/test': b'ignore'})
-        java = archive({'jdk/bin/java.exe': b'MZjava', 'jdk/bin/server/jvm.dll': b'MZjvm',
-                        'jdk/release': b'JAVA_VERSION="25"'})
+        java = archive({'jdk/bin/java.exe': pe(), 'jdk/bin/server/jvm.dll': pe(),
+                        'jdk/release': b'JAVA_VERSION="25"\nOS_NAME="Windows"\nOS_ARCH="x86_64"'})
         asset = b'sound'
         sha = hashlib.sha1(asset).hexdigest()
         index = {'objects': {'sound/test': {'hash': sha, 'size': len(asset)}}}
@@ -186,9 +188,9 @@ class PackagerTests(unittest.TestCase):
                         jar.parent.mkdir(parents=True)
                         jar.write_bytes((fixture / 'client.jar').read_bytes())
                     installation = discover([launcher_root], include_defaults=False).installations[0]
-                action = lambda: LocalBuildRequest(installation, output, root / 'cache').run(report, token)
+                action = lambda: LocalBuildRequest(installation, output, root / 'cache', allow_runtime_download=True).run(report, token)
             else:
-                action = lambda: build(output, Downloader(root / 'cache', token), source, progress=report, cancellation=token, exclude_saves=exclude_saves)
+                action = lambda: build(output, Downloader(root / 'cache', token, allow_runtime_download=True), source, progress=report, cancellation=token, exclude_saves=exclude_saves)
             if cancel_stage and cancel_stage != 'complete':
                 with self.assertRaises(OperationCancelled):
                     action()

@@ -16,10 +16,78 @@ Explicit Tested entries are Vanilla Minecraft 26.3 and Minecraft 26.3 with Fabri
 Loader 0.20.1 in a configuration without Ixeris. Other loader versions and arbitrary
 modpacks are not certified. Successful packaging or checksums never add Tested status.
 
-Vanilla packaging supports modern structured metadata requiring Java 17+. Fabric
-supports installed modern profiles from Prism/MultiMC and Minecraft Launcher,
-including exact selected loader versions and required local artifacts. Public
-checksum-pinned dependencies may still be acquired by the existing resolver.
+The development source resolves Minecraft metadata, not a version allowlist.
+It adapts structured and legacy game arguments, bounded metadata inheritance,
+Windows x64 rules and native classifiers, current default JVM arguments, official
+logging and indexed/virtual/resource assets. Fabric uses installed Minecraft
+Launcher inheritance or ordered Prism/MultiMC components with the exact selected
+loader and dependency overrides; no latest-loader substitution occurs. Java
+requirements come from metadata, including supported Fabric overrides.
+
+Three results remain distinct: **can package** is metadata capability and local
+source readiness; **package validated** means the generated files/dependencies and
+launch plan pass structural checks; **confirmed on PS5** requires separate physical
+configuration evidence. Neither automated result updates the PS5 registry.
+
+## Automated source packaging matrix
+
+The following captured Mojang and Fabric profiles pass complete synthetic-payload
+packaging, final validation and a second build with networking disabled across
+Minecraft Launcher, Prism Launcher and MultiMC layouts. The actual metadata rules,
+coordinates, launch arguments, client identity and runtime requirements are retained;
+checksums are replaced in memory to match synthetic payloads. No game or mod runs.
+
+| Minecraft | Required Windows x64 Java | Vanilla | Fabric profile tested | PS5 evidence |
+| --- | --- | --- | --- | --- |
+| 1.18.2 | 17 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
+| 1.19.2 | 17 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
+| 1.20.1 | 17 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
+| 1.21.1 | 21 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
+| 1.21.11 | 21 | Automated structural pass | 0.20.1: automated structural pass | Physical testing needed |
+| 26.1.2 | 25 | Automated structural pass | 0.20.1: automated structural pass | Physical testing needed |
+| 26.2 | 25 | Automated structural pass | 0.20.1: automated structural pass | Physical testing needed |
+| 26.3 | 25 | Automated structural pass | 0.20.1: automated structural pass | Existing exact reports below; new launch defaults still need acceptance |
+| 1.16.5 | 8 | Blocked: Java launcher argument files unavailable | Same base-runtime blocker | No new claim |
+
+These loader versions are test inputs, not a support allowlist. Other releases
+and snapshots can package when their actual metadata, installed client, selected
+loader, runtime, dependencies and placeholders are supported. Tests also cover
+synthetic inherited/snapshot identities, legacy argument strings and mapped asset
+layouts. See [snapshot provenance](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/tests/fixtures/versions/README.md),
+[architecture audit](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/docs/VERSION_COMPATIBILITY_AUDIT.md), `tests/test_version_matrix.py`
+and `tests/test_runtime_selection.py`.
+
+## Runtime selection and remaining blockers
+
+Selection requires the metadata's exact Java major, a Windows x64 release identity
+and AMD64 PE `java.exe`/`server/jvm.dll`, without executing Java on the host.
+It prefers explicit and known launcher-local runtimes, then a cached Java home or
+previously verified runtime archive. A Linux, macOS, ARM64 or different-major Java
+installation is not a substitute. These structural checks do not establish that
+Temurin or its graphics/native dependencies run through Playden.
+
+Runtime downloads are off by default. Use CLI `--java-runtime PATH`, a Java home
+under `CACHE/runtimes/java-MAJOR-windows-x64`, or explicitly enable
+`--allow-runtime-download` / the GUI Windows Java download checkbox. The download
+path verifies the archive's SHA-256 and checks its extracted target and major.
+The runtime archive and catalog remain cached. `--offline` forbids all HTTP;
+metadata and any public files absent from both the installed launcher and cache
+produce a missing-file error. Refresh the catalog explicitly with `versions` when
+adding a version absent from a cached manifest.
+
+Java 8 itself is identified and its release identity can be inspected, but the
+preserved Playden configuration launches `java.exe @../../playden.args`. Java 8
+cannot read Java launcher argument files; support needs a separately verified
+launch adapter. No automatic Java 17 substitution is made. This blocks 1.16.5 and
+Java 8-era releases, rather than rejecting them because of an absent version-list
+entry. See the [Java 8 launcher reference](https://docs.oracle.com/javase/8/docs/technotes/tools/windows/java.html).
+
+Arbitrary patched client JARs, non-Fabric custom profiles, legacy tweaker/JAR-mod
+loaders, unknown argument formats/placeholders and inconsistent component metadata
+still fail explicitly. Installed client files must match the official checksum.
+Existing `reference-26.3` remains an explicit diagnostic reproduction; packages
+created before the metadata adapter retain their original argument-validation
+policy. No package-layout or Playden program/argument-path migration is needed.
 
 Untested combinations, including best-effort Fabric 1.20.1 and 26.2, display:
 
@@ -30,10 +98,10 @@ NeoForge/Quilt launch packaging is not implemented; they are Cannot package, not
 inferred Broken from Forge. Unverified CLI file-only imports do not provide launch
 support. Missing clients/artifacts must be installed through the original launcher.
 
-Legacy Java 8/virtual-asset layouts, arbitrary patched clients and unsupported
-custom metadata are technical blockers. There is no authenticated multiplayer,
-Realms, online client acquisition, PS5 helper, direct console transfer or console
-log collection. Console game/mod/runtime acceptance remains configuration-specific.
+There is no authenticated multiplayer, Realms, online client acquisition or console
+log collection. PS5 LAN transfer and explicit receiver management are available
+on the development branch; they do not establish game/runtime compatibility.
+Console game/mod/runtime acceptance remains configuration-specific.
 
 ## Known Minecraft Version Compatibility
 

@@ -6,7 +6,8 @@ from .downloads import digest, safe_path
 from .arguments import generate
 from .dependencies import resolve, validate_natives
 from . import dependencies
-from . import profiles, recipe, fabric
+from . import profiles, recipe, fabric, assets
+from .metadata import logging_spec, check_runtime_requirement
 from .classpath import validate_classpath
 from .progress import Progress, ProgressCallback
 
@@ -49,6 +50,10 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
         metadata = json.loads((root / 'metadata/version.json').read_text(encoding='utf-8'))
         if metadata['id'] != inventory['version']:
             errors.append('Package version does not match exported Minecraft metadata')
+        runtime_record = json.loads((root / 'metadata/runtime.json').read_text(encoding='utf-8')) if 'metadata/runtime.json' in inventory['files'] else {}
+        adapter = runtime_record.get('metadata_adapter', 0)
+        if type(adapter) is not int or adapter not in (0, 1):
+            raise ValueError('Unsupported package metadata adapter')
         profile = inventory.get('launch_profile', profiles.DEFAULT_PROFILE)
         effective = profiles.effective_metadata(metadata, profile)
         client = profiles.client_path(metadata, profile)
@@ -65,16 +70,30 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
             errors.extend(fabric.validate(root, metadata, fabric_data))
         elif (root / 'metadata/fabric.json').exists():
             errors.append('Fabric launch plan has no package loader identity')
+        check_runtime_requirement(effective)
+        if 'metadata/runtime.json' in inventory['files']:
+            if adapter == 1 or runtime_record.get('target') is not None:
+                from .runtime import inspect as inspect_runtime
+                actual_runtime = inspect_runtime(root / 'java', check_runtime_requirement(effective))
+                if any(actual_runtime[key] != runtime_record.get(key) for key in ('major', 'release', 'target')):
+                    errors.append('Java runtime identity differs from metadata/runtime.json')
         required = [client]
+        logging = None if adapter == 0 or '_fabric_logging' in effective else logging_spec(effective)
+        if logging is not None:
+            required.append(logging['path'])
+            if digest(safe_path(root, logging['path'])) != logging['sha1']:
+                errors.append('Minecraft logging configuration checksum mismatch')
         if fabric_data is not None and '_fabric_logging' in effective:
             required.append(effective['_fabric_logging']['path'])
         required.extend('libraries/' + spec['path'] for spec, _, _ in resolve(effective))
         index_path = f'assets/indexes/{metadata["assetIndex"]["id"]}.json'
         required.append(index_path)
         index = json.loads(safe_path(root, index_path).read_text(encoding='utf-8'))
-        for asset in index['objects'].values():
-            sha = asset['hash']
-            required.append(f'assets/objects/{sha[:2]}/{sha}')
+        index_spec = metadata['assetIndex']
+        if index_spec.get('sha1') and digest(safe_path(root, index_path)) != index_spec['sha1']:
+            errors.append('Minecraft asset index checksum mismatch')
+        required.extend(name for name, _ in assets.files(index, index_spec['id'], profiles.game_directory(profile)))
+        errors.extend(assets.validate(root, index, index_spec['id'], profiles.game_directory(profile), cancellation))
         for name in required:
             if name not in inventory['files']:
                 errors.append(f'Required file absent from inventory: {name}')
@@ -87,7 +106,7 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
         errors.extend(validate_natives(root, effective))
         if inventory['classpath'] != expected_cp:
             errors.append('Classpath does not match resolved Windows x64 dependencies')
-        if (root / 'playden.args').read_text(encoding='utf-8') != generate(effective if fabric_data is not None else metadata, inventory['classpath'], '../../', inventory['username'], profile):
+        if (root / 'playden.args').read_text(encoding='utf-8') != generate(effective if fabric_data is not None else metadata, inventory['classpath'], '../../', inventory['username'], profile, metadata_adapter=adapter == 1):
             errors.append('Invalid portable arguments: playden.args')
         errors.extend(recipe.validate(root, f'Minecraft {inventory["version"]}'))
         for entry in inventory['classpath']:

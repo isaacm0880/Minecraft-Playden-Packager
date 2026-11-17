@@ -1,0 +1,113 @@
+{
+  "captured": "2026-11-17",
+  "sources": [
+    {
+      "file": "1.16.5.json",
+      "url": "https://piston-meta.mojang.com/v1/packages/fba9f7833e858a1257d810d21a3a9e3c967f9077/1.16.5.json",
+      "sha256": "3eeeab7b3165cc5263dc26ff8fe114fdb718b75a0244efead9d19635d090ba72",
+      "sha1": "fba9f7833e858a1257d810d21a3a9e3c967f9077"
+    },
+    {
+      "file": "fabric-1.16.5-0.16.10.json",
+      "url": "https://meta.fabricmc.net/v2/versions/loader/1.16.5/0.16.10/profile/json",
+      "sha256": "e0cb8b9f4c8ca6e34c1e8e8322ba68d2caba9075174e1dcb31add3912f771cad",
+      "loader": "0.16.10"
+    },
+    {
+      "file": "1.18.2.json",
+      "url": "https://piston-meta.mojang.com/v1/packages/334b33fcba3c9be4b7514624c965256535bd7eba/1.18.2.json",
+      "sha256": "3df8f7b5e0ae5ccfd73adc9e00daf407a7274b138daab5793e58d14f2ab74144",
+      "sha1": "334b33fcba3c9be4b7514624c965256535bd7eba"
+    },
+    {
+      "file": "fabric-1.18.2-0.16.10.json",
+      "url": "https://meta.fabricmc.net/v2/versions/loader/1.18.2/0.16.10/profile/json",
+      "sha256": "ab2c40455a54431bac41f6a4bdbfb8b981ee176c8291245827dfb937b001d023",
+      "loader": "0.16.10"
+    },
+    {
+      "file": "1.19.2.json",
+      "url": "https://piston-meta.mojang.com/v1/packages/ed548106acf3ac7e8205a6ee8fd2710facfa164f/1.19.2.json",
+      "sha256": "daa5085a617194df8ab930c0b03161ef01a654ccd15cc57f97c659f4c96e986f",
+      "sha1": "ed548106acf3ac7e8205a6ee8fd2710facfa164f"
+    },
+    {
+      "file": "fabric-1.19.2-0.16.10.json",
+      "url": "https://meta.fabricmc.net/v2/versions/loader/1.19.2/0.16.10/profile/json",
+      "sha256": "7a82c909f411882cfca22279995a46023325bebfa0fe84e0001fc80ca8cc008c",
+      "loader": "0.16.10"
+    },
+    {
+      "file": "1.20.1.json",
+      "url": "https://piston-meta.mojang.com/v1/packages/06646a0a4e6cbc6a15de4a485df9b26d6aaad2b5/1.20.1.json",
+      "sha256": "e55ca1e21bee48414feb29bb6b908af1226da6f08aa3924c145ca47782decf10",
+      "sha1": "06646a0a4e6cbc6a15de4a485df9b26d6aaad2b5"
+    },
+    {
+      "file": "fabric-1.20.1-0.16.10.json",
+      "url": "https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.16.10/profile/json",
+      "sha256": "9c2cb75367e417aa5a0cbcef11a57ba3f8a94d904d7cf837f2f231f7856a6bf0",
+      "loader": "0.16.10"
+    },
+    {
+      "file": "1.21.1.json",
+      "url": "https://piston-meta.mojang.com/v1/packages/680a0454142eaf3a3bac6fc3e96879a726fd0518/1.21.1.json",
+      "sha256": "50d61e61fde75ce7e0e5b2c2b0a478a854b13198e5c64d2f3d0ca82275b9d88a",
+      "sha1": "680a0454142eaf3a3bac6fc3e96879a726fd0518"
+    },
+    {
+      "file": "fabric-1.21.1-0.16.10.json",
+      "url": "https://meta.fabricmc.net/v2/versions/loader/1.21.1/0.16.10/profile/json",
+      "sha256": "89479d1ad55d640156026666499c67a44dc3f7f4b30bb32601cceabeb4986119",
+      "loader": "0.16.10"
+    },
+    {
+      "file": "1.21.11.json",
+      "url": "https://piston-meta.mojang.com/v1/packages/b50d9e4eb8449c3c960558628732ef911061b329/1.21.11.json",
+      "sha256": "594226aace505267407318d1e994d49e99137efa80e68dffa02ff6ab977b501c",
+      "sha1": "b50d9e4eb8449c3c960558628732ef911061b329"
+    },
+    {
+      "file": "fabric-1.21.11-0.20.1.json",
+      "url": "https://meta.fabricmc.net/v2/versions/loader/1.21.11/0.20.1/profile/json",
+      "sha256": "cf491ea978ff9bed75708207301034f0ff175c00d944a6ce733b232794541008",
+      "loader": "0.20.1"
+    },
+    {
+      "file": "26.1.2.json",
+      "url": "https://piston-meta.mojang.com/v1/packages/3cf35269229cb8aede5521f92d405a1527f0f3b0/26.1.2.json",
+      "sha256": "02f918fe884985d951e6b344ebdccef02ef968b6fdf1df051d2b173964a90c1a",
+      "sha1": "3cf35269229cb8aede5521f92d405a1527f0f3b0"
+    },
+    {
+      "file": "fabric-26.1.2-0.20.1.json",
+      "url": "https://meta.fabricmc.net/v2/versions/loader/26.1.2/0.20.1/profile/json",
+      "sha256": "73a6631933a4a9be6b1af7bad01fe5ab8c6542894fdfdd0405e84284c8ccd444",
+      "loader": "0.20.1"
+    },
+    {
+      "file": "26.2.json",
+      "url": "https://piston-meta.mojang.com/v1/packages/f76b7f3dc4df9778a004baa5097dc556474b3c8f/26.2.json",
+      "sha256": "fd3be7b9eefc1d9541dbc9cdb42f1d7cbb93349e21a678686b9b7c4bcedc3bcd",
+      "sha1": "f76b7f3dc4df9778a004baa5097dc556474b3c8f"
+    },
+    {
+      "file": "fabric-26.2-0.20.1.json",
+      "url": "https://meta.fabricmc.net/v2/versions/loader/26.2/0.20.1/profile/json",
+      "sha256": "bd72b4207375b20e7013df07ac2616e301e364077cc70b5e4371402bbd8aa51f",
+      "loader": "0.20.1"
+    },
+    {
+      "file": "26.3.json",
+      "url": "https://piston-meta.mojang.com/v1/packages/969f7ab0ce024e8dcf95372971bcf291b34ed9f7/26.3.json",
+      "sha256": "8e4f6f43da89550a2ee64833c07e61c46f1e59fd73a66d226f5bbb329e7d5046",
+      "sha1": "969f7ab0ce024e8dcf95372971bcf291b34ed9f7"
+    },
+    {
+      "file": "fabric-26.3-0.20.1.json",
+      "url": "https://meta.fabricmc.net/v2/versions/loader/26.3/0.20.1/profile/json",
+      "sha256": "9e871819b646826ea810a3ef11232055eb20ecd6fc0cebf7e895fc7b053034bc",
+      "loader": "0.20.1"
+    }
+  ]
+}

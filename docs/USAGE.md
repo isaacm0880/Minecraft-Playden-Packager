@@ -14,8 +14,26 @@ Cannot package rows; untested rows may build after the compatibility warning.
 Outputs default to sanitised instance names, with collision suffixes. A single
 build uses the displayed output path; a multi-build creates named directories
 under its parent. Existing outputs are not replaced. Keep source, cache and output
-separate. Downloaded public metadata, assets, dependencies and Windows Java may
-require internet access; missing local Minecraft clients are never downloaded.
+separate. Public metadata, assets and dependencies may require internet access;
+matching installed files and verified cached downloads are preferred. Missing
+local Minecraft clients are never downloaded.
+
+The development source selects the exact Java major required by Minecraft/Fabric
+metadata and requires a Windows x64 runtime, even when building on Linux/macOS.
+Windows Java runtime downloads are off by default. To permit one, enable **Allow
+Windows Java runtime download if missing** for the build queue. Otherwise provide
+a matching Java home at `CACHE/runtimes/java-MAJOR-windows-x64`; known local launcher
+runtime locations are also checked. Java 8 remains blocked because the preserved
+Playden launch command uses Java launcher argument files, introduced in Java 9.
+See [compatibility](COMPATIBILITY.md) for the tested metadata matrix and limitations.
+
+For CLI builds, `--java-runtime PATH` selects an existing Windows Java home and
+`--allow-runtime-download` permits a missing runtime download. Add `--offline` to
+forbid HTTP, including public metadata/dependencies. A first build may need the
+public manifest and missing Windows files; subsequent builds can reuse verified
+installed/cached files. `python -m minecraft_playden versions` explicitly refreshes
+the version catalog; `python -m minecraft_playden --offline versions` lists the
+cached catalog. Source packaging tests are not PS5 runtime tests.
 
 Build runs instances sequentially. Each keeps its own progress, result and error;
 a failure during an accepted queue does not stop later items. Cancel stops current

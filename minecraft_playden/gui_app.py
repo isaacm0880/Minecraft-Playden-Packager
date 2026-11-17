@@ -205,6 +205,10 @@ class MainWindow(QMainWindow):
         cache_row.addWidget(self.cache)
         cache_row.addWidget(self.cache_button)
         form.addRow('Download cache', cache_row)
+        self.allow_runtime_download = QCheckBox('Allow Windows Java runtime download if missing')
+        self.allow_runtime_download.setToolTip('Off by default. Prefer an installed or cached matching Windows x64 runtime. '
+                                              'Enabling this permits a verified Temurin runtime download for this build queue.')
+        form.addRow(self.allow_runtime_download)
         self.privacy_cleanup = QCheckBox('Privacy cleanup (recommended)')
         self.privacy_cleanup.setChecked(True)
         self.privacy_cleanup.setToolTip('Remove known credentials, sessions and personal identifiers from the package copy. '
@@ -505,7 +509,8 @@ class MainWindow(QMainWindow):
 
     def build_requests(self) -> tuple[list[LocalBuildRequest], str]:
         return selection_readiness(self.selected_installations(), self.output.text(), self.cache.text(), self.busy(),
-                                   username=offline_player_name(self.username.text()), privacy_cleanup=self.privacy_cleanup.isChecked())
+                                   username=offline_player_name(self.username.text()), privacy_cleanup=self.privacy_cleanup.isChecked(),
+                                   allow_runtime_download=self.allow_runtime_download.isChecked())
 
     def confirm_untested(self, requests: list[LocalBuildRequest]) -> bool:
         untested = [request.installation for request in requests
@@ -558,7 +563,7 @@ class MainWindow(QMainWindow):
 
     def operation_controls(self) -> tuple[QWidget, ...]:
         return (self.scan_button, self.folder_button, self.validate_button, self.output_button,
-                self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.username,
+                self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.allow_runtime_download, self.username,
                 self.cleanup_after_usb, self.ps5_destination, self.receiver_manager, self.ps5_name, self.ps5_pipeline)
 
     def start_task(self, operation: str, work: Callable[[ProgressCallback], object]) -> None:

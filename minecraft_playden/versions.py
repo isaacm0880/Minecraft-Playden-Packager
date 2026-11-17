@@ -1,6 +1,7 @@
-"""Mojang version discovery. Future import adapters can supply resolved metadata."""
+"""Cached official metadata, with bounded inheritance and reusable format adapters."""
 from typing import Any
 from .downloads import Downloader
+from .metadata import merge, normalize
 
 MANIFEST = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
 
@@ -9,18 +10,26 @@ class VersionResolver:
     def __init__(self, downloader: Downloader):
         self.downloader = downloader
 
-    def versions(self) -> list[dict[str, Any]]:
-        return self.downloader.json({'url': MANIFEST}, refresh=True)['versions']
+    def versions(self, refresh: bool = False) -> list[dict[str, Any]]:
+        return self.downloader.json({'url': MANIFEST}, refresh=refresh)['versions']
 
     def resolve(self, version: str) -> dict[str, Any]:
-        entry = next((v for v in self.versions() if v['id'] == version), None)
-        if entry is None:
-            raise ValueError(f"Unknown Minecraft version: {version}")
-        metadata = self.downloader.json(entry)
-        if metadata.get('id') != version:
-            raise ValueError('Official version metadata does not match the selected Minecraft version')
-        if 'inheritsFrom' in metadata or 'arguments' not in metadata:
-            raise ValueError('Only standalone modern versions with structured arguments are supported')
-        if metadata.get('javaVersion', {}).get('majorVersion', 8) < 17:
-            raise ValueError('This release supports Java 17+ Minecraft versions only')
-        return metadata
+        entries = {entry['id']: entry for entry in self.versions()}
+        seen: set[str] = set()
+        def load(identifier: str) -> dict[str, Any]:
+            if identifier in seen or len(seen) >= 32:
+                raise ValueError('Cyclic or excessive Minecraft version inheritance')
+            seen.add(identifier)
+            entry = entries.get(identifier)
+            if entry is None:
+                raise ValueError(f'Unknown Minecraft version: {identifier}; refresh the versions list to update cached metadata')
+            metadata = self.downloader.json(entry)
+            if not isinstance(metadata, dict) or metadata.get('id') != identifier:
+                raise ValueError('Official version metadata does not match the selected Minecraft version')
+            if 'inheritsFrom' in metadata:
+                parent = metadata['inheritsFrom']
+                if not isinstance(parent, str):
+                    raise ValueError('Invalid inherited Minecraft version')
+                metadata = merge(load(parent), metadata)
+            return normalize(metadata)
+        return load(version)

@@ -11,7 +11,7 @@ def quote(value: str) -> str:
 
 
 def generate(metadata: dict[str, Any], classpath: list[str], prefix: str, username: str = 'Player',
-             profile: str = DEFAULT_PROFILE) -> str:
+             profile: str = DEFAULT_PROFILE, *, metadata_adapter: bool = True) -> str:
     check_profile(metadata, profile)
     if profile == REFERENCE_PROFILE:
         args = ['-Xmx4G', '-Djava.library.path=' + prefix + 'natives', '-cp',
@@ -22,10 +22,13 @@ def generate(metadata: dict[str, Any], classpath: list[str], prefix: str, userna
                 '--uuid', '00000000-0000-0000-0000-000000000000', '--accessToken', '0',
                 '--versionType', metadata.get('type', 'release')]
         return '\n'.join(quote(arg) if not arg or any(c.isspace() or c in '\\\"\'#' for c in arg) else arg for arg in args) + '\n'
+    from .metadata import logging_spec
+    logging = None if not metadata_adapter or '_fabric_logging' in metadata else logging_spec(metadata)
     values = {
         'auth_player_name': username, 'version_name': metadata.get('launch_version', metadata['id']),
         'game_directory': prefix + 'instances/default/minecraft', 'assets_root': prefix + 'assets',
-        'assets_index_name': metadata['assetIndex']['id'], 'auth_uuid': '00000000-0000-0000-0000-000000000000',
+        'assets_index_name': metadata['assetIndex']['id'],
+        'game_assets': prefix + 'assets/virtual/' + metadata['assetIndex']['id'], 'auth_uuid': '00000000-0000-0000-0000-000000000000',
         'user_type': 'legacy', 'user_properties': '{}',
         'auth_access_token': '0', 'clientid': '0', 'auth_xuid': '0',
         'version_type': metadata.get('type', 'release'), 'natives_directory': prefix + 'natives',
@@ -40,12 +43,14 @@ def generate(metadata: dict[str, Any], classpath: list[str], prefix: str, userna
                 raise ValueError(f'Unsupported launch placeholder: {key}')
             return values[key]
         return re.sub(r'\$\{([^}]+)\}', replace, value)
-    args = ['-Xmx4G']
-    for section in ('jvm', 'game'):
+    args = [] if metadata_adapter and metadata['arguments'].get('default-user-jvm') else ['-Xmx4G']
+    for section in (('default-user-jvm', 'jvm', 'game') if metadata_adapter else ('jvm', 'game')):
         if section == 'game':
             # Use the proven flat native directory instead of Mojang's extraction subdirectory.
+            if logging is not None:
+                args.append('-Dlog4j.configurationFile=' + prefix + logging['path'])
             args += ['-Djava.library.path=' + prefix + 'natives', metadata['mainClass']]
-        for item in metadata['arguments'][section]:
+        for item in metadata['arguments'].get(section, []):
             if isinstance(item, str):
                 args.append(expand(item))
             elif allowed(item):

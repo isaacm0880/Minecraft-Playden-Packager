@@ -1,4 +1,5 @@
 """Modern Fabric package fixtures; no game, loader, scripts or network executed."""
+from runtime_fixtures import install_runtime
 import copy
 import hashlib
 import io
@@ -177,9 +178,7 @@ class FabricLaunchTests(unittest.TestCase):
             return io.BytesIO(value)
         def runtime(metadata, downloader, java):
             self.assertEqual(metadata['javaVersion']['majorVersion'], 17 if game == '1.20.1' else 25)
-            for path in ['bin/java.exe', 'bin/server/jvm.dll', 'release']:
-                save(java, path, b'Windows-x64-fixture')
-            return {'fixture': 'windows x64'}
+            return install_runtime(metadata, downloader, java)
         selected = launcher if official_root else instance
         selected_version = profile['id'] if official_root else None
         output = root / 'Package With Spaces'

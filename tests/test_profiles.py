@@ -1,4 +1,5 @@
 """Reference reproduction must be explicit, portable and strictly validated."""
+from runtime_fixtures import install_runtime
 import copy
 import hashlib
 import io
@@ -40,9 +41,9 @@ class ProfileTests(unittest.TestCase):
         self.assertTrue(cp[-1].endswith('netty-transport-native-unix-common-4.2.16.Final.jar'))
         self.assertFalse(any('natives-windows' in path for path in cp))
 
-    def test_default_profile_is_unchanged_and_does_not_invent_spng_requirement(self):
+    def test_default_profile_honors_metadata_without_inventing_spng_requirement(self):
         cp = profiles.classpath(MINECRAFT)
-        self.assertEqual(arguments.generate(MINECRAFT, cp, '../../'), (FIXTURES / 'official-26.3-playden.args').read_text())
+        self.assertEqual(arguments.generate(MINECRAFT, cp, '../../'), (FIXTURES / 'metadata-26.3-playden.args').read_text())
         self.assertEqual(len(cp), 65)
         self.assertEqual(profiles.client_path(MINECRAFT), 'versions/client.jar')
         self.assertFalse(any('lwjgl-spng' in path for path in cp))
@@ -95,11 +96,7 @@ class ProfileTests(unittest.TestCase):
                 data = blobs[url]
             return io.BytesIO(data)
         def runtime(metadata, downloader, java):
-            for filename in ['bin/java.exe', 'bin/server/jvm.dll', 'release']:
-                path = java / filename
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(b'fixture')
-            return {'release': 'fixture'}
+            return install_runtime(metadata, downloader, java)
         original_extract = dependencies.extract_natives
         def extract(jar, natives, excludes):
             if not omit_spng or 'spng' not in jar.name:

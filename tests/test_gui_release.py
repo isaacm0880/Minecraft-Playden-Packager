@@ -1,4 +1,5 @@
 """Qt-to-engine release regressions using deterministic local instances and HTTP payloads."""
+from runtime_fixtures import install_runtime
 import copy
 import faulthandler
 import contextlib
@@ -113,9 +114,7 @@ class ReleaseGuiTests(unittest.TestCase):
         return patch('urllib.request.urlopen', side_effect=request)
 
     def runtime(self, metadata, downloader, java):
-        for path in ['bin/java.exe', 'bin/server/jvm.dll', 'release']:
-            save(java, path, b'Windows-x64-fixture')
-        return {'fixture': 'windows x64'}
+        return install_runtime(metadata, downloader, java)
 
     def test_gui_cli_byte_parity_for_vanilla_fabric_layouts_and_privacy_policies(self):
         for loader, layout in [('Vanilla', 'prism'), ('Vanilla', 'multimc'), ('Vanilla', 'official'),

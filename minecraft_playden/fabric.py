@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from .dependencies import allowed, resolve as dependencies
+from .dependencies import allowed, coalesce, resolve as dependencies
 from .downloads import Downloader, digest, safe_path
 from .operations import CancellationToken
 from .importers import read_json, version_id
@@ -113,7 +113,7 @@ def merge_libraries(layers: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
     # collapse; two versions of one artifact in the same layer are ambiguous.
     result: dict[str, dict[str, Any]] = {}
     for index in reversed(range(len(layers))):
-        layer = layers[index]
+        layer = coalesce(layers[index]) if index == 0 else layers[index]
         seen: dict[str, dict[str, Any]] = {}
         for raw in layer:
             if not windows_library(raw):
@@ -131,7 +131,7 @@ def merge_libraries(layers: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
 def argument_lists(doc: dict[str, Any]) -> dict[str, list[Any]]:
     from .arguments import parse_argfile
     args = doc.get('arguments', {})
-    if not isinstance(args, dict) or set(args) - {'jvm', 'game'}:
+    if not isinstance(args, dict) or set(args) - {'jvm', 'game', 'default-user-jvm'}:
         raise ValueError('Unsupported Fabric arguments metadata')
     result = {'jvm': copy.deepcopy(args.get('jvm', [])), 'game': copy.deepcopy(args.get('game', []))}
     if any(not isinstance(value, list) for value in result.values()):
@@ -139,7 +139,7 @@ def argument_lists(doc: dict[str, Any]) -> dict[str, list[Any]]:
     extras = doc.get('+jvmArgs', [])
     if not isinstance(extras, list):
         raise ValueError('Fabric +jvmArgs must be a list')
-    result['jvm'] += extras
+    result['jvm'] = copy.deepcopy(args.get('default-user-jvm', [])) + result['jvm'] + extras
     if 'minecraftArguments' in doc:
         if not isinstance(doc['minecraftArguments'], str):
             raise ValueError('Invalid installed game argument string')
@@ -271,6 +271,11 @@ def derive(base: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
             result['_fabric_logging'] = spec
         if 'assetIndex' in doc and base.get('assetIndex') and (not isinstance(doc['assetIndex'], dict) or doc['assetIndex'].get('id') != base['assetIndex']['id']):
             raise ValueError('Installed Fabric asset index differs from base Minecraft')
+        if 'javaVersion' in doc:
+            from .metadata import java_major
+            required_major = java_major(doc)
+            if required_major > java_major(result):
+                result['javaVersion'] = copy.deepcopy(doc['javaVersion'])
         args = argument_lists(doc)
         for section in ('jvm', 'game'):
             if 'minecraftArguments' in doc and section == 'game':
@@ -290,7 +295,7 @@ def derive(base: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     names = [lib['name'] for lib in result['libraries']]
     if f'net.fabricmc:fabric-loader:{loader}' not in names:
         raise ValueError('Selected Fabric Loader artifact/version is missing or changed')
-    requires_mappings = base['id'].startswith('1.') or any(
+    requires_mappings = any(name.startswith('net.fabricmc:intermediary:') for name in names) or any(
         requirement.get('uid') == INTERMEDIARY and ('equals' in requirement or 'suggests' not in requirement)
         for doc in documents for requirement in doc.get('requires', []))
     if requires_mappings and f'net.fabricmc:intermediary:{base["id"]}' not in names:
@@ -494,7 +499,11 @@ def inspect(instance: Path, version: str | None = None, libraries: Path | None =
             loaded.append(doc)
         docs = sorted(loaded, key=lambda doc: doc.get('order', 0))
         # Metadata fallback is exact-version Fabric Meta, never latest-loader.
-        if any(doc.get('uid') == FABRIC for doc in docs) and not any(doc.get('uid') == INTERMEDIARY for doc in docs):
+        if (any(doc.get('uid') == FABRIC for doc in docs)
+                and not any(doc.get('uid') == INTERMEDIARY for doc in docs)
+                and (INTERMEDIARY in by_uid or any(
+                    req.get('uid') == INTERMEDIARY and ('equals' in req or 'suggests' not in req)
+                    for doc in docs for req in doc.get('requires', [])))):
             # The manifest pins intermediary to the base game even when the
             # launcher cached no separate (implicit) component JSON.
             docs.append({'uid': INTERMEDIARY, 'version': game, 'libraries': [

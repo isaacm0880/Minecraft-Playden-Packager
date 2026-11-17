@@ -32,14 +32,14 @@ and desktop usability are the current focus. See
 
 It does **not** sign in, download a replacement Minecraft client, collect console
 logs or deploy a payload without an explicit Start Receiver action. Public metadata, dependencies,
-assets and Windows Java may still need downloads. You need your own Minecraft files
+assets may still need downloads. Windows Java downloads require explicit permission; matching local/cached runtimes are preferred. You need your own Minecraft files
 and a working Playden installation.
 
 ## Compatibility
 
 | Installation | Packaging |
 | --- | --- |
-| Vanilla | Supported for modern versions requiring Java 17+ |
+| Vanilla | Metadata-driven Windows x64 packaging; Java 17/21/25 generations covered by source tests |
 | Fabric | Supported with installed Fabric metadata and required local dependencies |
 | Other untested Minecraft versions | Best-effort packaging where the engine supports the format; warning shown |
 | Forge | **Broken** — known unresolved Playden launch issues; building blocked |

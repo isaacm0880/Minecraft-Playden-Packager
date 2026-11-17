@@ -50,6 +50,14 @@ python -m minecraft_playden build --source local --client-jar /path/to/client.ja
 python -m minecraft_playden validate ./My-Package
 ```
 
+In the development source, Windows Java downloads require `--allow-runtime-download`
+or the GUI's explicit download checkbox. Prefer `--java-runtime /path/to/windows-jdk`
+or `CACHE/runtimes/java-MAJOR-windows-x64`. `build --offline` permits no HTTP and
+requires installed/cached metadata and dependencies. Java is selected by metadata
+major and verified as Windows x64; host Java is never used for the package.
+See [runtime limitations](COMPATIBILITY.md). The retained v0.1.0 binaries use their
+original behavior.
+
 Put `--cache PATH` before the command to choose a download cache. `--username NAME`
 sets the CLI's offline display name independently of GUI preferences. `versions`
 queries the public version catalog; listing is not a compatibility guarantee.
