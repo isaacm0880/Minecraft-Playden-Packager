@@ -72,7 +72,7 @@ def loopback(binary: Path, sandbox: Path, buffer: int | None, diagnostics: bool,
     if unbuffered:
         options.append('--unbuffered-frames')
     process = subprocess.Popen([str(binary), '--test-root', str(sandbox), '--bind', '127.0.0.1',
-                                '--port', '0', '--once', *options], stdout=subprocess.PIPE,
+                                '--port', '0', '--test-legacy-token', '--once', *options], stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True)
     # Drain continuously: diagnostics must never block a payload on a full pipe.
     lines: list[str] = []

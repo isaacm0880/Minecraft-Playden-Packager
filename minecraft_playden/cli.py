@@ -45,9 +45,11 @@ def main() -> int:
     transfer.add_argument('--host', required=True, help='Private PS5 IPv4 address')
     transfer.add_argument('--destination', choices=['internal', 'usb0'], default='internal')
     transfer.add_argument('--port', type=int, default=9025)
+    transfer.add_argument('--pair', action='store_true', help='Pair with a management-v2 receiver using a hidden six-digit code prompt')
+    transfer.add_argument('--control-port', type=int, default=9026, help='Management-v2 control port, used with --pair (default 9026)')
     transfer.add_argument('--name', help='Optional package name override; defaults to the recorded instance name, or package folder name for older packages')
     transfer.add_argument('--token-env', default='PLAYDEN_PS5_TOKEN',
-                          help='Environment variable holding the pairing token; otherwise prompt without echo')
+                          help='Legacy receiver token environment variable; otherwise prompt without echo (not used with --pair)')
     transfer.add_argument('--diagnostics', action='store_true', help='Print numeric timing counters to stderr (no token or file paths)')
     transfer.add_argument('--socket-buffer', type=int, help='Experimental socket buffer bytes, 4096..4194304; OS default if omitted')
     transfer.add_argument('--chunk-size', type=int, default=65536, help='Experimental DATA size, 4096..65536 (default 65536)')
@@ -59,7 +61,12 @@ def main() -> int:
             import os
             from .network_transfer import NetworkRequest
             from .terminal_progress import TransferProgress
-            pairing = os.environ.get(args.token_env) or getpass.getpass('PS5 receiver pairing token: ')
+            if args.pair:
+                from .receiver_manager import pair_receiver
+                paired = pair_receiver(args.host, getpass.getpass('PS5 receiver six-digit pairing code: '), args.control_port)
+                pairing, args.port = paired.key.hex(), paired.info.port
+            else:
+                pairing = os.environ.get(args.token_env) or getpass.getpass('Legacy PS5 receiver pairing token: ')
             interactive = sys.stderr.isatty() and sys.stdout.isatty() and 'NO_COLOR' not in os.environ
             import json
             metrics: dict[str, int | float] = {}

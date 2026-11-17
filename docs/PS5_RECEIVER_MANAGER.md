@@ -1,0 +1,169 @@
+# PS5 LAN Receiver Manager — development branch
+
+The GUI can start the matching receiver through the **already running** PS5 ELF
+loader, pair automatically when encrypted startup credentials are forwarded, pair
+with an externally started receiver using six digits, and request authenticated
+shutdown. These controls act only when clicked. They do not install a loader,
+restart the PS5, deploy unrelated payloads or manage Playden's own game folders.
+
+## Prepare locally
+
+Install the GUI dependencies and build the receiver with your installed SDK:
+
+```bash
+python -m pip install -e '.[dev,gui]'
+make -B -C ps5/receiver PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk
+python -m minecraft_playden gui
+```
+
+Building contacts no console. The GUI does not download an ELF. Select the SDK
+root and this branch's `ps5/receiver/minecraft_playden_receiver.elf` under
+**Receiver paths and ports…**. The POSIX SDK deployer requires `socat` on PATH;
+the Windows SDK script requires `plink.exe`. Windows batch-script paths containing
+spaces or shell characters are rejected because the upstream script does not
+quote its payload path safely. Use safe SDK/temp paths or start externally and
+pair. Native Windows SDK/loader acceptance has not been established here.
+
+| Service | Default TCP port |
+| --- | --- |
+| Existing PS5 ELF loader | 9021 |
+| Authenticated package transfer | 9025 |
+| Receiver-specific management and pairing | 9026 |
+
+Ports are editable and must be distinct. GUI startup patches only its ephemeral
+RSA **public** key and receiver ports into a temporary ELF copy. The source ELF
+is retained unchanged. No private key, pairing code or transfer credential is
+written into either ELF. Keep all services on a trusted private LAN.
+
+## Build, start, send and import
+
+1. Select a Minecraft instance and **Build Playden package**, then choose **Send
+   to PS5 (LAN)…** in the completion dialog. The package is already selected.
+   Alternatively use **Validate existing package…**.
+2. Enter the PS5 IP in **PS5 LAN Receiver Manager**. Ensure its ELF loader is
+   already running, then click **Start Receiver**. Deployment, RSA generation and
+   status checks run in workers; the interface remains responsive.
+3. When the loader forwards payload stdout, the GUI decrypts the startup envelope
+   in memory and verifies the receiver's session identity, version and HMAC
+   response before showing **Running**. Its six-digit session code appears in the
+   code field. **Start** never treats an SDK exit code as a receiver success.
+4. If started externally, enter the six digits from the PS5 receiver notification
+   and click **Pair**. **Refresh status** alone supplies only unverified discovery
+   information and cannot enable Send or Stop. Codes expire after five minutes,
+   are consumed on successful pairing and permit at most five attempts per
+   receiver session. A locked/expired receiver must be restarted manually unless
+   you still hold an authenticated controller session.
+5. Check internal/USB0 destination and the editable instance name, then click
+   **Send to PS5 (LAN)**. This reuses the existing validated-package workflow,
+   buffered protocol, optional default-off file pipelining, progress, cancellation,
+   verification and publication receipts. Local builds and **Copy to USB** remain
+   separate operations; USB0 here is attached to the PS5.
+6. On confirmed success, use the exact import path in Playden's **Play from Import
+   Folder** flow. Publication uncertainty still requires inspection before retry.
+7. Click **Stop Receiver** when finished. It requests shutdown of this specific
+   authenticated session and confirms both listeners closed. It never powers off
+   the PS5 or kills another payload. Stop is disabled during local LAN transfers;
+   an externally active transfer is refused by the receiver. Finish or explicitly
+   cancel the transfer first, then stop. There is no force-stop override.
+
+IP, SDK/ELF paths, ports and destination are non-sensitive remembered settings.
+Codes, RSA private keys, session credentials and stop leases are never stored in
+QSettings or logs. Closing the GUI disconnects its local SDK stream; it does not
+send shutdown. Keep the GUI open until stopping if you need to retain control:
+after closing, an expired/used code cannot recover a forgotten credential.
+Use the loader's own documented manual stop/unload procedure in that situation.
+
+## Status meanings
+
+| Status | Meaning |
+| --- | --- |
+| Unknown | Not paired, unverified discovery, lost contact, changed session or uncertain start/stop |
+| Starting | SDK deployment and authenticated startup confirmation are pending |
+| Running | This version and session authenticated successfully; it may be busy |
+| Stopping | Authenticated stop and listener-closure confirmation are pending |
+| Stopped | The receiver acknowledged stop and both of its listeners refused new connections |
+| Error | Settings, version, pairing or deployment failed; read the adjacent message |
+
+Paired sessions are probed every five seconds while the manager is idle. A failed
+probe disables Stop and Send. A changed receiver session clears stale credentials
+and requires pairing again. A live SDK process is not evidence the ELF is alive,
+and an exited SDK process is not evidence it stopped. The manager never tears
+down an earlier connected SDK stream merely to retry Start, nor closes one
+receiver's stream as a side effect of stopping another receiver. Returning to an
+endpoint owned by this window can reuse its in-memory credential only after an
+authenticated Refresh; closing the window forgets it.
+
+## Loader limitations and trust
+
+The installed SDK `prospero-deploy` sends an ELF over raw TCP and forwards loader
+output. It does not offer a receiver-specific unload API or prove remote payload
+lifetime. Some loaders detach stdout: startup then remains **Unknown**, even if
+the ELF is running. Use the PS5 notification and **Pair**, rather than repeatedly
+redeploying. Start refuses occupied receiver ports before invoking the loader.
+It also refuses to deploy when reachability is too uncertain to exclude an
+existing receiver.
+
+Encrypted startup credentials resist passive observation of the raw loader
+stream. That stream itself is **not an authenticated code-loading channel**: an
+active attacker able to replace the uploaded ELF can replace its behaviour or
+bootstrap public key. The GUI cannot repair that loader limitation. Automatic
+startup assumes a trusted loader and private LAN. Manual code pairing uses PAKE;
+it does not send the code or expose an offline password-checking transcript.
+Package data remains authenticated but unencrypted, as in PDLAN/1.
+
+Receiver shutdown closes only its sockets, clears its credentials and returns
+normally from its entry point after joining its control thread. Host tests prove
+this behaviour on the host. Actual PS5 loader return/unload/resource-reclamation
+semantics, and whether a particular loader ties ELF lifetime to its console
+stream, require owner acceptance on that loader/firmware. No physical deployment
+or benchmark was performed for this change.
+
+Legacy PDLAN/1 receivers remain usable with the existing CLI's hidden 64-character
+token prompt/environment option. They do not implement six-digit pairing or
+management: the GUI cannot safely stop them. Stop/unload them manually before
+starting this branch's receiver. New receivers retain PDLAN/1 authenticated data
+framing but acquire their strong credentials through management v2.
+
+The CLI can also pair with the new receiver without putting a code in argv:
+
+```bash
+python -m minecraft_playden transfer-ps5 /path/to/package --host 192.168.1.50 --pair
+```
+
+This prompts privately for the six digits, discovers the authenticated data port,
+and performs the existing transfer. It does not deploy or stop anything.
+
+## Validation and CachyOS checks
+
+Automated tests use loopback C receivers and fake SDK scripts, not a PS5. They
+cover GUI responsiveness and repeats, startup envelopes, PAKE reference vectors,
+leading-zero codes, invalid public values, expiry, attempt exhaustion, replays,
+control/data key separation, authenticated identity, active-transfer races,
+short-lived stop leases, unavailable SDK/loader output, unexpected termination,
+legacy transfers, retained packages and secret-free settings/logs.
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m pytest -q --ignore=tests/test_lan_benchmark.py
+python -m mypy --platform linux minecraft_playden release
+python -m mypy --platform win32 minecraft_playden release
+python -m mypy --platform darwin minecraft_playden release
+PLAYDEN_RECEIVER_SANITIZE=1 QT_QPA_PLATFORM=offscreen python -m pytest -q tests/test_receiver_manager.py tests/test_gui_receiver.py tests/test_network_receiver.py tests/test_network_transfer.py
+```
+
+On CachyOS/KDE, run the source GUI, build one package into a path with spaces, and
+check output opening from both the completion dialog and main window. Build two
+instances and check selecting each successful result opens its own folder. Check
+existing-package validation and the manager's initial Unknown state and disabled
+Stop without pairing. Verify settings survive reopening while the code is blank.
+
+When choosing to test a real receiver, explicitly start the PS5 loader yourself
+and click Start. Check encrypted automatic pairing if stdout is forwarded, or
+manual six-digit pairing otherwise; send, verify the import path, stop, then
+start again. Cancel a transfer before requesting Stop. Disconnect the LAN to
+check Unknown and disabled Stop/Send. These are optional owner acceptance steps;
+there is no benchmark requirement. The existing release source-approval gate
+still blocks producing a new AppImage under the old v0.1 approval.
+
+The full management wire format and cryptographic construction are documented in
+[the receiver protocol](../ps5/receiver/PROTOCOL.md). This is regression coverage,
+not an independent cryptographic audit of the new protocol composition.

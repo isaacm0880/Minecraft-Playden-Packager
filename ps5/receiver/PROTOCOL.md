@@ -1,15 +1,17 @@
-# PDLAN/1
+# PDLAN/1 transfers and management v2
 
-An explicitly started, single-client import receiver. TCP port 9025; private IPv4
-LAN interfaces only (loopback is supported for host tests). No discovery, remote
-execution, archive extraction, arbitrary destinations or managed-game access.
+An explicitly started, single-transfer import receiver. Transfer TCP port 9025
+and receiver-specific management TCP port 9026; private IPv4 only (loopback for
+host tests). No remote execution, archive extraction, arbitrary destinations or
+managed-game access. Public management discovery never authorizes a write or stop.
 
 ## Pairing and frames
 
-The receiver generates a fresh random 32-byte key at every start and displays its
-64-character hexadecimal encoding locally. The PC never sends the key. It must
-be entered in the GUI for each receiver session, or supplied to the CLI through
-an environment variable or hidden prompt. It is never stored in QSettings.
+Legacy receivers display a random 32-byte key as 64 hexadecimal characters; the
+legacy CLI prompt/environment path remains compatible. Management-v2 receivers
+never print that key in production. They issue independent high-entropy data
+credentials through the PAKE or encrypted startup mechanisms below. Neither
+credential nor six-digit code is stored in QSettings. Data framing is unchanged.
 
 The receiver sends `PDLAN1\r\n` followed by a random 32-byte server nonce. The PC
 sends its random 32-byte nonce and HMAC-SHA256(key, `client` || server || client).
@@ -145,7 +147,7 @@ to named `_s` values, keeps them in NetworkResult.receiver_metrics and reports
 numeric diagnostics/progress. Failed, unauthenticated, unknown or missing metrics
 are discarded; an already authenticated publication receipt remains successful.
 Optional metrics waits are bounded separately. Metrics are currently available
-for successful transfers, not via a new failure/recovery or shutdown command.
+for successful transfers; management status and shutdown do not expose profiling counters.
 
 ## Optional detailed profile (GET_PROFILE = 8)
 
@@ -184,3 +186,117 @@ schema-1 reply and the incoming profile query. No dynamic field names, paths,
 pairing material or payload contents are transmitted. See the
 [profiling investigation](../../docs/PS5_LAN_PERFORMANCE.md#wired-378-second-transfer-accounting-and-bounded-receive-buffering)
 for definitions and before/after results.
+
+
+## Management v2 (`PDMGR2`)
+
+This is an independently serviced, bounded control listener, normally TCP 9026.
+It cannot interpret package writes. It never shares transfer diagnostics state.
+The receiver creates a random 32-byte session ID and random 32-byte bootstrap
+credential, and uniformly samples a six-digit ASCII code with rejection sampling
+from OS `arc4random_buf`. The code appears in the PS5 notification, not stdout.
+An explicit HOST_TEST-only legacy banner/private test pipe is compiled out of the
+PS5 build. Production stdout contains only public startup information and, when
+requested, an encrypted bootstrap envelope.
+
+A management connection receives `PDMGR2\r\n` (8 bytes) and the session ID
+(32 bytes). The client selects exactly one ASCII operation:
+
+- `I`: public discovery. Server sends a u16 JSON length (at most 768), then JSON
+  containing protocol=2, exact build version, session ID, data/control ports, busy
+  flag and empty stop lease. This is unverified and must not enable Send or Stop.
+- `P`: six-digit PAKE pairing, below. At most five admitted attempts per receiver
+  lifetime, including disconnects/malformed inputs, and only within five minutes
+  measured by a monotonic clock. A successful code is consumed. Exhaustion/expiry
+  requires an already authenticated controller or a manual receiver restart;
+  clients never automatically redeploy. This global budget can be exhausted by
+  a hostile peer (availability is not guaranteed), but cannot be reset over LAN.
+- `A`: authenticated control. Derive `control_key = HMAC-SHA256(data_credential,
+  "control-v2" || session_id)` first. Run the original mutually authenticated
+  PDLAN/1 nonce handshake with this separate key, then use its ordered, directional
+  authenticated frames. Master and PAKE-issued data credentials are accepted;
+  the six-digit code is never accepted as a data or control HMAC key.
+
+An authenticated control session must send empty STATUS (9) first. The signed ACK
+contains the same validated status JSON. Unknown protocol/version, wrong session
+ID or malformed fields fail closed. When idle, status also contains a random
+16-byte `stop_lease`, hex encoded; busy responses contain no lease.
+
+To stop, immediately send STOP (10), payload `session_id:32 || stop_lease:16` in
+that same authenticated connection. The lease expires two seconds after status
+was sent. The lifecycle mutex checks the accept-time busy snapshot, current busy
+state and stopping state before setting stopping. A transfer that begins after
+status makes Stop fail with authenticated BUSY, and is not interrupted. New
+transfers are refused after stopping is set. No command is queued behind a data
+transfer because the control listener has its own thread. Unauthenticated/slow
+control peers have bounded reads and cannot create staging or stop a transfer.
+
+ACK `stopping` confirms the request, then the receiver closes its control listener;
+the main owner closes the data listener, joins control and clears both credentials
+with a volatile wipe before returning normally. Clients only report Stopped after
+ACK **and** both listener ports refuse connections. Lost receipts, timeout,
+replacement services or unconfirmed closure mean Unknown. They never trigger an
+OS kill, a PS5 power operation or automatic retry. Loader unload semantics remain
+outside this protocol. Clock failures reject authentication/leases and startup
+rather than disabling expiry.
+
+### Fixed SRP-6a suite
+
+The six digits are a PAKE password, not a transfer key. Use RFC 5054 Appendix A's
+2048-bit safe-prime group, g=2, SHA-256, username ASCII `playden`, and 256-bit
+random private ephemeral exponents. All public group values are exactly 256-byte
+big-endian integers; salts are exactly 16 random bytes. This suite uses
+`k = H(PAD(N) || PAD(g))`, `x = H(salt || H("playden:" || code))`,
+`u = H(PAD(A) || PAD(B))`, and the SRP-6a premaster secret S. Reject A or B zero
+modulo N, out-of-range public inputs and zero u. The C server uses pinned BearSSL
+constant-time i31 modular arithmetic with fixed-width private exponents.
+
+1. After `P`, server sends one byte: 1 if admitted, 0 if expired/used/exhausted.
+   The attempt is charged before receiving any attacker public input.
+2. Client sends A (256). Server computes verifier v and fresh B, then sends salt
+   (16) and B (256). No verifier or password hash is transmitted.
+3. Both derive `K = SHA256(PAD(S))` and transcript
+   `T = SHA256(session_id || salt || A || B)`.
+4. Client sends `HMAC-SHA256(K, "client-pair-v2" || T)` (32).
+5. Only after this proof and a second expiry check does the server install
+   `data_credential = HMAC-SHA256(K, "credential-v2" || T)` and consume the code.
+   It sends `HMAC-SHA256(K, "server-pair-v2" || T)` (32), then closes the PAKE
+   connection. The client must validate that proof and an authenticated STATUS
+   for this session before enabling transfer/control.
+
+Fresh salt, A, B and transcript-bound directional proofs prevent replay and do
+not expose an offline code-checking oracle. An active guessing party gets only
+one password guess per charged attempt; the five-attempt, five-minute budget is
+receiver-global. A lost PAKE server proof can be resolved only by successfully
+using the already derived high-entropy credential to authenticate this exact
+session. A failed proof never enables transfer or control. Successful PAKE grants
+one additional in-memory credential; it does not replace the startup owner's key.
+
+### Encrypted automatic startup
+
+The GUI generates a new RSA-3072 key pair (e=65537) in its worker. Only its public
+modulus (384 bytes) and data/control ports (u16 each) are placed after the unique
+`PDLAN-BOOTSTRAP-RSA-3072-V2:` slot in a temporary ELF copy. The private RSA key is
+never serialized. An unpatched external ELF has no bootstrap public key.
+
+The receiver encrypts exactly 82 bytes:
+`"PDBOOT2\0":8 || session_id:32 || random_data_credential:32 || code:6 ||
+data_port:u16 || control_port:u16` using RSAES-OAEP, SHA-256, MGF1-SHA256 and label
+ASCII `Playden receiver bootstrap v2`. Its stdout line is
+`PDLAN2_BOOTSTRAP ` plus the 384-byte ciphertext in lowercase hexadecimal.
+No cleartext code, credential or private key is printed. The GUI's reader bounds
+line sizes, discards other output without logging it, decrypts in memory, checks
+ports and format, then authenticates STATUS with the credential and session ID.
+RSA key freshness prevents startup-envelope replay across GUI starts.
+
+The raw SDK loader channel is not authenticated code loading. Encryption protects
+startup secrets against passive capture; it cannot defend a console against an
+active attacker who can replace the ELF being loaded. Such loader trust and
+stdout/return/unload limitations are explicitly reported by the GUI/docs. A
+missing stdout envelope never counts as successful startup or remote shutdown.
+
+References: [RFC 5054](https://www.rfc-editor.org/rfc/rfc5054),
+[BearSSL big integers](https://bearssl.org/bigint.html),
+[RSA-OAEP](https://www.rfc-editor.org/rfc/rfc8017).
+Independent synthetic SRP premaster-secret vectors are in
+`tests/fixtures/pairing/`, in addition to C/Python integration and replay tests.

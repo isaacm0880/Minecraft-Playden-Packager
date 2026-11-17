@@ -20,3 +20,8 @@ ast-serialize==0.13.1
 pefile==2024.8.26; sys_platform == 'win32'
 pywin32-ctypes==0.2.3; sys_platform == 'win32'
 colorama==0.4.6; sys_platform == 'win32'
+
+# Encrypted, ephemeral receiver startup credentials (GUI only).
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.12

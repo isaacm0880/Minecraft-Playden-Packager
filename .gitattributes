@@ -5,3 +5,6 @@
 *.ico binary
 *.AppImage binary
 *.icns binary
+
+# Preserve pinned upstream BearSSL files byte-for-byte, including licence spacing.
+ps5/receiver/vendor/bearssl/** -whitespace

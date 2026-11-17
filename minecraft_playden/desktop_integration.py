@@ -6,22 +6,11 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment
 
+from .process_environment import desktop_environment
+
 
 def needs_system_opener() -> bool:
     return sys.platform.startswith('linux') and (bool(getattr(sys, 'frozen', False)) or bool(os.environ.get('APPIMAGE')))
-
-
-def desktop_environment() -> dict[str, str]:
-    env = dict(os.environ)
-    # PyInstaller prepends its libraries; KDE's executables must load host Qt.
-    original = env.pop('LD_LIBRARY_PATH_ORIG', '')
-    env.pop('LD_LIBRARY_PATH', None)
-    if original:
-        env['LD_LIBRARY_PATH'] = original
-    for key in ('QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'QML2_IMPORT_PATH',
-                'PYTHONHOME', 'PYTHONPATH'):
-        env.pop(key, None)
-    return env
 
 
 def open_system_folder(path: Path, parent: QObject, failed: Callable[[str], None]) -> QProcess:

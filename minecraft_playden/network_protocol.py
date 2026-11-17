@@ -155,7 +155,7 @@ class Session:
             return hmac.digest(key, label + server + client, 'sha256')
         self.write(client + mac(b'client'))
         if not hmac.compare_digest(self.read(32), mac(b'server')):
-            raise NetworkTransferError('Receiver authentication failed. Check the pairing token.')
+            raise NetworkTransferError('Receiver authentication failed. Pair again with the receiver, or check the legacy CLI token.')
         self.key = mac(b'session')
 
     def send(self, kind: int, payload: bytes = b'') -> None:

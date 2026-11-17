@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,11 +25,11 @@
 #include "paths.h"
 #include "wire.h"
 
-static volatile sig_atomic_t stopping;
+static _Atomic int stopping;
 static const char *roots[] = {"/data/playden-import", "/mnt/usb0/playden/import"};
 static const char *temp_roots[] = {"/data/playden-packager-temp",
                                    "/mnt/usb0/playden-packager-temp"};
-#define RECEIVER_BUILD "v0.4-profile-1"
+#define RECEIVER_BUILD "v0.4-manager-2"
 #ifdef HOST_TEST
 static char test_root[1024];
 static uint64_t test_free = UINT64_MAX;
@@ -71,43 +72,31 @@ static void hex(const uint8_t *bytes, size_t n, char *out) {
     }
     out[n * 2] = 0;
 }
-static void show_pairing(const char *address, unsigned port, const char *token) {
-    printf("PDLAN/1 address=%s port=%u token=%s\n", address, port, token);
-    printf("receiver_build=%s stat_backend=%s diagnostics=%d stdout=unbuffered\n", RECEIVER_BUILD,
+#include "management.h"
+static void show_pairing(const char *address, unsigned port, const char *code) {
+    printf("PDLAN/2 address=%s port=%u control_port=%u version=%s\n",
+           address, port, manager.control_port, MANAGER_VERSION);
+    uint8_t payload[82], encrypted[384];
+    memcpy(payload, "PDBOOT2\0", 8); memcpy(payload + 8, manager.id, 32);
+    memcpy(payload + 40, manager.master, 32); memcpy(payload + 72, code, 6);
+    putnum(payload + 78, manager.data_port, 2); putnum(payload + 80, manager.control_port, 2);
+    if (bootstrap_encrypt(payload, sizeof(payload), encrypted)) {
+        char encoded[769]; hex(encrypted, sizeof(encrypted), encoded);
+        printf("PDLAN2_BOOTSTRAP %s\n", encoded);
+        wipe(encoded, sizeof(encoded));
+    }
+    wipe(payload, sizeof(payload)); wipe(encrypted, sizeof(encrypted));
 #ifdef PS5_RECEIVER
-           "freebsd-carry",
-#else
-           "posix-host",
-#endif
-           diagnostics_enabled);
-#ifdef PS5_RECEIVER
-    /* Same ABI used by upstream ps5-payload-dev/elfldr's notification helper. */
-    typedef struct {
-        char reserved[45];
-        char message[3075];
-    } Notification;
+    typedef struct { char reserved[45]; char message[3075]; } Notification;
     extern int sceKernelSendNotificationRequest(int, Notification *, size_t, int);
-    Notification request;
-    memset(&request, 0, sizeof(request));
+    Notification request; memset(&request, 0, sizeof(request));
     snprintf(request.message, sizeof(request.message),
-             "Playden LAN receiver %s:%u\nPairing token:\n%s", address, port, token);
+             "Playden receiver %s:%u\nPairing code: %s (expires in 5 minutes)", address, port, code);
     sceKernelSendNotificationRequest(0, &request, sizeof(request), 0);
+    wipe(&request, sizeof(request));
+#else
+    (void)code;
 #endif
-}
-static int handshake(Wire *w, const uint8_t key[32]) {
-    uint8_t greeting[40], reply[64], expected[32], proof[32];
-    memcpy(greeting, MAGIC, 8);
-    arc4random_buf(greeting + 8, 32);
-    if (!io_all(w->fd, greeting, 40, 1) || !io_all(w->fd, reply, 64, 0))
-        return 0;
-    mac(key, "client", 6, greeting + 8, 32, reply, 32, expected);
-    if (!same(reply + 32, expected, 32))
-        return 0;
-    mac(key, "server", 6, greeting + 8, 32, reply, 32, proof);
-    if (!io_all(w->fd, proof, 32, 1))
-        return 0;
-    mac(key, "session", 7, greeting + 8, 32, reply, 32, w->key);
-    return 1;
 }
 static int storage_root(int destination, int temporary, char path[2048]) {
 #ifdef HOST_TEST
@@ -492,13 +481,13 @@ static int send_profile(Wire *wire, double connection_started) {
     return frame_send(wire, ACK, payload, sizeof(payload));
 }
 
-static void connection(int client, const uint8_t key[32]) {
+static void connection(int client) {
     memset(&metrics, 0, sizeof(metrics));
     double connection_started = metric_clock();
     phase_current = PH_PAIR;
     phase_started = connection_started;
     Wire wire = {.fd = client, .sent = 0, .received = 0};
-    if (!handshake(&wire, key)) {
+    if (!receiver_auth(client, &wire, 0)) {
         sleep(1);
         return;
     }
@@ -867,7 +856,7 @@ cleanup:
     free(inventory.slots);
     free(body);
     free(wire.rx);
-    memset(wire.key, 0, sizeof(wire.key));
+    wipe(wire.key, sizeof(wire.key));
     if (diagnostics_enabled) {
         printf("receiver_cleanup wall_s=%.6f complete=%d errno=%d (%s)\n",
                metric_clock() - cleanup_started, !cleanup_error, cleanup_error,
@@ -897,8 +886,17 @@ static void tune_socket(int fd, const char *side) {
 }
 int main(int argc, char **argv) {
     char bind_address[INET_ADDRSTRLEN] = {0};
-    unsigned port = 9025;
+    uint8_t ports[4];
+    for (size_t j = 0; j < 4; ++j) ports[j] = bootstrap_slot[BOOT_MARKER_SIZE + 384 + j];
+    unsigned port = (unsigned)getnum(ports, 2), control_port = (unsigned)getnum(ports + 2, 2);
+    if (!port) port = 9025;
+    if (!control_port) control_port = 9026;
     int once = 0;
+#ifdef HOST_TEST
+    int test_legacy_token = 0, credential_fd = -1;
+    unsigned test_pairing_ttl = 300;
+    if (!getnum(ports + 2, 2)) control_port = 0;
+#endif
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--bind") && i + 1 < argc) {
             if (strlen(argv[++i]) >= sizeof(bind_address))
@@ -910,6 +908,10 @@ int main(int argc, char **argv) {
             if (*end || value > 65535)
                 return 2;
             port = (unsigned)value;
+        } else if (!strcmp(argv[i], "--control-port") && i + 1 < argc) {
+            char *end; unsigned long value = strtoul(argv[++i], &end, 10);
+            if (*end || value > 65535) return 2;
+            control_port = (unsigned)value;
         } else if (!strcmp(argv[i], "--diagnostics")) {
             diagnostics_enabled = 1;
         } else if (!strcmp(argv[i], "--socket-buffer") && i + 1 < argc) {
@@ -920,7 +922,12 @@ int main(int argc, char **argv) {
             socket_buffer = (int)value;
         }
 #ifdef HOST_TEST
-        else if (!strcmp(argv[i], "--test-root") && i + 1 < argc) {
+        else if (!strcmp(argv[i], "--test-legacy-token")) { test_legacy_token = 1; }
+        else if (!strcmp(argv[i], "--test-credentials-fd") && i + 1 < argc) {
+            credential_fd = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--test-pairing-ttl") && i + 1 < argc) {
+            test_pairing_ttl = (unsigned)atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--test-root") && i + 1 < argc) {
             if (strlen(argv[++i]) >= sizeof(test_root))
                 return 2;
             strcpy(test_root, argv[i]);
@@ -1023,15 +1030,53 @@ int main(int argc, char **argv) {
     }
     socklen_t size = sizeof(address);
     getsockname(listener, (struct sockaddr *)&address, &size);
-    uint8_t key[32];
-    char token[65];
-    arc4random_buf(key, 32);
-    hex(key, 32, token);
-    show_pairing(bind_address, ntohs(address.sin_port), token);
-    memset(token, 0, sizeof(token));
+    manager.data_port = ntohs(address.sin_port);
+    manager.listener = socket(AF_INET, SOCK_STREAM, 0);
+    if (manager.listener < 0) { close(listener); return 1; }
+    setsockopt(manager.listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    address.sin_port = htons((uint16_t)control_port);
+    if (bind(manager.listener, (struct sockaddr *)&address, sizeof(address)) < 0 ||
+        listen(manager.listener, 2) < 0) {
+        perror("receiver control bind/listen"); close(manager.listener); close(listener); return 1;
+    }
+    size = sizeof(address); getsockname(manager.listener, (struct sockaddr *)&address, &size);
+    manager.control_port = ntohs(address.sin_port);
+    arc4random_buf(manager.master, 32); arc4random_buf(manager.id, 32);
+    uint32_t random_code;
+    do { arc4random_buf(&random_code, sizeof(random_code)); } while (random_code >= UINT32_C(4294000000));
+    snprintf(manager.code, sizeof(manager.code), "%06u", random_code % 1000000);
+    double started_at = manager_now();
+    if (started_at < 0) {
+        fprintf(stderr, "Monotonic clock unavailable; receiver not started.\n");
+        close(manager.listener); close(listener); wipe(manager.master, 32); wipe(manager.code, sizeof(manager.code)); return 1;
+    }
+    manager.pair_deadline = started_at + 300;
+#ifdef HOST_TEST
+    manager.pair_deadline = manager_now() + test_pairing_ttl;
+    if (credential_fd >= 0) {
+        /* Dedicated private test pipe, never production stdout or logs. */
+        uint8_t test_credentials[70];
+        memcpy(test_credentials, manager.master, 32); memcpy(test_credentials + 32, manager.code, 6);
+        memcpy(test_credentials + 38, manager.id, 32);
+        if (write(credential_fd, test_credentials, sizeof(test_credentials)) != sizeof(test_credentials)) return 1;
+        close(credential_fd); wipe(test_credentials, sizeof(test_credentials));
+    }
+    if (test_legacy_token) {
+        char token[65]; hex(manager.master, 32, token);
+        printf("PDLAN/1 address=%s port=%u token=%s\n", bind_address, manager.data_port, token);
+        wipe(token, sizeof(token));
+    }
+#endif
+    show_pairing(bind_address, manager.data_port, manager.code);
+    pthread_t control_thread;
+    if (pthread_create(&control_thread, NULL, control_loop, NULL)) {
+        close(manager.listener); close(listener); wipe(manager.master, 32); wipe(manager.code, sizeof(manager.code)); return 1;
+    }
     tune_socket(listener, "listener");
-    time_t expiry = time(NULL) + 3600;
-    while (!stopping && time(NULL) < expiry) {
+    double expiry = started_at + 3600;
+    while (!stopping) {
+        double current = manager_now();
+        if (current < 0 || current >= expiry) break;
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(listener, &readfds);
@@ -1051,13 +1096,20 @@ int main(int argc, char **argv) {
         struct timeval timeout = {15, 0};
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
         setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-        if (private_ip(peer.sin_addr.s_addr))
-            connection(client, key);
+        pthread_mutex_lock(&manager.mutex);
+        int accepted = private_ip(peer.sin_addr.s_addr) && !stopping;
+        if (accepted) manager.busy = 1;
+        pthread_mutex_unlock(&manager.mutex);
+        if (accepted) connection(client);
+        pthread_mutex_lock(&manager.mutex); manager.busy = 0; pthread_mutex_unlock(&manager.mutex);
         close(client);
         if (once)
             break;
     }
     close(listener);
-    memset(key, 0, sizeof(key));
+    stopping = 1;
+    pthread_join(control_thread, NULL);
+    wipe(manager.master, sizeof(manager.master)); wipe(manager.paired, sizeof(manager.paired));
+    wipe(manager.code, sizeof(manager.code));
     return 0;
 }

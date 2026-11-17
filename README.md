@@ -16,7 +16,8 @@ custom PS5 receiver, targeting internal import storage or USB0. The receiver
 builds with the PS5 Payload SDK and passes host integration tests. The owner has
 successfully transferred and launched packages on a physical PS5. GUI integration
 and desktop usability are the current focus. See
-[PS5 LAN setup and physical test commands](docs/PS5_LAN_TRANSFER.md).
+[Receiver Manager and loader limitations](docs/PS5_RECEIVER_MANAGER.md) and
+[PS5 LAN setup](docs/PS5_LAN_TRANSFER.md).
 
 ## What it does
 
@@ -26,10 +27,11 @@ and desktop usability are the current focus. See
 - Shows compatibility warnings and blocks known-broken or technically unsupported builds.
 - Cleans known private data from package copies by default in the GUI; original instances stay untouched.
 - Copies every successful queue output to USB, with progress, cancellation and checksum verification enabled by default.
-- Sends newly built or existing validated packages over paired LAN, with editable import names, progress, speed, ETA and cancellation. The receiver must be started manually.
+- Sends newly built or existing validated packages over paired LAN, with editable import names, progress, speed, ETA and cancellation.
+- Manages the receiver through explicit Start/Stop controls, encrypted automatic startup pairing or a six-digit PAKE code. The PS5 ELF loader must already be running.
 
 It does **not** sign in, download a replacement Minecraft client, collect console
-logs or install a payload automatically. Public metadata, dependencies,
+logs or deploy a payload without an explicit Start Receiver action. Public metadata, dependencies,
 assets and Windows Java may still need downloads. You need your own Minecraft files
 and a working Playden installation.
 
@@ -137,4 +139,4 @@ is not affiliated with Mojang, Microsoft or Sony.
 
 LAN development: [staging, pairing and manual PS5 testing](docs/PS5_LAN_TRANSFER.md),
 [performance diagnostics and benchmarks](docs/PS5_LAN_PERFORMANCE.md), and
-[future receiver shutdown proposal](docs/PS5_RECEIVER_SHUTDOWN.md).
+[authenticated receiver shutdown](docs/PS5_RECEIVER_SHUTDOWN.md).

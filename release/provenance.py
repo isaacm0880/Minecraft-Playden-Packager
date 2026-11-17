@@ -86,7 +86,7 @@ def check_source(root: Path, expected: str | None = None, preview: bool = False)
         path = root / name
         if path.is_symlink() or not path.is_file():
             raise ValueError(f'Source snapshot contains missing/linked input: {name}')
-        if not (name.startswith(('minecraft_playden/', 'release/', 'tests/', 'docs/', '.github/workflows/', 'tools/'))
+        if not (name.startswith(('minecraft_playden/', 'release/', 'tests/', 'docs/', '.github/workflows/', 'tools/', 'ps5/'))
                 or name in ('pyproject.toml', 'LICENSE', '.gitignore', '.gitattributes', 'CHANGELOG.md', 'THIRD_PARTY.md', 'RELEASE_NOTES.md') or name.startswith('README')):
             continue
         data = path.read_bytes()

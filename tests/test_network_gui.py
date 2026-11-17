@@ -8,6 +8,7 @@ import pytest
 pytest.importorskip('PySide6')
 from PySide6.QtWidgets import QApplication
 
+from minecraft_playden.receiver_manager import PairedReceiver, ReceiverInfo, VERSION
 from minecraft_playden.desktop import ValidatedPackage
 from minecraft_playden.network_transfer import NetworkRequest, NetworkResult
 from minecraft_playden.progress import Progress
@@ -24,6 +25,12 @@ def wait(window):
     assert not window.busy(), window.status.text()
 
 
+def install_credentials(window, key=bytes.fromhex('ab' * 32), port=9025):
+    manager = window.receiver_manager
+    manager.monitoring = False
+    manager.install(PairedReceiver(window.ps5_host.text(), ReceiverInfo(VERSION, bytes(32), port, 9026), key, '004201'), monitor=False)
+
+
 @pytest.fixture
 def ready(preferences, tmp_path):
     create, read = preferences
@@ -34,7 +41,7 @@ def ready(preferences, tmp_path):
     window.completed_package = ValidatedPackage(package)
     window.update_build_button()
     window.ps5_host.setText('192.168.1.50')
-    window.ps5_token.setText('ab' * 32)
+    install_credentials(window)
     yield window, package, create, read
     if window.busy():
         window.cancel_operation()
@@ -51,7 +58,7 @@ def test_settings_persist_host_and_usb_destination_but_never_pairing_token(ready
     reopened = create()
     assert reopened.ps5_destination.currentData() == 'usb0'
     assert reopened.ps5_host.text() == '192.168.1.50'
-    assert reopened.ps5_token.text() == ''
+    assert reopened.receiver_manager.paired is None and reopened.receiver_manager.code.text() == ''
     assert not reopened.copy_ps5_button.isEnabled()
     assert 'ab' * 32 not in [str(read().value(key)) for key in read().allKeys()]
 
@@ -131,11 +138,9 @@ def test_gui_uses_the_same_recorded_instance_name_and_receives_metrics(ready, tm
     window.update_build_button()
     with receiver('--diagnostics') as (sandbox, port, token):
         window.ps5_host.setText('127.0.0.1')
-        window.ps5_token.setText(token)
-        with patch('minecraft_playden.gui_app.NetworkRequest', side_effect=lambda source, host, pairing, destination, **options:
-                   NetworkRequest(source, host, pairing, destination, port, **options)):
-            window.copy_to_ps5()
-            wait(window)
+        install_credentials(window, bytes.fromhex(token), port)
+        window.copy_to_ps5()
+        wait(window)
         assert window.outcome == 'succeeded', window.log.toPlainText()
         assert window.network_results[0].destination.endswith('/Shared GUI Instance Name')
         assert window.network_results[0].receiver_metrics['published'] == 1
@@ -162,7 +167,7 @@ def test_name_override_and_pipeline_are_passed_to_worker_and_survive_repeat(read
     assert 'publication confirmed' in window.status.text()
     assert '/data/playden-import/My PS5 Instance' in window.status.text()
     assert create().ps5_pipeline.isChecked()
-    assert create().ps5_token.text() == ''
+    assert create().receiver_manager.paired is None
     window.ps5_name.setText('../escape')
     assert not window.copy_ps5_button.isEnabled()
 
@@ -205,7 +210,7 @@ def test_build_completion_reuses_package_and_reveals_lan_settings(ready):
     dialog.ps5_button.click()
     assert not dialog.isVisible()
     assert window.completed_package.path == package
-    assert 'receiver manually' in window.status.text()
+    assert 'Start Receiver' in window.status.text()
     assert window.copy_ps5_button.isEnabled()
 
 

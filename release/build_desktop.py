@@ -54,7 +54,7 @@ def licenses(root: Path, stage: Path) -> None:
             if copyright_file.is_file():
                 shutil.copyfile(copyright_file, native / (copyright_file.parent.name + '.txt'))
     notices = []
-    for name in ('PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'certifi', 'PyInstaller'):
+    for name in ('PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'certifi', 'PyInstaller', 'cryptography', 'cffi', 'pycparser'):
         distribution = packages.distribution(name)
         headers = distribution.metadata.json
         notices.append(f'{name} {distribution.version}\n{headers.get("license_expression") or headers.get("license", "See bundled license files")}')
@@ -80,8 +80,12 @@ def licenses(root: Path, stage: Path) -> None:
 def bundle_documentation(root: Path, destination: Path, macos: bool = False) -> None:
     """Retain the installation guide's local links and licence/credit notices."""
     for name in ('INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md', 'TROUBLESHOOTING.md',
-                 'PS5_LAN_TRANSFER.md', 'PS5_LAN_PERFORMANCE.md', 'PS5_RECEIVER_SHUTDOWN.md'):
-        shutil.copyfile(root / 'docs' / name, destination / name)
+                 'PS5_LAN_TRANSFER.md', 'PS5_LAN_PERFORMANCE.md', 'PS5_RECEIVER_SHUTDOWN.md', 'PS5_RECEIVER_MANAGER.md'):
+        text = (root / 'docs' / name).read_text(encoding='utf-8')
+        text = text.replace('../ps5/receiver/PROTOCOL.md', 'receiver/PROTOCOL.md')
+        (destination / name).write_text(text, encoding='utf-8')
+    (destination / 'receiver').mkdir()
+    shutil.copyfile(root / 'ps5/receiver/PROTOCOL.md', destination / 'receiver/PROTOCOL.md')
     (destination / 'benchmarks').mkdir()
     for name in ('lan-loopback-2026-11-16.jsonl', 'lan-profile-loopback-2026-11-16.jsonl'):
         shutil.copyfile(root / 'docs/benchmarks' / name, destination / 'benchmarks' / name)

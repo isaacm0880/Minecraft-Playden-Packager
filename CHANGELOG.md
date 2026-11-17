@@ -2,12 +2,21 @@
 
 ## v0.4.0.dev0 — unreleased
 
+- PS5 Receiver Manager with explicit SDK deployment, authenticated session status,
+  independent idle-only graceful shutdown and five-second liveness checks.
+- Six-digit SRP-6a pairing with expiry, a five-attempt global budget and replay
+  protection; RSA-OAEP encrypted automatic startup credentials. GUI session
+  secrets stay in memory. Legacy CLI token transfers remain supported;
+  `transfer-ps5 --pair` privately prompts for a new receiver's six-digit code.
+- Lifecycle, PAKE reference-vector, encrypted bootstrap, busy-race, secret-handling
+  and responsive GUI tests; loader stdout/trust/unload limitations documented.
+
 - Paired PS5 LAN receiver payload and Python sender, with internal storage as
   the default destination and an explicit USB0 option without fallback.
 - Authenticated messages, private staging, streamed hashes, receiver-side readback
   verification, constrained recipe/inventory checks and refusal of existing names.
 - GUI send button, progress and cancellation; remembered IP/destination and
-  memory-only pairing token. CLI `transfer-ps5` supports a fresh remote name.
+  memory-only session credentials. CLI `transfer-ps5` supports a fresh remote name.
 - Host protocol/security integration tests and PS5 SDK build validation. The owner
   reports successful transfer and launch on a physical PS5; durability across
   unexpected power loss is not established.

@@ -31,3 +31,17 @@ The receiver includes Alain Mosnier’s SHA-256 implementation from
 `565f65009bdd98267361b17d50cddd7c9beb3e6c`, under the 0BSD licence.
 The unmodified source and licence are in `ps5/receiver/vendor/`.
 The PS5 Payload SDK remains an external build dependency.
+
+
+## Receiver Manager cryptography
+
+The PS5 receiver also includes the MIT-licensed BearSSL 0.6 constant-time i31
+integer arithmetic subset, public headers and conditional-copy routine. Original
+licence and pinned file/archive hashes are retained in
+`ps5/receiver/vendor/bearssl/`. This supports SRP-6a and RSA-OAEP; no BearSSL TLS
+stack is shipped. Two local include adapters are identified in its manifest.
+
+GUI startup encryption uses the external `cryptography` Python package (Apache-2.0
+or BSD-3-Clause); frozen dependency licence collection retains its notices and
+those of its bundled crypto backend. The PS5 Payload SDK remains separately
+installed. Synthetic SRP vector provenance is in `tests/fixtures/pairing/README.md`.

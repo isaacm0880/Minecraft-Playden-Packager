@@ -1,11 +1,14 @@
 # PS5 LAN package transfer — v0.4 development
 
 The PC sends a validated launch package to an explicitly started custom receiver.
-It does not deploy the payload, execute a game, modify Playden's managed games,
-remove local outputs, or silently overwrite an existing import. The owner has successfully transferred and launched packages on a physical PS5.
+CLI transfer does not deploy a payload. The GUI Receiver Manager deploys only
+on an explicit Start click. Transfers do not execute games, modify Playden's
+managed games, remove local outputs or overwrite an existing import. The owner has successfully transferred and launched packages on a physical PS5.
 The current work focuses on GUI integration and bug fixes; the manual commands
 below remain reference instructions, not a requirement to repeat hardware testing. The published v0.1.0 binaries do not
 include it; run the development source on `feat/ps5-network-transfer`.
+
+See [Receiver Manager, six-digit pairing and loader limitations](PS5_RECEIVER_MANAGER.md) for the current GUI workflow. The ELF loader must already be running.
 
 | Selection | Published import root | Private staging root |
 | --- | --- | --- |
@@ -48,27 +51,24 @@ PS5_LOADER_PORT=9021
   ps5/receiver/minecraft_playden_receiver.elf
 ```
 
-Run the next commands in a second terminal if the loader retains the first one
-for payload output. Read the fresh **64-character pairing token** from the PS5
-notification or receiver console output. Never paste it into a public report.
-It changes on every payload start. The sender prompts for it without echo:
+Run transfer from another terminal if the loader retains the first one for
+payload output. Read the fresh **six-digit code** from the PS5 notification.
+The CLI can pair without echoing the code or putting it in argv:
 
 ```bash
 . .venv/bin/activate
 read -r -p 'Existing built package directory: ' PACKAGE_DIR
 python -m minecraft_playden validate "$PACKAGE_DIR"
-python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" \
+python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" --pair \
   --destination internal
-python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" \
-  --destination usb0
 ```
 
-If using a second terminal, set `PS5_IP` there too. For scripted sends the token
-can be supplied via `PLAYDEN_PS5_TOKEN`; it is not accepted as a command-line
-argument and is never saved in QSettings. The GUI is available with
-`python -m minecraft_playden gui`. Enter IP/token, select the destination and
-click **Send to PS5 (LAN)**. Close/reopen to check that USB0 persists and the token
-does not. The existing local USB-copy feature continues to work independently.
+For repeated sends or switching internal/USB0 in one receiver session, use the
+GUI, which keeps the strong credential in memory. The one-shot CLI consumes the
+code and forgets its derived credential on exit; it cannot reuse that code.
+An authenticated GUI that started the receiver remains able to manage it.
+Legacy PDLAN/1 receivers still use the CLI's hidden 64-character token prompt or
+`PLAYDEN_PS5_TOKEN`. The current GUI has no manual long-token field.
 
 After transfer, inspect the exact package paths printed in the success receipts, then manually select the corresponding
 folder in Playden's **Play from Import Folder** flow. Do not move files into or
@@ -84,10 +84,11 @@ automated tests cover both preflight and write-time insufficient-space errors.
 
 ## Pairing, integrity and recovery
 
-The receiver expires after an hour between connections; stop/unload it through
-the loader when finished. A fresh random key and per-connection nonces provide
+The receiver expires one hour after startup, after any active connection finishes.
+Use authenticated Stop when finished; use the loader manually for legacy or
+unpaired sessions that cannot authenticate. Fresh strong credentials and nonces provide
 mutual HMAC-SHA256 authentication, ordered authenticated frames and replay
-protection. The token authorizes writes to the import roots: keep it private.
+protection. The in-memory credential authorizes writes to the import roots. The six-digit code is never used as the data HMAC key.
 This protocol does **not encrypt** packages, worlds or mods. Use a trusted private
 LAN and do not expose TCP 9025 outside it.
 
@@ -137,64 +138,20 @@ When stdout or stderr is redirected, or `NO_COLOR` is set, the CLI writes plain
 stage records and at most one intermediate record every 30 seconds to stderr;
 the final receipt remains on stdout. GUI callbacks retain the same byte fields.
 
-## Physical testing — Fish
+## Optional physical acceptance
 
-These commands are manual. Stop/unload the old receiver through the loader first;
-do not run two listeners on port 9025. Build with numeric diagnostics enabled:
+The owner reported successful transfers and launches with earlier receivers.
+For this manager update, validation uses host receivers and fake SDK tools; no
+physical deployment or performance benchmark was performed. Follow the optional
+[Receiver Manager acceptance steps](PS5_RECEIVER_MANAGER.md#validation-and-cachyos-checks)
+when ready. The manager's authenticated idle-only Stop is implemented; automatic
+exit-after-success remains unimplemented. See
+[shutdown behaviour](PS5_RECEIVER_SHUTDOWN.md).
 
-```fish
-cd /path/to/Minecraft-Playden-Packager
-set -gx PS5_PAYLOAD_SDK /opt/ps5-payload-sdk/ps5-payload-sdk
-make -B -C ps5/receiver PS5_PAYLOAD_SDK="$PS5_PAYLOAD_SDK" DIAGNOSTICS=1
-read -P 'PS5 LAN IPv4 address: ' PS5_IP
-read -P 'ELF loader port (usually 9021): ' PS5_LOADER_PORT
-umask 077
-"$PS5_PAYLOAD_SDK/bin/prospero-deploy" -h "$PS5_IP" -p "$PS5_LOADER_PORT" ps5/receiver/minecraft_playden_receiver.elf | tee /tmp/playden-receiver-private.log
-```
-
-Check `receiver_build=v0.4-profile-1 stat_backend=freebsd-carry`. The full
-log includes a pairing token; keep it private. In a second Fish terminal:
-
-```fish
-cd /path/to/Minecraft-Playden-Packager
-read -P 'PS5 LAN IPv4 address: ' PS5_IP
-read -P 'Existing validated package directory: ' PACKAGE_DIR
-.venv/bin/python -m minecraft_playden validate "$PACKAGE_DIR"
-.venv/bin/python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" --destination internal --diagnostics
-.venv/bin/python -m minecraft_playden transfer-ps5 "$PACKAGE_DIR" --host "$PS5_IP" --destination usb0 --diagnostics
-```
-
-Each send prompts privately for the fresh token. Inspect the exact named import
-folders only after success. During a transfer, verify that the random private
-stage appears under `/data/playden-packager-temp/` or
-`/mnt/usb0/playden-packager-temp/`, not inside the import root. Cancel another
-fresh-name transfer before COMMIT; its private stage and final import name should
-be absent, local outputs unchanged, and unrelated staging directories preserved.
-Retry an existing successful name and confirm refusal without changing its files.
-Check USB0 unavailable behaviour, GUI destination persistence and local USB copy.
-Do not fill the PS5 to simulate ENOSPC; automated fault tests cover storage errors.
-If publication reports uncertain durability or a lost receipt, inspect that final
-name before retrying; never automatically delete it.
-
-To share diagnostic evidence without the startup pairing banner:
-
-```fish
-rg '^(receiver_build=|receiver_metrics |receiver_cleanup |receiver_socket )' /tmp/playden-receiver-private.log > /tmp/playden-receiver-metrics.txt
-```
-
-See [performance experiments and reproducible benchmarks](PS5_LAN_PERFORMANCE.md)
-for controlled Wi-Fi/wired, internal/USB and buffer comparisons. The
-[future shutdown proposal](PS5_RECEIVER_SHUTDOWN.md) is documentation only; no
-shutdown command or automatic shutdown option is available in this receiver.
-
-
-If verification rejects progress after upload, see the
-[syscall ABI investigation and metrics lifecycle](PS5_LAN_PERFORMANCE.md#verification-failure-near-completion--syscall-abi-fix).
-The current sender includes the rejected numeric counters in its error. Keep
-mandatory verification enabled; a rejected frame never authorizes publication.
-`receiver_metrics` is flushed before staging deletion; `receiver_cleanup` confirms
-whether cleanup completed. Check `diagnostics=1` in the startup build line.
-
+Historical diagnostic investigations remain in
+[PS5_LAN_PERFORMANCE.md](PS5_LAN_PERFORMANCE.md). They describe earlier receiver
+versions and token banners; they are not current GUI setup instructions or a
+requirement for new benchmarking. Mandatory verification remains enabled.
 
 ## Instance names and import access
 
@@ -247,39 +204,32 @@ not change GUI sending. See the performance guide for controlled manual trials.
 
 ## GUI build and send workflow
 
-Physical PS5 transfer and Playden launch have been reported successful by the
-owner. This GUI update is validated with automated desktop and host receiver
-tests; no further performance runs or physical benchmarks are required.
+1. Select a local instance and **Build Playden package**, then choose **Send to
+   PS5 (LAN)…** in the completion dialog. No folder selection is repeated.
+   **Validate existing package…** loads a previously built package instead.
+2. In **PS5 LAN Receiver Manager**, choose the PS5 IP and configure SDK/ELF paths
+   if needed. Ensure the PS5 ELF loader is running, then click **Start Receiver**.
+   It uses encrypted automatic pairing when loader stdout is available. An
+   externally started receiver instead uses its six-digit PS5 code and **Pair**.
+3. Select internal/USB0 and check the editable **PS5 instance name**. The recorded
+   instance name survives a renamed local folder. A multi-build queue sends all
+   successful launch packages with their own names; selecting a result changes
+   which local output folder is opened. **Copy to USB** separately writes to a
+   drive attached to this computer.
+4. Click **Send to PS5 (LAN)**. Validation, sending, receiver verification and
+   publication are separate stages. Speed and ETA describe sending. The progress
+   bar completes only after a confirmed publication receipt. Once COMMIT is sent,
+   cancellation cannot undo publication; inspect uncertain import paths before
+   retrying. Local outputs remain.
+5. Open the confirmed path through Playden's **Play from Import Folder**, then
+   use **Stop Receiver** when idle. Stop never interrupts an active transfer.
+   Closing the app only closes its local SDK connection, not remote shutdown.
 
-1. Select a Minecraft instance and choose **Build Playden package**. The build
-   creates and validates a local package; it does not contact the console.
-2. In the completion dialog choose **Send to PS5 (LAN)…** to reveal the connection
-   settings for that package. Its folder is already selected. Alternatively use
-   **Validate existing package…** to load a previously built package.
-3. Start the receiver ELF manually on the PS5. Enter its private IPv4 address and
-   fresh pairing token. Select **Internal storage** or **USB0 storage** on the PS5.
-   The app never deploys or starts the receiver. USB0 here means the PS5's drive;
-   **Copy to USB** separately writes to a drive attached to this computer.
-4. Check **PS5 instance name**. It defaults to the recorded instance name, even
-   if the local package folder was renamed. Edit it to use a fresh import name;
-   existing names are refused. A multi-build queue sends all successful launch
-   packages using their individual recorded names; the name field is disabled
-   for a queue. Selecting a results row changes which local folder is opened.
-5. Click **Send to PS5 (LAN)**. Validation, sending, receiver verification and
-   publication are distinct stages. Transfer speed and ETA describe the sending
-   stage only; the progress bar reaches completion after the publication receipt.
-   **Cancel Operation** requests cancellation while the worker keeps the UI
-   responsive. Once COMMIT is sent, publication may finish despite cancellation.
-6. On confirmed success, copy the final PS5 import path shown in the log and open
-   it through Playden's **Play from Import Folder** flow. Local outputs remain.
-   If the GUI says **publication uncertain**, inspect the PS5 import folder before
-   retrying: a lost receipt does not prove that publication failed.
-
-IP, destination and the advanced pipeline preference are remembered locally.
-The pairing token is never saved. Name edits apply to the current package during
-this session. Buffered receiver reads are enabled by default in the normal ELF
-build. **Advanced: pipeline files (--pipeline-files)** is off by default and is
-optional; it does not replace pairing, validation or receiver verification.
+Non-sensitive settings are remembered. Session secrets and codes are not.
+Buffered receiver reads remain the default; **Advanced: pipeline files
+(--pipeline-files)** is optional and initially disabled. See the
+[manager guide](PS5_RECEIVER_MANAGER.md) for states, code expiry, security,
+manual recovery and the limits of the SDK loader's raw TCP transport.
 
 ### CachyOS / KDE regression check
 
@@ -305,8 +255,9 @@ AppImage awaits a separately approved desktop build.
   Ensure `dolphin` and `xdg-utils` are installed and the desktop's default folder
   handler is configured if opening fails. Desktop acceptance is not established
   by an offscreen test; check the actual file manager window.
-- Enter IP/token and an edited name; check internal/USB0 selection, disabled
-  controls while sending, cancellation, separate verification/publication states
-  and the final import path. Close and reopen: IP/destination remain, token is
-  blank. Start the receiver yourself when doing an actual send; no benchmark or
-  additional physical transfer is needed to test the local build/folder controls.
+- Check the manager starts Unknown with Stop disabled. Enter IP/code and pair, or
+  explicitly click Start with an already running ELF loader. Check internal/USB0,
+  an edited name, disabled Stop while sending, cancellation, verification,
+  publication and the final import path. Stop when idle. Close and reopen:
+  IP/destination remain, code and credentials are blank. No benchmark or physical
+  transfer is needed to test local build/folder controls.

@@ -1,0 +1,45 @@
+{
+  "upstream": "https://bearssl.org/bearssl-0.6.tar.gz",
+  "archive_sha256": "6705bba1714961b41a728dfc5debbe348d2966c117649392f8c8139efc83ff14",
+  "files": {
+    "LICENSE.txt": "771bf18c8633ea69ec9b07d2e604c4b99b7bef41b0f5ce6385d24df4448f61ca",
+    "inc/bearssl.h": "5e73cb64005a5efd5082932bb9b7a3301a748969841c45d7f61123006e9ca5fe",
+    "inc/bearssl_aead.h": "9d90afbc65535335517c028817ac0704af6b58971f2c262a65eb26e0b4099201",
+    "inc/bearssl_block.h": "a00b4a48c42c824f2ec4ee775672df9cec86ad455b08cb8ae7eb8c89e63d082a",
+    "inc/bearssl_ec.h": "3ee566b317361828cce70a96ce22d34d865b8dea73e65de55a6f511076bab766",
+    "inc/bearssl_hash.h": "adfe3039fe48962c7fd74a1031f6d9dde951fb12a6acdae65a39f4d8537d2ef9",
+    "inc/bearssl_hmac.h": "a40c14a7a71d5b4fa21f8485d7ad3975d3a37b9cd8b9f72cd0fa032af8105614",
+    "inc/bearssl_kdf.h": "dee68113a97743febd0fee22d545c9548d81a6448e5b28311fa8ce384ee48bd8",
+    "inc/bearssl_pem.h": "ef36260e8568e5927178e92c2aab849be71bc07414c01baeb1d12a3a51a82c3e",
+    "inc/bearssl_prf.h": "0162e674d6c49425bfa0e8e9c79b3d850530e7928288930284fb7ac940a12b17",
+    "inc/bearssl_rand.h": "968335e8a2957e5bf64cb0b6b1f916e53bc330e8c66d5f2d2f658f415a56dd44",
+    "inc/bearssl_rsa.h": "1d9538cb78269cd02ca9ec118f67930ba88730eece4427f973fda2cb7122f9ff",
+    "inc/bearssl_ssl.h": "52ea66d52eac903661865d99a05b5621e743a4acb227d7faf154bb5ce1ea48f3",
+    "inc/bearssl_x509.h": "92a1674630209ee2a35d078990f7d8a1bf98753b4ec97db9aa9c288f7c294ab1",
+    "src/bearssl.h": "77edc40e13f8d63a90e072958ea0df9c263cd98bf7c116901ab3e50c7be36a0b",
+    "src/ccopy.c": "5163871149faa35a4ba026a915743065238fc94cc4312f02867a4f50ff2631f8",
+    "src/config.h": "785d0cea25a7bbcb2b6d32e096072ac00b12f4d0b4819aa95ca28816a0e484d0",
+    "src/inner.h": "05a4c5b30599a00deda2648fbb842c07eb783bc5a62589ba90c3fada36ad732a",
+    "src/int/i31_add.c": "d8b364d686757e2ea87e900930f84cc1ed6991e67ee454c3c4edbede745762dc",
+    "src/int/i31_bitlen.c": "c0bb679941783edf36ef941e11258ffa9261255ec1095e916f3b43c87b28a044",
+    "src/int/i31_decmod.c": "654e982c3fefbd874effb816646159f08340291c4805df9a28aba29f1c8eb12c",
+    "src/int/i31_decode.c": "93690aeb61b5986c2bed451e6fb9dadd893b7caf132d21dd10d980ae6c47eb92",
+    "src/int/i31_encode.c": "4235d5bb38695e8296603682c84a1b1959fd3e6a44fe9d26f6c1e320c110f923",
+    "src/int/i31_iszero.c": "a479041e88dfc813e1560442b31c4e6a4b1f40ce1c0c50335a52dfd5205c47f2",
+    "src/int/i31_modpow.c": "484c22d19397cda93be1b349683a3128e5f51fb8fb408ddc6a7bbdf96ee53993",
+    "src/int/i31_montmul.c": "c2a8a366679fc13ce77e207f11f627d3f1e6cae2b57610215774eb5c5058064e",
+    "src/int/i31_muladd.c": "243f4587f7eb443e2844d7e3ccd7b5177187a7c4d1707344d085599ba28fe192",
+    "src/int/i31_ninv31.c": "6e8cb090af5052252253597338b7b1c3b5f1c34a31b7b9668cfb512b9c5854eb",
+    "src/int/i31_sub.c": "08e82e7fbb042081b6b37e882f05e4611e8c9502f0acb19234520a6f8b8e22c8",
+    "src/int/i31_tmont.c": "a16cd1f0b8a1658b6db2b4ea3d6423dab0da9294ce2a146fa7bc46de5dd84798",
+    "src/int/i32_div32.c": "f0ade1999953e879c5cdb2ae66fd00438d09cab3099ed1143288cbeaaad40295",
+    "src/int/inner.h": "cd532896e22ce758cece80d34e6e7567887f2cb3bc9f62a2204b4c154116369b"
+  },
+  "local_adapters": [
+    "src/bearssl.h",
+    "src/int/inner.h"
+  ],
+  "upstream_paths": {
+    "src/ccopy.c": "src/codec/ccopy.c"
+  }
+}

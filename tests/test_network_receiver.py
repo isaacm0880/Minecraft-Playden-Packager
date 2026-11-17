@@ -47,7 +47,7 @@ def receiver(receiver_binary, tmp_path):
         sandbox.mkdir()
         if usb:
             (sandbox / 'usb0').mkdir()
-        process = subprocess.Popen([str(receiver_binary), '--bind', '127.0.0.1', '--port', '0',
+        process = subprocess.Popen([str(receiver_binary), '--bind', '127.0.0.1', '--port', '0', '--test-legacy-token',
                                     '--test-root', str(sandbox), *options],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         lines = queue.Queue()
@@ -657,7 +657,7 @@ def test_many_file_verification_heartbeats_are_monotonic_and_keep_exact_total(re
 def test_metrics_are_visible_while_receiver_is_alive_after_disconnect(receiver_binary, tmp_path):
     sandbox = tmp_path / 'metrics-console'
     sandbox.mkdir()
-    process = subprocess.Popen([str(receiver_binary), '--bind', '127.0.0.1', '--port', '0',
+    process = subprocess.Popen([str(receiver_binary), '--bind', '127.0.0.1', '--port', '0', '--test-legacy-token',
                                 '--test-root', str(sandbox), '--diagnostics', '--test-pause-cleanup'],
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     lines = queue.Queue()

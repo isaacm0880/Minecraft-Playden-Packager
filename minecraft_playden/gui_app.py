@@ -24,6 +24,7 @@ from .progress import Progress, ProgressCallback
 from .formatting import format_size
 from .branding import application_icon, configure_desktop_identity, DESKTOP_ID
 
+from .gui_receiver import ReceiverManager
 from .gui_components import Task, CompletionDialog, DriveDialog, SpaceDialog, QueueCompletionDialog
 from .operations import CancellationToken
 from .cleanup import GeneratedOutput
@@ -32,7 +33,7 @@ from .usb_queue import UsbRecord, TransferCandidate, transfer_candidates, plan_t
 from .volumes import DriveTarget
 from .transfer import TransferRequest, TransferResult, InsufficientSpace
 from .network_transfer import NetworkRequest, NetworkResult, run_network_queue, recorded_instance_name
-from .network_protocol import ROOTS, lan_address, pairing_key, safe_relative
+from .network_protocol import ROOTS, lan_address, safe_relative
 
 
 class PathDelegate(QStyledItemDelegate):
@@ -95,6 +96,7 @@ class MainWindow(QMainWindow):
         self.network_results: tuple[NetworkResult, ...] = ()
         self.ps5_name_source: Path | None = None
         self.network_started: float | None = None
+        self._last_receiver_log = ''
         self.folder_openers: list[object] = []
         self.space_dialog: SpaceDialog | None = None
         self.transfer_retry_available = False
@@ -211,6 +213,9 @@ class MainWindow(QMainWindow):
         self.save_offline_name(self.username.text())
         self.username.setToolTip('Remembered for this user on this device. Offline display name only; this does not sign in or enable authenticated services.')
         form.addRow('Offline player name', self.username)
+        self.receiver_manager = ReceiverManager(self.settings, self)
+        self.ps5_host = self.receiver_manager.host
+        form.addRow(self.receiver_manager)
         self.ps5_destination = QComboBox()
         self.ps5_destination.addItem('Internal storage (default)', 'internal')
         self.ps5_destination.addItem('USB0 storage', 'usb0')
@@ -219,18 +224,6 @@ class MainWindow(QMainWindow):
         self.ps5_destination.setCurrentIndex(max(0, destination_index))
         self.ps5_destination.setToolTip('LAN destination remembered per user. USB0 never falls back to internal storage.')
         form.addRow('PS5 transfer destination', self.ps5_destination)
-        self.ps5_host = QLineEdit()
-        try:
-            self.ps5_host.setText(lan_address(str(self.settings.value('transfer/host', ''))))
-        except ValueError:
-            pass
-        self.ps5_host.setPlaceholderText('192.168.1.50')
-        form.addRow('PS5 IPv4 address', self.ps5_host)
-        self.ps5_token = QLineEdit()
-        self.ps5_token.setEchoMode(QLineEdit.EchoMode.Password)
-        self.ps5_token.setPlaceholderText('Pairing token displayed by the receiver')
-        self.ps5_token.setToolTip('Session token. Kept in memory only; never saved in settings or logs.')
-        form.addRow('PS5 pairing token', self.ps5_token)
         self.ps5_name = QLineEdit()
         self.ps5_name.setPlaceholderText('Recorded instance name (one package at a time)')
         self.ps5_name.setToolTip('Edit the final PS5 import folder name. For a queue, each package uses its own recorded name.')
@@ -240,7 +233,7 @@ class MainWindow(QMainWindow):
         self.ps5_pipeline.setToolTip('Optional file pipelining. Disabled by default; buffered receiver reads are the normal protocol.')
         form.addRow('PS5 LAN protocol', self.ps5_pipeline)
         receiver_note = QLabel('Build locally → Send to PS5 (LAN) → Playden: Play from Import Folder. '
-                              'Start the receiver ELF manually on the PS5 before sending; this app does not deploy or start it. '
+                              'Start Receiver requires an already running PS5 ELF loader. '
                               'Copy to USB writes to a drive attached to this computer.')
         receiver_note.setWordWrap(True)
         form.addRow(receiver_note)
@@ -346,13 +339,24 @@ class MainWindow(QMainWindow):
         self.privacy_cleanup.toggled.connect(self.update_build_button)
         self.ps5_destination.currentIndexChanged.connect(self.save_ps5_destination)
         self.ps5_host.textChanged.connect(self.save_ps5_host)
-        self.ps5_token.textChanged.connect(self.update_build_button)
+        self.receiver_manager.credentials_changed.connect(self.update_build_button)
+        self.receiver_manager.state_changed.connect(self.receiver_state_changed)
         self.ps5_name.textChanged.connect(self.update_build_button)
         self.ps5_pipeline.toggled.connect(lambda checked: self.settings.setValue('transfer/pipelineFiles', checked))
         self.username.textChanged.connect(self.offline_name_changed)
         self.username.editingFinished.connect(self.normalise_offline_name)
         self.update_build_button()
         QTimer.singleShot(0, self.scan)
+
+    @Slot(str)
+    def receiver_state_changed(self, state: str) -> None:
+        detail = self.receiver_manager.error.text()
+        if state == 'Unknown' and not detail:
+            return
+        message = f'PS5 receiver: {state}' + (' — ' + detail if detail else '')
+        if message != self._last_receiver_log:
+            self.log.appendPlainText(message)
+            self._last_receiver_log = message
 
     @Slot(int)
     def save_ps5_destination(self, index: int) -> None:
@@ -481,14 +485,15 @@ class MainWindow(QMainWindow):
         network_ready = False
         try:
             lan_address(self.ps5_host.text().strip())
-            pairing_key(self.ps5_token.text())
+            if not self.receiver_manager.ready:
+                raise ValueError('Receiver is busy; finish its active transfer first.' if self.receiver_manager.state == 'Running' else 'Start or pair with the receiver first.')
             if len(candidates) == 1 and self.ps5_name.text():
                 safe_relative(self.ps5_name.text(), package=True)
             network_ready = True
         except ValueError:
             pass
         self.copy_ps5_button.setEnabled(not self.busy() and transferable and network_ready)
-        self.copy_ps5_button.setToolTip('Start the PS5 receiver, enter its LAN address and pairing token, then send validated packages. Local files are retained.')
+        self.copy_ps5_button.setToolTip('Start Receiver or enter the six-digit code and Pair, then send validated packages. Local files are retained.')
         if self.queue_dialog is not None and self.queue_dialog.copy_button is not None:
             self.queue_dialog.copy_button.setEnabled(not self.busy() and transferable)
         self.retry_usb_button.setEnabled(not self.busy() and self.last_transfer is not None and self.transfer_retry_available)
@@ -554,7 +559,7 @@ class MainWindow(QMainWindow):
     def operation_controls(self) -> tuple[QWidget, ...]:
         return (self.scan_button, self.folder_button, self.validate_button, self.output_button,
                 self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.username,
-                self.cleanup_after_usb, self.ps5_destination, self.ps5_host, self.ps5_token, self.ps5_name, self.ps5_pipeline)
+                self.cleanup_after_usb, self.ps5_destination, self.receiver_manager, self.ps5_name, self.ps5_pipeline)
 
     def start_task(self, operation: str, work: Callable[[ProgressCallback], object]) -> None:
         if self.busy():
@@ -943,6 +948,8 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def task_finished(self) -> None:
+        if self.operation == 'network':
+            self.receiver_manager.set_transfer_active(False)
         self.worker_thread = None
         self.task = None
         if self.usb_batch_active and self.operation in ('transfer', 'cleanup'):
@@ -1074,7 +1081,7 @@ class MainWindow(QMainWindow):
         """Reveal connection settings for the package just built; no folder repicking."""
         self.details_scroll.ensureWidgetVisible(self.ps5_host)
         self.ps5_host.setFocus()
-        self.status.setText('Start the PS5 receiver manually, enter its IP and fresh pairing token, then click Send to PS5 (LAN).')
+        self.status.setText('Select the PS5 IP, choose Start Receiver, or enter its six-digit code and Pair, then Send to PS5 (LAN). The PS5 ELF loader must already be running.')
 
     def open_directory(self, path: Path) -> None:
         def failed(detail: str) -> None:
@@ -1145,7 +1152,8 @@ class MainWindow(QMainWindow):
             return
         try:
             host = lan_address(self.ps5_host.text().strip())
-            pairing_key(self.ps5_token.text())
+            if not self.receiver_manager.ready:
+                raise ValueError('Receiver is busy; finish its active transfer first.' if self.receiver_manager.state == 'Running' else 'Start or pair with the receiver first.')
             destination = self.ps5_destination.currentData()
             if destination not in ROOTS:
                 raise ValueError('Choose internal or USB0 storage.')
@@ -1159,12 +1167,17 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             QMessageBox.warning(self, 'PS5 instance name', str(exc))
             return
-        requests = tuple(NetworkRequest(item.source, host, self.ps5_token.text(), destination,
+        paired = self.receiver_manager.paired
+        if paired is None:
+            QMessageBox.warning(self, 'Receiver not paired', 'Start Receiver or enter the six-digit PS5 code and Pair first.')
+            return
+        requests = tuple(NetworkRequest(item.source, host, paired.key.hex(), destination, port=paired.info.port,
                                         package_name=name or None, pipeline_files=self.ps5_pipeline.isChecked()) for item in candidates)
         self.network_results = ()
         self.cancellation = CancellationToken()
         self.last_stage = ''
         self.status.setText(f'Preparing {len(requests)} package(s) for PS5 LAN transfer…')
+        self.receiver_manager.set_transfer_active(True)
         self.start_task('network', lambda progress: run_network_queue(requests, progress, self.cancellation))
 
     @Slot()
@@ -1388,10 +1401,11 @@ class MainWindow(QMainWindow):
         self.log.appendPlainText(message)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self.busy():
+        if self.busy() or self.receiver_manager.busy():
             QMessageBox.information(self, 'Operation in progress', 'Please wait for the operation to finish, or request cancellation, before closing the packager.')
             event.ignore()
         else:
+            self.receiver_manager.shutdown_local()
             self.settings.setValue('layout/instanceSplitter', self.splitter.saveState())
             event.accept()
 
