@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from .desktop import ValidatedPackage, LocalBuildRequest, suggest_output, check_package, selection_readiness, offline_player_name, BuildRecord, queue_summary
+from .desktop import ValidatedPackage, LocalBuildRequest, suggest_output, check_package, selection_readiness, offline_player_name, BuildRecord, queue_summary, prepare_existing_package, unique_output
 from .compatibility import Status, UNTESTED_WARNING
 from . import __version__
 from .discovery import DiscoveryResult, Installation, discover
@@ -107,6 +107,8 @@ class MainWindow(QMainWindow):
         self._suggested_output = ''
         self._output_is_manual = False
         self._preferred_path: Path | None = None
+        self._fabric_selection: tuple = ()
+        self._prepare_fabric_requested = True
         self.settings = QSettings('MinecraftPlayden', 'Packager')
         body = QWidget()
         layout = QVBoxLayout(body)
@@ -209,6 +211,20 @@ class MainWindow(QMainWindow):
         self.allow_runtime_download.setToolTip('Off by default. Prefer an installed or cached matching Windows x64 runtime. '
                                               'Enabling this permits a verified Temurin runtime download for this build queue.')
         form.addRow(self.allow_runtime_download)
+        self.prepare_fabric = QCheckBox('Prepare Fabric for Playden')
+        self.prepare_fabric.setToolTip("Prepares Fabric's game files before transfer to avoid first-launch remapping issues on Playden.")
+        form.addRow(self.prepare_fabric)
+        self.fabric_explanation = QLabel("Prepares Fabric's game files before transfer to avoid first-launch remapping issues on Playden.")
+        self.fabric_explanation.setWordWrap(True)
+        form.addRow(self.fabric_explanation)
+        self.remap_java = QLineEdit(str(self.settings.value('preparation/java', '')))
+        self.remap_java.setPlaceholderText('Automatic: host-native JDK 17+ with compiler module')
+        self.remap_java.setToolTip('Host preparation Java executable. Separate from the Windows runtime packaged for PS5; no Wine or downloads.')
+        self.remap_java_button = QPushButton('Choose Java…')
+        java_row = QHBoxLayout()
+        java_row.addWidget(self.remap_java)
+        java_row.addWidget(self.remap_java_button)
+        form.addRow('Host preparation JDK', java_row)
         self.privacy_cleanup = QCheckBox('Privacy cleanup (recommended)')
         self.privacy_cleanup.setChecked(True)
         self.privacy_cleanup.setToolTip('Remove known credentials, sessions and personal identifiers from the package copy. '
@@ -283,6 +299,12 @@ class MainWindow(QMainWindow):
         for button in (self.open_output_button, self.copy_usb_button, self.copy_ps5_button, self.retry_usb_button, self.cancel_button):
             actions.addWidget(button)
         layout.addLayout(actions)
+        self.prepare_existing_button = QPushButton('Prepare Fabric…')
+        self.prepare_existing_button.setEnabled(False)
+        actions.addWidget(self.prepare_existing_button)
+        self.fabric_package_status = QLabel()
+        self.fabric_package_status.setWordWrap(True)
+        details_layout.addWidget(self.fabric_package_status)
         self.completed_label = QLabel('No validated package built in this session yet.')
         self.completed_label.setTextFormat(Qt.TextFormat.PlainText)
         self.completed_label.setWordWrap(True)
@@ -328,6 +350,10 @@ class MainWindow(QMainWindow):
         self.scan_button.clicked.connect(self.scan)
         self.folder_button.clicked.connect(self.add_folder)
         self.validate_button.clicked.connect(self.validate_existing)
+        self.prepare_existing_button.clicked.connect(self.prepare_existing)
+        self.remap_java_button.clicked.connect(self.choose_remap_java)
+        self.prepare_fabric.toggled.connect(self.fabric_preparation_toggled)
+        self.remap_java.textChanged.connect(self.save_remap_java)
         self.output_button.clicked.connect(self.choose_output)
         self.cache_button.clicked.connect(self.choose_cache)
         self.build_button.clicked.connect(self.start_build)
@@ -435,6 +461,14 @@ class MainWindow(QMainWindow):
             except (OSError, ValueError, RuntimeError):
                 # Keep manual output selection available if no safe suggestion can be made.
                 pass
+        selected = self.selected_installations()
+        key = tuple(sorted((str(item.instance), item.version, tuple((loader.name, loader.version) for loader in item.loaders), str(item.needs_fabric_preparation)) for item in selected))
+        if key != self._fabric_selection:
+            self._fabric_selection = key
+            self._prepare_fabric_requested = True
+            relevant = any(len(item.loaders) == 1 and item.loaders[0].name == 'Fabric' and item.needs_fabric_preparation is not False for item in selected)
+            with QSignalBlocker(self.prepare_fabric):
+                self.prepare_fabric.setChecked(relevant)
         self.update_build_button()
 
     @Slot()
@@ -462,6 +496,12 @@ class MainWindow(QMainWindow):
                             for installation in self.selected_installations())
         self.build_reason.setText(('Build disabled: ' + reason if reason else explanation) + ('\n' + notices if notices else ''))
         self.username.setEnabled(not self.busy())
+        relevant = any(len(item.loaders) == 1 and item.loaders[0].name == 'Fabric' and item.needs_fabric_preparation is not False for item in self.selected_installations())
+        self.prepare_fabric.setEnabled(not self.busy() and relevant)
+        state = self.completed_package.preparation if self.completed_package else None
+        self.prepare_existing_button.setEnabled(not self.busy() and state is not None and state.required and not state.prepared)
+        self.prepare_existing_button.setToolTip(str(self.completed_package.path) if self.completed_package else 'Validate an existing Fabric package first.')
+        self.fabric_package_status.setText(state.message if state is not None and self.completed_package is not None and self.completed_package.kind == 'launch-package' else '')
         open_path = self.output_view if self.output_view is not None else (self.completed_package.path if self.completed_package else None)
         self.open_output_button.setEnabled(not self.busy() and open_path is not None and open_path.is_dir())
         transferable = any(not candidate.skip_reason for candidate in self.usb_candidates())
@@ -501,7 +541,7 @@ class MainWindow(QMainWindow):
         if self.queue_dialog is not None and self.queue_dialog.copy_button is not None:
             self.queue_dialog.copy_button.setEnabled(not self.busy() and transferable)
         self.retry_usb_button.setEnabled(not self.busy() and self.last_transfer is not None and self.transfer_retry_available)
-        self.cancel_button.setEnabled(self.busy() and self.operation in ('build', 'transfer', 'network', 'validate', 'cleanup') and not self.cancellation.cancelled)
+        self.cancel_button.setEnabled(self.busy() and self.operation in ('build', 'prepare', 'transfer', 'network', 'validate', 'cleanup') and not self.cancellation.cancelled)
 
     def build_request(self) -> tuple[LocalBuildRequest | None, str]:
         requests, reason = self.build_requests()
@@ -510,7 +550,8 @@ class MainWindow(QMainWindow):
     def build_requests(self) -> tuple[list[LocalBuildRequest], str]:
         return selection_readiness(self.selected_installations(), self.output.text(), self.cache.text(), self.busy(),
                                    username=offline_player_name(self.username.text()), privacy_cleanup=self.privacy_cleanup.isChecked(),
-                                   allow_runtime_download=self.allow_runtime_download.isChecked())
+                                   allow_runtime_download=self.allow_runtime_download.isChecked(), prepare_fabric=self._prepare_fabric_requested,
+                                   remap_java=Path(self.remap_java.text().strip()).expanduser() if self.remap_java.text().strip() else None)
 
     def confirm_untested(self, requests: list[LocalBuildRequest]) -> bool:
         untested = [request.installation for request in requests
@@ -566,6 +607,7 @@ class MainWindow(QMainWindow):
     def operation_controls(self) -> tuple[QWidget, ...]:
         return (self.scan_button, self.folder_button, self.validate_button, self.output_button,
                 self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.allow_runtime_download, self.username,
+                self.prepare_fabric, self.remap_java, self.remap_java_button, self.prepare_existing_button,
                 self.cleanup_after_usb, self.ps5_destination, self.receiver_manager, self.ps5_name, self.ps5_pipeline)
 
     def start_task(self, operation: str, work: Callable[[ProgressCallback], object]) -> None:
@@ -695,6 +737,55 @@ class MainWindow(QMainWindow):
             self.status.setText('Checking package inventory and launch configuration…')
             self.start_task('validate', lambda progress: check_package(Path(folder), progress, self.cancellation))
 
+    @Slot(bool)
+    def fabric_preparation_toggled(self, enabled: bool) -> None:
+        self._prepare_fabric_requested = enabled
+        self.update_build_button()
+
+    @Slot(str)
+    def save_remap_java(self, value: str) -> None:
+        if value.strip():
+            self.settings.setValue('preparation/java', value.strip())
+        else:
+            self.settings.remove('preparation/java')
+
+    @Slot()
+    def choose_remap_java(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(self, 'Choose host-native JDK 17+ Java executable', self.remap_java.text())
+        if filename:
+            self.remap_java.setText(filename)
+
+    @Slot()
+    def prepare_existing(self) -> None:
+        if self.busy() or self.completed_package is None:
+            return
+        package = self.completed_package
+        if package.preparation is None or not package.preparation.required or package.preparation.prepared:
+            return
+        folder = QFileDialog.getExistingDirectory(self, 'Choose parent folder for a separate prepared package', str(package.path.parent))
+        if not folder:
+            return
+        output = unique_output(Path(folder) / (package.name + ' Prepared'))
+        java = Path(self.remap_java.text().strip()).expanduser() if self.remap_java.text().strip() else None
+        self.cancellation = CancellationToken()
+        self.last_stage = ''
+        self.status.setText('Preparing a separate Fabric package; original files are retained…')
+        self.start_task('prepare', lambda progress: prepare_existing_package(package.path, output, java, progress, self.cancellation))
+
+    def confirm_unprepared_transfer(self, paths: list[Path]) -> bool:
+        packages = [record.package for record in self.build_records if record.package is not None]
+        if self.completed_package is not None:
+            packages.append(self.completed_package)
+        unprepared = {str(package.path) for package in packages if package.path in paths and package.preparation is not None
+                      and package.preparation.required and not package.preparation.prepared}
+        if not unprepared:
+            return True
+        answer = QMessageBox.warning(self, 'Transfer unprepared Fabric?',
+                                     'Fabric preparation is required for these packages. They may fail during first-launch remapping on Playden. '
+                                     'Use Prepare Fabric first, or transfer the legacy package for troubleshooting.\n\n' + '\n'.join(sorted(unprepared)),
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        return answer == QMessageBox.StandardButton.Yes
+
     @Slot(object)
     def task_progress(self, event: Progress) -> None:
         usb_record = self.current_usb_record()
@@ -815,7 +906,7 @@ class MainWindow(QMainWindow):
                         self.table.scrollToItem(row_item)
                         break
             self.selection_changed()
-        elif self.operation in ('build', 'validate'):
+        elif self.operation in ('build', 'validate', 'prepare'):
             if not isinstance(result, ValidatedPackage) or (self.operation == 'build' and result.path != self.build_output):
                 self.task_error('Build returned without a validated package result; success was not reported.')
                 return
@@ -837,16 +928,20 @@ class MainWindow(QMainWindow):
                 self.usb_table.hide()
                 self.usb_aggregate.hide()
             self.completed_package = result
+            if result.generated is not None:
+                self.generated_outputs[result.generated.path] = result.generated
             message = (f'Instance files validated at {result.path}. File-only import; launchability is unverified.' if result.kind == 'instance-import' else
                        (f'Validated package created at {result.path}.' if self.operation == 'build' else f'Package file validation passed at {result.path}.') +
                        ' Console/mod compatibility still requires testing.')
+            if result.preparation is not None and result.kind == 'launch-package':
+                message += '\n' + result.preparation.message
             self.status.setText(message)
             label = 'Last file import (launch unverified)' if result.kind == 'instance-import' else 'Last validated package'
             self.completed_label.setText(queue_summary(self.build_records) if self.operation == 'build' and self.batch else
                                          f'{label}: {result.name} — {result.path}')
             self.log.appendPlainText(message + ('\n' + INSTRUCTIONS if result.kind != 'instance-import' else ''))
             self.queue_status(f'Completed: {result.path}', result)
-            if self.operation == 'build' and not self.batch:
+            if (self.operation == 'build' and not self.batch) or self.operation == 'prepare':
                 self.pending_dialog = (result.path, False)
         elif self.operation == 'transfer':
             self.transfer_retry_available = False
@@ -937,7 +1032,7 @@ class MainWindow(QMainWindow):
                 usb_record.cleanup = 'Cleanup failed; inspect local output. Verified USB copy retained: ' + message
             self.refresh_usb_results()
         self.pending_dialog = None
-        self.status.setText({'scan': 'Scan failed.', 'validate': 'Package validation failed.',
+        self.status.setText({'scan': 'Scan failed.', 'prepare': 'Fabric preparation failed; no new package was published. Select a host JDK if Java is unavailable.', 'validate': 'Package validation failed.',
                              'network': 'PS5 LAN transfer failed. Local outputs retained; see the log for completed packages and errors.',
                              'transfer': 'USB transfer failed. Retry is available; no success was reported.',
                              'cleanup': 'Local cleanup failed; the verified USB copy was not deleted.'}.get(self.operation, 'Build failed. No completed output was published.'))
@@ -1180,6 +1275,8 @@ class MainWindow(QMainWindow):
             return
         requests = tuple(NetworkRequest(item.source, host, paired.key.hex(), destination, port=paired.info.port,
                                         package_name=name or None, pipeline_files=self.ps5_pipeline.isChecked()) for item in candidates)
+        if not self.confirm_unprepared_transfer([request.source for request in requests]):
+            return
         self.network_results = ()
         self.cancellation = CancellationToken()
         self.last_stage = ''
@@ -1195,6 +1292,8 @@ class MainWindow(QMainWindow):
         available = [candidate for candidate in candidates if not candidate.skip_reason]
         if not available:
             self.update_build_button()
+            return
+        if not self.confirm_unprepared_transfer([candidate.source for candidate in available]):
             return
         names = [candidate.source.name for candidate in available]
         dialog = (DriveDialog(names[0], self, package_names=names) if len(names) > 1 else DriveDialog(names[0], self))
@@ -1374,7 +1473,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def cancel_operation(self) -> None:
-        if self.busy() and self.operation in ('build', 'transfer', 'network', 'validate', 'cleanup'):
+        if self.busy() and self.operation in ('build', 'prepare', 'transfer', 'network', 'validate', 'cleanup'):
             self.cancellation.cancel()
             self.cancel_button.setEnabled(False)
             self.status.setText('Cancellation requested. Waiting for current I/O to stop safely…')
@@ -1402,7 +1501,7 @@ class MainWindow(QMainWindow):
         if self.operation == 'transfer':
             self.transfer_retry_available = True
         self.pending_dialog = None
-        self.status.setText({'transfer': 'USB transfer cancelled.', 'validate': 'Package validation cancelled.',
+        self.status.setText({'transfer': 'USB transfer cancelled.', 'prepare': 'Fabric preparation cancelled; no new package was published.', 'validate': 'Package validation cancelled.',
                              'network': 'PS5 LAN transfer cancelled. Earlier confirmed packages remain on PS5; local outputs retained.',
                              'cleanup': 'Local cleanup cancelled; verified USB copy retained.'}.get(self.operation, 'Build cancelled. No completed output was published.'))
         self.log.appendPlainText(message)

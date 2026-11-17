@@ -14,7 +14,7 @@ yet verified; there is no required macOS binary. See [installation](INSTALLATION
 | Cannot package | Missing required files/dependencies or unsupported packaging format |
 
 Explicit Tested entries are Vanilla Minecraft 1.20.1, Vanilla Minecraft 26.3 and Minecraft 26.3 with Fabric
-Loader 0.20.1 in a configuration without Ixeris. Other loader versions and arbitrary
+Loader 0.20.1 in a configuration without Ixeris. The 1.20.1 Fabric confirmation requires native pre-remapping and establishes reaching the main menu, not world loading or every mod. Other loader versions and arbitrary
 modpacks are not certified. Successful packaging or checksums never add Tested status.
 
 The development source resolves Minecraft metadata, not a version allowlist.
@@ -42,7 +42,7 @@ checksums are replaced in memory to match synthetic payloads. No game or mod run
 | --- | --- | --- | --- | --- |
 | 1.18.2 | 17 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
 | 1.19.2 | 17 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
-| 1.20.1 | 17 | Automated structural pass; confirmed PS5 working | 0.16.10: automated structural pass; 0.20.1: physical remapping failure | Fabric headless preparation requires PS5 retesting |
+| 1.20.1 | 17 | Confirmed reaching the PS5 main menu | 0.16.10: automated structural pass; 0.20.1: confirmed reaching main menu with native preparation | Startup only; world loading and arbitrary mods remain unverified |
 | 1.21.1 | 21 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
 | 1.21.11 | 21 | Automated structural pass | 0.20.1: automated structural pass | Physical testing needed |
 | 26.1.2 | 25 | Automated structural pass | 0.20.1: automated structural pass | Physical testing needed |
@@ -57,6 +57,31 @@ synthetic inherited/snapshot identities, legacy argument strings and mapped asse
 layouts. See [snapshot provenance](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/tests/fixtures/versions/README.md),
 [architecture audit](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/docs/VERSION_COMPATIBILITY_AUDIT.md), `tests/test_version_matrix.py`
 and `tests/test_runtime_selection.py`.
+
+## Automatic GUI preparation
+
+Select a Fabric instance and click Build. **Prepare Fabric for Playden** defaults
+on when installed metadata indicates remapping is required (or still needs to be
+resolved). The background exporter makes the final decision from the verified
+mappings, never a Minecraft version list. Vanilla and Fabric with no remapping
+work, including supported 26.3 configurations, bypass the Java worker. The checkbox
+can be disabled explicitly for troubleshooting; the resulting unprepared package
+receives a warning before GUI USB/LAN transfer.
+
+Preparation uses a separate host-native JDK 17+ with `jdk.compiler`, discovered
+from JAVA_HOME/PATH and common JDK locations on Linux, Windows and macOS. Windows
+can also use the packaged JDK. **Host preparation JDK → Choose Java…** allows manual
+selection. The worker validates the selected executable's major version, compiler
+module and native OS. No native Java is downloaded; no Wine or PS5 SDK is needed.
+If no suitable JDK is found, the requested build fails without publishing an
+unprepared substitute.
+
+After Validate existing package, **Prepare Fabric…** creates a separate validated
+copy in a chosen parent directory. Matching validated caches need no further
+preparation; stale inputs/caches fail validation. Prepared packages retain their
+hidden `.fabric/remappedJars` files and `metadata/fabric-remap.json` during USB and
+LAN transfer. Optional CLI `prepare-fabric` and `build --prepare-fabric` remain
+available. The PS5 receiver protocol and ELF are unchanged.
 
 ## Runtime selection and remaining blockers
 
@@ -110,12 +135,12 @@ This table tracks Minecraft Java Edition versions tested with **Playden on PS5**
 
 | Minecraft Version | Mod Loader | Loader Version | Status | Notes |
 |---|---|---|---|---|
-| 1.20.1 | Vanilla | N/A | ✅ Working | User-confirmed on Playden 0.12.0-nightly.20261116.1 |
-| 1.20.1 | Fabric | 0.20.1 | ❌ Launch failure; retest required | Fails during client JAR remapping; headless-prepared candidate is not PS5-verified |
+| 1.20.1 | Vanilla | N/A | ✅ Main menu | Confirmed startup on Playden 0.12.0-nightly.20261116.1; world loading not established |
+| 1.20.1 | Fabric | 0.20.1 | ✅ Main menu with native pre-remapping | User-confirmed startup; world loading and every Fabric mod are not certified. The original unprepared package failed during first-launch remapping |
 | 26.3 | Vanilla | N/A | ✅ Working | Confirmed working |
 | 26.3 | Fabric | 0.20.1 | ✅ Working | Confirmed working |
 
-For the 1.20.1 Fabric failure, see [headless preparation, investigation and PS5 retest instructions](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/docs/FABRIC_REMAP.md). The failure reaches a Java ZIP filesystem reporting read-only; USB location alone does not establish its cause.
+For automatic GUI preparation and the original 1.20.1 failure investigation, see [Fabric preparation and physical test instructions](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/docs/FABRIC_REMAP.md). The failure reaches a Java ZIP filesystem reporting read-only; USB location alone does not establish its cause.
 
 **Status key:**
 

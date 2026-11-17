@@ -124,7 +124,7 @@ def installed(root, game='1.20.1', loader='0.16.10', layout='prism', full_compon
             entries = {profile['mainClass'].replace('.', '/') + '.class': b'Knot',
                        'net/fabricmc/loader/api/FabricLoader.class': b'Loader'}
         elif name.startswith('net.fabricmc:intermediary:'):
-            entries = {'mappings/mappings.tiny': b'tiny mappings'}
+            entries = {'mappings/mappings.tiny': b'v1\tofficial\tintermediary\n'}
         data = archive(entries)
         save(root, 'libraries/' + path, data)
         # Fixture official checksums describe fixture data, not redistributable binaries.

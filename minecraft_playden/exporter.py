@@ -3,6 +3,7 @@ import json
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Literal
 from . import arguments, dependencies, runtime, profiles, recipe, fabric, assets
 from .downloads import Downloader, digest, safe_path
 from .versions import VersionResolver
@@ -25,7 +26,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
           progress: ProgressCallback | None = None, launch_profile: str = profiles.DEFAULT_PROFILE,
           cancellation: CancellationToken | None = None, exclude_saves: bool = False,
           privacy_cleanup: bool = False, instance_name: str | None = None,
-          prepare_fabric: bool = False, remap_java: Path | None = None) -> None:
+          prepare_fabric: bool | Literal['auto'] = False, remap_java: Path | None = None) -> None:
     def check_cancelled() -> None:
         if cancellation is not None:
             cancellation.check()
@@ -143,10 +144,13 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             files[path.relative_to(root).as_posix()] = digest(path, 'sha256', cancellation)
             report('hashing', 'Hashing immutable package files...', number, len(paths))
         save('package.json', {'schema': 2, 'launch_profile': launch_profile, 'source': source.mode, 'version': version, 'username': username, 'classpath': classpath, 'files': files,  **({'loader': {'name': 'Fabric', 'version': source.fabric.loader}} if source.fabric else {})})
-        if prepare_fabric:
-            from .fabric_remap import prepare_staged
-            report('remapping', 'Preparing Fabric client cache with the selected loader; no Minecraft or mods are launched...')
-            prepare_staged(root, remap_java, cancellation)
+        if prepare_fabric and fabric_data is not None:
+            from .fabric_remap import prepare_staged, package_status
+            state = package_status(root, validated=False, cancellation=cancellation)
+            if prepare_fabric is True or state.required:
+                prepare_staged(root, remap_java, cancellation, progress)
+            else:
+                report('prepare-check', state.message)
         report('validation', 'Validating package inventory and launch configuration...')
         errors = validate(root, cancellation=cancellation, progress=progress)
         if errors:

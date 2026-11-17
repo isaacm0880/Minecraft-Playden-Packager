@@ -3,9 +3,11 @@
 ## Failure and evidence
 
 Physical testing on Playden `0.12.0-nightly.20261116.1` confirmed Vanilla 1.20.1
-working, and Fabric 1.20.1 with Loader 0.20.1 failing while opening
-`client-intermediary.jar.tmp`. The corrected preparation below is **not yet verified
-on PS5**. Existing 26.3 confirmations are unchanged.
+reaching the main menu. Fabric 1.20.1 with Loader 0.20.1 originally failed while
+opening `client-intermediary.jar.tmp`. Physical retesting now confirms **1.20.1 +
+Fabric Loader 0.20.1 reaching the main menu on PS5 with native pre-remapping**.
+This establishes startup, not world loading or every Fabric mod. Existing 26.3
+confirmations are unchanged.
 
 For obfuscated Minecraft, Fabric normally transforms the official client into the
 intermediary namespace on first launch. The official client, matching intermediary
@@ -44,14 +46,19 @@ The explicit preparation step runs the **selected installed loader's own
 never calls Knot, initializes Minecraft, scans mods, signs in or fetches anything.
 Only selected local library JARs enter the worker classloader; the client JAR is
 read as remapping input. Java option/classpath injection environment variables
-are removed. This is an opt-in execution of the installed loader/remapper code;
-ordinary builds remain file-only packaging.
+are removed. The GUI uses this existing remapper automatically when required.
+The Prepare Fabric for Playden checkbox allows an explicit troubleshooting opt-out;
+CLI builds still opt in through `--prepare-fabric`.
 
 A bundled Java **source** adapter uses the native JDK source-file launcher, so no
 helper executable, downloaded remapper version or Java build framework is needed.
 Use a host-native JDK 17+ with its compiler module available. On Windows, the
-packaged Windows JDK is the default preparation executable. Linux/macOS use native
-`java` on PATH or `--remap-java`; no runtime is acquired automatically. The actual
+packaged Windows JDK is a discovery candidate alongside native installed JDKs.
+Linux/macOS check JAVA_HOME, PATH and common platform-specific JDK directories.
+The worker probes Java 17+, the compiler module and native OS before preparation;
+a foreign Windows executable is not launched through Wine on Linux/macOS. Use the
+GUI Host preparation JDK field or CLI `--remap-java` to select an executable.
+No native runtime is acquired automatically. The actual
 Playden launch still uses the package's metadata-selected Windows runtime.
 
 Preparation starts in a fresh temporary game directory, with the exact client,
@@ -80,15 +87,36 @@ selected libraries/mappings, metadata and launch arguments. The output JAR is
 inventoried, all ZIP members/CRCs are checked, and expected mapped client classes
 must be present. Missing, changed, incomplete or stale inputs fail validation.
 A neighboring `.jar.tmp` is rejected because Fabric would delete the completed
-cache on its next launch. Preparation never reuses an installed remapping cache;
-changing Minecraft, Fabric, mappings or dependencies requires a fresh preparation.
+cache on its next launch. A matching cache with a valid preparation record is
+reused without launching Java again. An arbitrary installed first-launch cache is
+never trusted; changed Minecraft, Fabric, mappings or dependencies require fresh
+preparation.
 Worlds, mods, settings and original source files remain separate from this cache.
 
 26.3 profiles without intermediary remapping need no Java preparation worker;
-preparation records `not-required` and leaves their launch configuration intact.
+automatic GUI builds skip preparation and leave their launch configuration intact;
+explicit CLI preparation can record `not-required`.
 Legacy/unprepared packages remain structurally valid without a preparation record.
 
-## Rebuild and test on PS5
+## Automatic GUI workflow
+
+1. Run the source GUI (`python -m minecraft_playden gui`) and rescan/add the source.
+2. Select the installed Fabric instance. **Prepare Fabric for Playden** defaults
+   on if the metadata requires remapping or the requirement still needs resolving.
+   Vanilla and known configurations without remapping do not enable the checkbox.
+3. Leave **Host preparation JDK** blank for discovery, or select native JDK 17+
+   with **Choose Java…**. This is separate from the Windows runtime packaged for PS5.
+4. Click **Build**. The same background worker resolves dependencies, builds,
+   validates native Java, prepares Fabric, validates the cache and finalises the
+   package. Cancellation/failure cleans staging and publishes no incomplete output.
+5. Transfer the successful output through the existing USB/LAN actions.
+
+For an external package, use **Validate existing package…** followed by **Prepare
+Fabric…**, choose an output parent, and transfer the resulting separate copy.
+The status clearly reports when a matching validated cache already needs no work.
+Legacy unprepared packages remain transferable with a warning.
+
+## Optional manual CLI workflow and PS5 testing
 
 Close Minecraft and use the original installed **1.20.1 + Fabric Loader 0.20.1**
 instance. For a GUI-built or existing validated package, create a prepared copy:
@@ -129,8 +157,9 @@ Inspect the selected import for the completed remapped JAR and absence of its
 `.tmp` sibling. Launch once and record the full log and Playden version. Fabric
 should reuse the prepared game JAR rather than report first-launch game remapping.
 If it still attempts that operation, preserve the actual cache path and complete
-exception chain. Do not mark the configuration working until a physical launch
-succeeds. Mod discovery, mod-specific caches, graphics and other Playden filesystem
+exception chain. The prepared 1.20.1/0.20.1 configuration has reached the main menu on PS5; repeat
+startup and world/mod tests for a new configuration. Mod discovery, mod-specific
+caches, graphics and other Playden filesystem
 operations can still expose independent runtime issues.
 
 ## Why Wine is not required
@@ -181,5 +210,41 @@ Verification for this change on the Linux development host:
   was launched and no desktop application binary or release was produced.
 
 The optional older-loader integration skips when that local loader is absent.
-These results do not establish native Windows preparation acceptance or PS5
-launch success; both remain physical follow-up checks.
+These historical automated results do not establish native Windows preparation
+acceptance. Subsequent owner testing confirmed PS5 main-menu startup for prepared
+1.20.1/0.20.1; world loading, other mod combinations and new platform setups still
+need acceptance testing.
+
+## Automatic GUI integration verification
+
+The GUI integration adds native-JDK discovery/probing and uses the same remapper.
+Its source regression run passed **805 tests** with **3 skipped**, plus **345
+subtests**. Enabling local real-loader inputs passed **43 host-JDK, GUI and cache
+checks**, including the actual Fabric remapper. A further **43 receiver lifecycle,
+GUI receiver and prepared-cache publication checks** passed under address and
+undefined-behavior sanitizers. All three mypy platform targets passed for 62 source
+files, and the public-source audit passed for 265 source files.
+
+GUI tests cover automatic preparation, metadata changes after scanning, Vanilla/
+26.3 bypass, explicit opt-out, missing Java, manual selection, cancellation of
+builds and existing-package preparation, validated cache reuse, legacy transfer
+warnings and prepared cache preservation during verified USB copying. The existing
+actual-C-receiver regression also preserves the prepared cache over LAN.
+
+To check the source GUI manually on Linux:
+
+```bash
+.venv/bin/python -m minecraft_playden gui
+```
+
+Select a complete 1.20.1/Fabric 0.20.1 installation. The preparation checkbox should
+be checked. Leave Host preparation JDK blank to use automatic discovery (or select
+a native JDK 17+ executable), choose a new output and click Build. Confirm Java
+selection, Preparing Fabric, cache validation and finalisation appear in the log;
+only then should transfer be offered. Select Vanilla or a 26.3 profile without
+remapping and confirm no remapper is launched. For an existing unprepared package,
+validate it, prepare a separate copy, then validate that copy again: it should
+report a matching cache and no further preparation necessary.
+
+Native Windows/macOS GUI and JDK acceptance remain platform-specific manual
+checks; mocked discovery/type checks do not establish desktop acceptance there.

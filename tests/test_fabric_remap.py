@@ -52,7 +52,7 @@ def fixture_package(tmp_path, version='1.20.1', prepared=False):
     return output, instance
 
 
-def fake_remap(java, arguments, work, cancellation):
+def fake_remap(java, arguments, work, cancellation, progress=None):
     classpath, client, game, receipt, mappings, namespace, version = arguments
     assert namespace == 'official' and version == '1.20.1'
     assert Path(mappings).name == 'intermediary-1.20.1.jar'
@@ -88,12 +88,12 @@ def test_new_copy_is_prepared_and_validated_without_modifying_original(tmp_path)
         fabric_remap.prepare_package(source, prepared, Path(sys.executable))
 
 
-def test_build_time_preparation_and_fresh_repreparation(tmp_path):
+def test_build_time_preparation_and_validated_cache_reuse(tmp_path):
     source, _ = fixture_package(tmp_path, prepared=True)
     assert json.loads((source / fabric_remap.RECORD).read_text())['mode'] == 'loader-cache'
     with patch.object(fabric_remap, '_run', side_effect=fake_remap) as worker:
         fabric_remap.prepare_package(source, tmp_path / 'Again', Path(sys.executable))
-    assert worker.call_count == 1 and validate(tmp_path / 'Again') == []
+    assert worker.call_count == 0 and validate(tmp_path / 'Again') == []
 
 
 @pytest.mark.parametrize('changed', ['loader', 'minecraft', 'client', 'mapping', 'classpath', 'temporary'])
@@ -159,8 +159,8 @@ def test_failure_or_cancel_never_publishes_a_partial_package(tmp_path):
 def test_physical_evidence_distinguishes_vanilla_success_from_fabric_retest():
     assert assess('1.20.1', ()).status == Status.TESTED
     result = assess('1.20.1', (ModLoader('Fabric', '0.20.1'),))
-    assert result.status == Status.RETEST and result.permits_build
-    assert 'Confirmed PS5 launch failure' in result.evidence and 'not yet PS5-verified' in result.evidence
+    assert result.status == Status.TESTED and result.permits_build
+    assert 'main menu' in result.evidence and 'native pre-remapping' in result.evidence and 'startup only' in result.evidence
 
 
 @pytest.mark.skipif(not os.environ.get('PLAYDEN_FABRIC_LIBRARIES'), reason='Opt-in real Fabric loader/ASM/mapping inputs; no network acquisition in tests')

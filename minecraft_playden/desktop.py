@@ -7,6 +7,7 @@ import re
 import unicodedata
 
 from .discovery import Installation
+from .fabric_remap import PreparationStatus, package_status
 from .downloads import Downloader
 from .exporter import build
 from .progress import Progress, ProgressCallback
@@ -24,6 +25,7 @@ class ValidatedPackage:
     path: Path
     kind: str = 'launch-package'
     generated: GeneratedOutput | None = None
+    preparation: PreparationStatus | None = None
 
     @property
     def name(self) -> str:
@@ -41,6 +43,8 @@ class LocalBuildRequest:
     file_only: bool = False
     privacy_cleanup: bool = True
     allow_runtime_download: bool = False
+    prepare_fabric: bool = True
+    remap_java: Path | None = None
 
     def validate(self) -> None:
         if self.installation.build_problem and not self.file_only:
@@ -114,7 +118,8 @@ class LocalBuildRequest:
         build(self.output, Downloader(self.cache, cancellation, allow_runtime_download=self.allow_runtime_download), source, self.username,
               progress=progress, cancellation=cancellation, exclude_saves=self.exclude_saves,
               launch_profile=self.launch_profile, privacy_cleanup=self.privacy_cleanup,
-              instance_name=self.installation.name)
+              instance_name=self.installation.name, prepare_fabric='auto' if self.prepare_fabric else False,
+              remap_java=self.remap_java)
         protected = tuple(path for path in (self.installation.instance, self.installation.launcher_root,
                                              self.installation.libraries_root,
                                              self.installation.client.parent if self.installation.client else None)
@@ -126,7 +131,7 @@ class LocalBuildRequest:
             generated = None
             if progress is not None:
                 progress(Progress('cleanup-registration', f'Local cleanup unavailable: {exc}'))
-        return ValidatedPackage(self.output, generated=generated)
+        return ValidatedPackage(self.output, generated=generated, preparation=package_status(self.output, validated=True))
 
 
 def build_readiness(installation: Installation | None, output: str, cache: str,
@@ -170,7 +175,7 @@ def check_package(path: Path, progress: ProgressCallback | None = None,
     inventory = json.loads((path / 'package.json').read_text(encoding='utf-8'))
     if progress is not None:
         progress(Progress('complete', 'Package file validation passed.', 1, 1))
-    return ValidatedPackage(path, inventory.get('kind', 'launch-package'))
+    return ValidatedPackage(path, inventory.get('kind', 'launch-package'), preparation=package_status(path, validated=True, cancellation=cancellation))
 
 
 def suggest_output(installation: Installation, home: Path | None = None) -> Path:
@@ -207,7 +212,8 @@ def unique_output(base: Path, reserved: set[Path] | None = None) -> Path:
 
 def selection_readiness(installations: list[Installation], output: str, cache: str,
                         busy: bool = False, *, username: str = 'Player',
-                        privacy_cleanup: bool = True, allow_runtime_download: bool = False) -> tuple[list[LocalBuildRequest], str]:
+                        privacy_cleanup: bool = True, allow_runtime_download: bool = False,
+                        prepare_fabric: bool = True, remap_java: Path | None = None) -> tuple[list[LocalBuildRequest], str]:
     """Capture every selected row; no partial queue if any input is blocked."""
     from dataclasses import replace
     if busy:
@@ -230,7 +236,8 @@ def selection_readiness(installations: list[Installation], output: str, cache: s
             if reason or request is None:
                 problems.append(f'{installation.name} ({installation.loader_label}, {installation.version}): {reason}')
             else:
-                requests.append(replace(request, privacy_cleanup=privacy_cleanup, allow_runtime_download=allow_runtime_download))
+                requests.append(replace(request, privacy_cleanup=privacy_cleanup, allow_runtime_download=allow_runtime_download,
+                                        prepare_fabric=prepare_fabric, remap_java=remap_java))
         except (OSError, ValueError, RuntimeError) as exc:
             problems.append(f'{installation.name}: {exc}')
     if problems:
@@ -276,3 +283,20 @@ def queue_summary(records: list[BuildRecord]) -> str:
                      (f'\nUSB: {record.usb}' if record.usb else '') +
                      (f'\n{record.detail}' if record.detail else ''))
     return '\n\n'.join(lines)
+
+
+def prepare_existing_package(source: Path, output: Path, java: Path | None = None,
+                             progress: ProgressCallback | None = None,
+                             cancellation: CancellationToken | None = None) -> ValidatedPackage:
+    from .fabric_remap import prepare_package
+    prepare_package(source, output, java, cancellation, progress)
+    # Publication is the commit point; a late cancellation cannot revoke success.
+    generated = None
+    try:
+        generated = GeneratedOutput.capture(output, (source,))
+    except (OSError, ValueError):
+        pass
+    result = ValidatedPackage(output, generated=generated, preparation=package_status(output, validated=True))
+    if progress is not None:
+        progress(Progress('complete', 'Prepared Fabric package validated and ready for transfer.', 1, 1))
+    return result

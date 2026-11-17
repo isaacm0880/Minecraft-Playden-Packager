@@ -35,6 +35,33 @@ installed/cached files. `python -m minecraft_playden versions` explicitly refres
 the version catalog; `python -m minecraft_playden --offline versions` lists the
 cached catalog. Source packaging tests are not PS5 runtime tests.
 
+**Prepare Fabric for Playden** defaults on for Fabric instances whose metadata
+requires remapping. It prepares Fabric's game files before transfer to avoid
+first-launch remapping issues on Playden. The worker resolves the actual mappings:
+Vanilla and Fabric without remapping work bypass preparation. You may uncheck the
+option for troubleshooting; GUI transfer warns about unprepared Fabric packages.
+
+The **Host preparation JDK** field is separate from the Windows Java runtime
+packaged for PS5. Leave it blank for automatic native JDK discovery, or use
+**Choose Java…** to select a JDK 17+ Java executable with the compiler module.
+Linux checks JAVA_HOME, PATH and common `/usr/lib/jvm` installations; Windows also
+checks installed and packaged JDKs; macOS checks standard JDK bundles and Homebrew
+locations. Java validation and preparation run in the background. Missing or
+incompatible Java is reported as an error; no incomplete package is published.
+No Wine, PS5 SDK or extra Java download is used for preparation.
+
+For an existing package, click **Validate existing package…**. The status explains
+whether preparation is required or an existing matching cache is already valid.
+Click **Prepare Fabric…**, choose a parent directory, and let the worker create a
+separate prepared package. The original is retained. On success, use Copy to USB
+or Send to PS5 (LAN) as usual. Hidden `.fabric` cache files and preparation metadata
+are retained; no receiver protocol change is involved.
+
+Minecraft 1.20.1 Vanilla and 1.20.1 + Fabric Loader 0.20.1 with native pre-remapping
+are confirmed reaching the PS5 main menu. This does not establish world loading
+or compatibility with every mod. Optional manual CLI preparation remains available;
+see [compatibility](COMPATIBILITY.md) for its scope and limits.
+
 Build runs instances sequentially. Each keeps its own progress, result and error;
 a failure during an accepted queue does not stop later items. Cancel stops current
 work safely and marks pending items not started. Successful outputs remain. The

@@ -78,7 +78,7 @@ def installation(root, version, modded, layout, legacy_assets=False, loader_over
             members = {profile['mainClass'].replace('.', '/') + '.class': b'synthetic Knot',
                        'net/fabricmc/loader/api/FabricLoader.class': b'synthetic API'}
         elif raw['name'].startswith('net.fabricmc:intermediary:'):
-            members = {'mappings/mappings.tiny': b'synthetic mappings'}
+            members = {'mappings/mappings.tiny': b'v1\tofficial\tintermediary\n'}
         else:
             members = {'fixture.class': b'synthetic loader dependency'}
         payload = archive(members)

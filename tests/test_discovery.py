@@ -244,7 +244,7 @@ class DesktopLogicTests(unittest.TestCase):
             installation = self.installation(root)
             request = LocalBuildRequest(installation, root / 'new package', root / 'cache')
             callback = Mock()
-            with patch('minecraft_playden.desktop.build') as exporter:
+            with patch('minecraft_playden.desktop.build') as exporter, patch('minecraft_playden.desktop.package_status', return_value=None):
                 request.run(callback)
                 call = exporter.call_args
                 self.assertEqual(call.args[0], request.output)
@@ -252,6 +252,7 @@ class DesktopLogicTests(unittest.TestCase):
                 self.assertEqual(call.args[2].client_jar, installation.client)
                 self.assertEqual(call.args[2].version, '26.3')
                 self.assertIs(call.kwargs['progress'], callback)
+                self.assertEqual(call.kwargs['prepare_fabric'], 'auto')
 
     def test_existing_output_source_overlap_cache_overlap_and_missing_client(self):
         with tempfile.TemporaryDirectory() as temp:

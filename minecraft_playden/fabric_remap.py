@@ -8,15 +8,71 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 from . import fabric, profiles
 from .downloads import digest, safe_path
 from .operations import CancellationToken
 from .process_environment import desktop_environment
+from .progress import Progress, ProgressCallback
 
 RECORD = 'metadata/fabric-remap.json'
 HELPER = Path(__file__).parent / 'resources/remap/FabricRemap.java'
+
+
+
+@dataclass(frozen=True)
+class PreparationStatus:
+    required: bool
+    prepared: bool
+    message: str
+
+
+def package_status(root: Path, *, validated: bool = False,
+                   cancellation: CancellationToken | None = None) -> PreparationStatus:
+    inventory = json.loads((root / 'package.json').read_text(encoding='utf-8'))
+    if inventory.get('loader', {}).get('name') != 'Fabric':
+        return PreparationStatus(False, False, 'Fabric preparation is not applicable.')
+    if not validated:
+        from .validator import validate as validate_package
+        errors = validate_package(root, cancellation=cancellation)
+        if errors:
+            raise ValueError('\n'.join(errors))
+    metadata = json.loads((root / 'metadata/version.json').read_text(encoding='utf-8'))
+    data = json.loads((root / 'metadata/fabric.json').read_text(encoding='utf-8'))
+    from .dependencies import classpath as resolved_classpath
+    classpath = resolved_classpath(fabric.derive(metadata, data))
+    try:
+        _, _, classes, _ = _mapping(root, classpath, metadata['id'])
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+        if RECORD in inventory['files']:
+            raise
+        return PreparationStatus(True, False, 'Fabric preparation needs attention: mappings could not be resolved. Prepare Fabric before transfer; the preparation worker will report the missing or unsupported input.')
+    if not classes:
+        return PreparationStatus(False, False, 'Fabric does not require game JAR remapping.')
+    if RECORD in inventory['files']:
+        return PreparationStatus(True, True, 'Matching Fabric preparation cache validated; no additional preparation is necessary.')
+    return PreparationStatus(True, False, 'Fabric preparation required: this unprepared package may fail during first-launch remapping on Playden.')
+
+
+def installation_hint(instance: Path, version: str, libraries: Path | None = None,
+                      launcher_root: Path | None = None) -> bool | None:
+    """Read-only scan hint; the exporter decides from resolved/verified metadata."""
+    try:
+        installed = fabric.inspect(instance, version, libraries, launcher_root)
+        paths = [lib.get('name', '') for doc in installed.profiles
+                 for lib in doc.get('libraries', []) + doc.get('+libraries', [])]
+        _, relative = fabric.coordinate(f'net.fabricmc:intermediary:{version}')
+        mapping = installed.libraries / relative
+        if mapping.is_file():
+            _, _, classes, _ = _read_mapping(mapping, str(mapping))
+            return bool(classes)
+        requires = any(lib.startswith('net.fabricmc:intermediary:') for lib in paths) or any(
+            req.get('uid') == fabric.INTERMEDIARY for doc in installed.profiles for req in doc.get('requires', []))
+        return True if requires else None if installed.needs_metadata else False
+    except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile):
+        return None  # A worker will resolve missing metadata and report precise errors.
 
 
 def _context(root: Path) -> tuple[dict, dict, dict, list[str]]:
@@ -47,7 +103,11 @@ def _mapping(root: Path, classpath: list[str], version: str) -> tuple[str | None
     mapping_path = 'libraries/' + relative
     if mapping_path not in classpath:
         return None, '', {}, ''
-    with zipfile.ZipFile(safe_path(root, mapping_path)) as jar:
+    return _read_mapping(safe_path(root, mapping_path), mapping_path)
+
+
+def _read_mapping(path: Path, mapping_path: str) -> tuple[str, str, dict[str, str], str]:
+    with zipfile.ZipFile(path) as jar:
         lines = jar.read('mappings/mappings.tiny').decode('utf-8').splitlines()
         manifest = jar.read('META-INF/MANIFEST.MF').decode('utf-8') if 'META-INF/MANIFEST.MF' in jar.namelist() else ''
     header = lines[0].split('\t') if lines else []
@@ -143,7 +203,15 @@ def validate(root: Path, inventory: dict, cancellation: CancellationToken | None
     return []
 
 
-def _run(java: Path, arguments: list[str], work: Path, cancellation: CancellationToken | None) -> None:
+def _run(java: Path | None, arguments: list[str], work: Path, cancellation: CancellationToken | None,
+         progress: ProgressCallback | None = None) -> None:
+    from .host_java import find
+    if progress is not None:
+        progress(Progress('prepare-java', 'Finding and validating a host-native JDK 17+ with its compiler module...'))
+    selected = find(java, Path(arguments[1]).parent.parent / 'java/bin/java.exe', cancellation)
+    java = selected.executable
+    if progress is not None:
+        progress(Progress('remapping', f'Preparing Fabric using native Java {selected.major}: {java}'))
     env = desktop_environment()
     for key in ('JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'CLASSPATH'):
         env.pop(key, None)
@@ -177,12 +245,23 @@ def _save_inventory(root: Path, inventory: dict, additions: list[str], cancellat
     (root / 'package.json').write_text(json.dumps(inventory, indent=2) + '\n', encoding='utf-8')
 
 
-def prepare_staged(root: Path, java: Path | None = None, cancellation: CancellationToken | None = None) -> None:
+def prepare_staged(root: Path, java: Path | None = None, cancellation: CancellationToken | None = None,
+                   progress: ProgressCallback | None = None) -> None:
+    def report(stage: str, message: str) -> None:
+        if cancellation is not None:
+            cancellation.check()
+        if progress is not None:
+            progress(Progress(stage, message))
+    report('prepare-check', 'Checking Fabric preparation requirements and cache...')
     from .validator import validate as validate_package
     errors = validate_package(root, cancellation=cancellation)
     if errors:
         raise ValueError('\n'.join(errors))
     inventory, metadata, data, classpath = _context(root)
+    state = package_status(root, validated=True, cancellation=cancellation)
+    if state.prepared:
+        report('prepare-reuse', state.message)
+        return
     mapping, source, classes, mapping_name = _mapping(root, classpath, metadata['id'])
     record: dict[str, Any] = {'schema': 1, 'minecraft': metadata['id'], 'loader': data['loader'],
                               'inputs': _inputs(root, classpath, cancellation), 'outputs': {}, 'mode': 'not-required'}
@@ -195,10 +274,7 @@ def prepare_staged(root: Path, java: Path | None = None, cancellation: Cancellat
         if stale.exists():
             shutil.rmtree(stale)
         inventory['files'] = {name: value for name, value in inventory['files'].items() if not name.startswith(cache + '/') and name != RECORD}
-        if java is None:
-            java = root / 'java/bin/java.exe' if os.name == 'nt' else Path(shutil.which('java') or '')
-        if not java.is_file():
-            raise ValueError('Fabric preparation requires a host-native JDK; supply --remap-java PATH. No runtime will be downloaded.')
+        report('prepare-java', 'Finding host-native Java for Fabric preparation...')
         with tempfile.TemporaryDirectory(prefix='playden-remap-') as temporary:
             work = Path(temporary)
             game = work / 'game'
@@ -207,8 +283,8 @@ def prepare_staged(root: Path, java: Path | None = None, cancellation: Cancellat
             if any('\n' in name or '\r' in name for name in paths):
                 raise ValueError('Remapping paths must not contain newlines')
             (work / 'classpath.txt').write_text('\n'.join(paths), encoding='utf-8')
-            _run(java.resolve(), [str(work / 'classpath.txt'), str((root / 'versions/client.jar').resolve()), str(game),
-                                  str(work / 'receipt.json'), str(safe_path(root, mapping).resolve()), source, metadata['id']], work, cancellation)
+            _run(java.expanduser().absolute() if java is not None else None, [str(work / 'classpath.txt'), str((root / 'versions/client.jar').resolve()), str(game),
+                                  str(work / 'receipt.json'), str(safe_path(root, mapping).resolve()), source, metadata['id']], work, cancellation, progress)
             receipt = json.loads((work / 'receipt.json').read_text(encoding='utf-8'))
             if receipt['loader'] != data['loader'] or receipt['minecraft'] != metadata['id']:
                 raise ValueError('Remapper receipt differs from selected Minecraft/Fabric versions')
@@ -221,12 +297,14 @@ def prepare_staged(root: Path, java: Path | None = None, cancellation: Cancellat
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(safe_path(game, relative), target)
             record.pop('relative_output')
+            report('prepare-validation', 'Validating prepared Fabric cache and mapped client classes...')
             try:
                 _verify_jar(root, output, classes, cancellation)
             except (zipfile.BadZipFile, RuntimeError) as exc:
                 raise ValueError(f'Remapped client JAR could not be verified: {exc}') from exc
             record['outputs'] = {output: digest(target, 'sha256', cancellation)}
             additions.append(output)
+    report('prepare-validation', 'Validating Fabric preparation metadata and package inventory...')
     (root / RECORD).write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
     _save_inventory(root, inventory, additions, cancellation)
     errors = validate_package(root, cancellation=cancellation)
@@ -235,7 +313,7 @@ def prepare_staged(root: Path, java: Path | None = None, cancellation: Cancellat
 
 
 def prepare_package(source: Path, output: Path, java: Path | None = None,
-                    cancellation: CancellationToken | None = None) -> None:
+                    cancellation: CancellationToken | None = None, progress: ProgressCallback | None = None) -> None:
     """Publish a new prepared copy; never run code in or change the input package."""
     from .validator import validate as validate_package
     from .instance_content import check_separate, copy_tree
@@ -248,14 +326,20 @@ def prepare_package(source: Path, output: Path, java: Path | None = None,
     if errors:
         raise ValueError('\n'.join(errors))
     inventory, _, _, _ = _context(source)
+    state = package_status(source, validated=True, cancellation=cancellation)
+    if progress is not None:
+        progress(Progress('prepare-copy', 'Copying package to a separate preparation staging folder...'))
     cache = profiles.game_directory() + '/.fabric/remappedJars/'
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.playden-remap-', dir=output.parent) as temporary:
         root = Path(temporary) / 'package'
-        copy_tree(source, root, source, lambda p: p.as_posix() == RECORD or p.as_posix() == cache.rstrip('/') or p.as_posix().startswith(cache), cancellation)
-        inventory['files'] = {name: value for name, value in inventory['files'].items() if name != RECORD and not name.startswith(cache)}
+        copy_tree(source, root, source, lambda p: not state.prepared and (p.as_posix() == RECORD or p.as_posix() == cache.rstrip('/') or p.as_posix().startswith(cache)), cancellation)
+        if not state.prepared:
+            inventory['files'] = {name: value for name, value in inventory['files'].items() if name != RECORD and not name.startswith(cache)}
         (root / 'package.json').write_text(json.dumps(inventory, indent=2) + '\n', encoding='utf-8')
-        prepare_staged(root, java, cancellation)
+        prepare_staged(root, java, cancellation, progress)
         if cancellation is not None:
             cancellation.check()
+        if progress is not None:
+            progress(Progress('export', 'Finalising the validated prepared package...'))
         publish_without_replace(root, output)

@@ -24,6 +24,7 @@ class Installation:
     loaders: tuple[ModLoader, ...] = ()
     packaging_problem: str = ''
     base_problem: str = ''
+    needs_fabric_preparation: bool | None = None
 
     @property
     def loader_label(self) -> str:
@@ -202,7 +203,11 @@ def discover(extra_paths: Sequence[Path] = (), *, home: Path | None = None,
         library_root = libraries
         if library_root is None and (instance / 'mmc-pack.json').is_file() and instance.parent.name == 'instances':
             library_root = instance.parent.parent / 'libraries'
-        candidate = Installation(name, launcher, version, instance, client, problem, launcher_root, library_root, loaders, packaging_problem, base_problem)
+        preparation = None
+        if len(loaders) == 1 and loaders[0].name == 'Fabric' and not (problem or packaging_problem or base_problem):
+            from .fabric_remap import installation_hint
+            preparation = installation_hint(instance, version, library_root, launcher_root)
+        candidate = Installation(name, launcher, version, instance, client, problem, launcher_root, library_root, loaders, packaging_problem, base_problem, preparation)
         if key not in visited:
             visited[key] = len(found)
             found.append(candidate)
