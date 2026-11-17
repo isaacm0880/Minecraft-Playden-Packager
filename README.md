@@ -45,9 +45,13 @@ and a working Playden installation.
 | Forge | **Broken** — known unresolved Playden launch issues; building blocked |
 | NeoForge / Quilt | **Not supported** for launch packaging |
 
-Confirmed PS5 configurations are **Vanilla 26.3** and, separately, **26.3 with Fabric
+Confirmed PS5 configurations include **Vanilla 1.20.1**, **Vanilla 26.3** and **26.3 with Fabric
 Loader 0.20.1**. This does not certify every mod or modpack. A
 successful package validation is not proof that the game will launch on PS5.
+
+**1.20.1 + Fabric Loader 0.20.1** has a confirmed PS5 remapping failure.
+[Headless cache preparation](docs/FABRIC_REMAP.md) creates a candidate for retesting
+without Wine or a Minecraft session; the corrected package is not yet PS5-verified.
 
 Untested combinations show:
 

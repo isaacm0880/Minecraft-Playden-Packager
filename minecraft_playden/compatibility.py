@@ -12,6 +12,7 @@ FORGE_BROKEN = 'Broken — known unresolved Playden launch issues for Forge. Bui
 class Status(StrEnum):
     TESTED = 'Tested'
     UNTESTED = 'Unsupported / Untested'
+    RETEST = 'Failed on PS5 / Retest required'
     BROKEN = 'Broken'
     CANNOT_PACKAGE = 'Cannot package'
 
@@ -23,7 +24,7 @@ class Compatibility:
 
     @property
     def permits_build(self) -> bool:
-        return self.status in (Status.TESTED, Status.UNTESTED)
+        return self.status in (Status.TESTED, Status.UNTESTED, Status.RETEST)
 
     @property
     def label(self) -> str:
@@ -32,6 +33,13 @@ class Compatibility:
 
 # Exact Minecraft + loader identities; never infer evidence from a completed build.
 REGISTRY: dict[tuple[str, tuple[ModLoader, ...]], Compatibility] = {
+    ('1.20.1', ()): Compatibility(
+        Status.TESTED, 'Vanilla Minecraft 1.20.1 confirmed working on PS5 through Playden 0.12.0-nightly.20261116.1. '
+        'This evidence does not cover Fabric, mods or other runtime configurations.'),
+    ('1.20.1', (ModLoader('Fabric', '0.20.1'),)): Compatibility(
+        Status.RETEST, 'Confirmed PS5 launch failure during Fabric client JAR remapping on Playden '
+        '0.12.0-nightly.20261116.1. Headless-prepared packages are candidates for physical retesting; '
+        'the fix is not yet PS5-verified. See the Fabric remapping guide.'),
     ('26.3', ()): Compatibility(
         Status.TESTED,
         'Vanilla Minecraft 26.3 confirmed working on PS5 in a tested configuration. '

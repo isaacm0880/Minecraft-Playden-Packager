@@ -503,3 +503,17 @@ def test_invalid_profile_is_discarded_without_losing_schema_one_metrics(receiver
         assert result.receiver_metrics['published'] == 1
         assert 'profile_version' not in result.receiver_metrics
         assert (sandbox / 'internal' / built_package.name).is_dir()
+
+
+def test_prepared_fabric_cache_survives_actual_receiver_publication(receiver, tmp_path):
+    from test_fabric_remap import fixture_package
+    from minecraft_playden.fabric_remap import RECORD
+    package, _ = fixture_package(tmp_path / 'remapping', prepared=True)
+    before = snapshot(package)
+    with receiver() as (sandbox, port, token):
+        NetworkRequest(package, '127.0.0.1', token, 'internal', port).run()
+        remote = sandbox / 'internal' / package.name
+        assert snapshot(remote) == before
+        assert validate(remote) == []
+        record = json.loads((remote / RECORD).read_text())
+        assert all((remote / name).is_file() for name in record['outputs'])

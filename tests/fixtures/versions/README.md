@@ -26,3 +26,7 @@ as such in the tests. The older `fabric/` 26.2 generalisation test remains synth
 this directory adds captured 26.2 metadata rather than replacing its provenance.
 `metadata-26.3-playden.args` in the parent directory is the updated golden launch
 plan; the older console-reference argument fixtures remain unchanged.
+
+The additional `fabric-1.20.1-0.20.1.json` snapshot was captured from the exact
+Fabric Meta profile endpoint for the reported remapping failure. It supplements
+the earlier 0.16.10 matrix input; it does not imply successful PS5 execution.

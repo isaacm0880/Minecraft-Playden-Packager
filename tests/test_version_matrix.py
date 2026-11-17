@@ -40,7 +40,7 @@ def spec_payload(spec, payload, blobs):
     blobs[spec['url']] = payload
 
 
-def installation(root, version, modded, layout, legacy_assets=False):
+def installation(root, version, modded, layout, legacy_assets=False, loader_override=None):
     """Keep upstream rules, coordinates, arguments, natives, inheritance and Java."""
     metadata = json.loads((FIXTURES / f'{version}.json').read_text())
     if legacy_assets:
@@ -69,6 +69,7 @@ def installation(root, version, modded, layout, legacy_assets=False):
     spec_payload(metadata['logging']['client']['file'], b'<Configuration/>', blobs)
     put(root, 'assets/log_configs/' + metadata['logging']['client']['file']['id'], b'<Configuration/>')
     loader = '0.16.10' if version in ('1.18.2', '1.19.2', '1.20.1', '1.21.1') else '0.20.1'
+    loader = loader_override or loader
     profile = json.loads((FIXTURES / f'fabric-{version}-{loader}.json').read_text())
     for raw in profile['libraries']:
         value = fabric.library(raw)
@@ -169,7 +170,7 @@ def test_packaging_matrix(tmp_path, layout, modded, version, major):
         build(tmp_path / 'Offline Package', offline, source)
     assert validate(tmp_path / 'Offline Package') == []
     status = selected.compatibility.status
-    assert status == (Status.TESTED if version == '26.3' else Status.UNTESTED)
+    assert status == (Status.TESTED if version == '26.3' or (version == '1.20.1' and not modded) else Status.UNTESTED)
     # Rehashing an incorrect runtime cannot bypass independent target validation.
     runtime_file = output / 'java/release'
     runtime_file.write_text(runtime_file.read_text().replace('Windows', 'Linux'))

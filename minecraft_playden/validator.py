@@ -112,6 +112,8 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
         for entry in inventory['classpath']:
             if entry not in inventory['files']:
                 errors.append(f'Classpath file not inventoried: {entry}')
+        from .fabric_remap import validate as validate_remap
+        errors.extend(validate_remap(root, inventory, cancellation))
         if not any(p.startswith('natives/') and p.endswith('.dll') for p in inventory['files']):
             errors.append('No native DLLs')
     except (OSError, ValueError, KeyError, TypeError) as exc:

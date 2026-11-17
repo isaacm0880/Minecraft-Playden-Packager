@@ -36,6 +36,12 @@ def main() -> int:
     package.add_argument('--username', default='Player')
     package.add_argument('--launch-profile', choices=PROFILES, default=DEFAULT_PROFILE,
                          help='official (default), or reference-26.3 for a separate reproduction of the supplied working launch configuration')
+    package.add_argument('--prepare-fabric', action='store_true', help='Prepare Fabric remapping headlessly using its exact installed loader')
+    package.add_argument('--remap-java', type=Path, help='Host-native JDK java executable for headless remapping; never downloaded')
+    prepare = commands.add_parser('prepare-fabric', help='Prepare Fabric remapping in a new copy of a validated package; no game/mod launch')
+    prepare.add_argument('path', type=Path)
+    prepare.add_argument('--output', type=Path, required=True)
+    prepare.add_argument('--remap-java', type=Path, help='Host-native JDK java executable (Linux/Windows/macOS)')
     package.add_argument('--exclude-saves', action='store_true', help='Omit world saves; worlds are included by default')
     local_import = commands.add_parser('import-instance', help='Phase 2A: preserve instance files without claiming a verified launch')
     local_import.add_argument('--instance', type=Path, required=True)
@@ -60,6 +66,11 @@ def main() -> int:
     transfer.add_argument('--pipeline-files', action='store_true', help='Experimental: overlap each file ENTRY acknowledgement with DATA; at most two pending ACKs')
     args = parser.parse_args()
     try:
+        if args.command == 'prepare-fabric':
+            from .fabric_remap import prepare_package
+            prepare_package(args.path, args.output, args.remap_java)
+            print(f'Fabric preparation validated: {args.output}. PS5 launch still requires physical testing.')
+            return 0
         if args.command == 'transfer-ps5':
             import getpass
             import os
@@ -132,7 +143,8 @@ def main() -> int:
                 installations = discover([args.instance], include_defaults=False).installations if args.instance else ()
                 instance_name = installations[0].name if len(installations) == 1 else args.output.name
                 build(args.output, downloader, source, args.username, launch_profile=args.launch_profile,
-                      exclude_saves=args.exclude_saves, instance_name=instance_name)
+                      exclude_saves=args.exclude_saves, instance_name=instance_name,
+                      prepare_fabric=args.prepare_fabric, remap_java=args.remap_java)
                 print(f'Package validated: {args.output}\n' + INSTRUCTIONS)
         return 0
     except KeyboardInterrupt:

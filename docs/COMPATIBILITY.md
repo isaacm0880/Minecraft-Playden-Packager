@@ -9,10 +9,11 @@ yet verified; there is no required macOS binary. See [installation](INSTALLATION
 | --- | --- |
 | Tested | A specific configuration has confirmed PS5 success |
 | Unsupported / Untested | No PS5 confirmation; best-effort packaging allowed if technically possible |
+| Failed on PS5 / Retest required | A physical failure is recorded; candidate packages may build, but need a new physical test |
 | Broken | Known unresolved compatibility problems; building blocked |
 | Cannot package | Missing required files/dependencies or unsupported packaging format |
 
-Explicit Tested entries are Vanilla Minecraft 26.3 and Minecraft 26.3 with Fabric
+Explicit Tested entries are Vanilla Minecraft 1.20.1, Vanilla Minecraft 26.3 and Minecraft 26.3 with Fabric
 Loader 0.20.1 in a configuration without Ixeris. Other loader versions and arbitrary
 modpacks are not certified. Successful packaging or checksums never add Tested status.
 
@@ -41,7 +42,7 @@ checksums are replaced in memory to match synthetic payloads. No game or mod run
 | --- | --- | --- | --- | --- |
 | 1.18.2 | 17 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
 | 1.19.2 | 17 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
-| 1.20.1 | 17 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
+| 1.20.1 | 17 | Automated structural pass; confirmed PS5 working | 0.16.10: automated structural pass; 0.20.1: physical remapping failure | Fabric headless preparation requires PS5 retesting |
 | 1.21.1 | 21 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
 | 1.21.11 | 21 | Automated structural pass | 0.20.1: automated structural pass | Physical testing needed |
 | 26.1.2 | 25 | Automated structural pass | 0.20.1: automated structural pass | Physical testing needed |
@@ -89,7 +90,7 @@ Existing `reference-26.3` remains an explicit diagnostic reproduction; packages
 created before the metadata adapter retain their original argument-validation
 policy. No package-layout or Playden program/argument-path migration is needed.
 
-Untested combinations, including best-effort Fabric 1.20.1 and 26.2, display:
+Unconfirmed combinations, including Fabric 1.20.1 with other loader versions and Fabric 26.2, display:
 
 > Unsupported version — not tested on PS5. Packaging will be attempted, but the game or some mods may not work.
 
@@ -109,8 +110,12 @@ This table tracks Minecraft Java Edition versions tested with **Playden on PS5**
 
 | Minecraft Version | Mod Loader | Loader Version | Status | Notes |
 |---|---|---|---|---|
+| 1.20.1 | Vanilla | N/A | ✅ Working | User-confirmed on Playden 0.12.0-nightly.20261116.1 |
+| 1.20.1 | Fabric | 0.20.1 | ❌ Launch failure; retest required | Fails during client JAR remapping; headless-prepared candidate is not PS5-verified |
 | 26.3 | Vanilla | N/A | ✅ Working | Confirmed working |
 | 26.3 | Fabric | 0.20.1 | ✅ Working | Confirmed working |
+
+For the 1.20.1 Fabric failure, see [headless preparation, investigation and PS5 retest instructions](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/docs/FABRIC_REMAP.md). The failure reaches a Java ZIP filesystem reporting read-only; USB location alone does not establish its cause.
 
 **Status key:**
 

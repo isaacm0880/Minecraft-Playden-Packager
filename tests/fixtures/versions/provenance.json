@@ -108,6 +108,12 @@
       "url": "https://meta.fabricmc.net/v2/versions/loader/26.3/0.20.1/profile/json",
       "sha256": "9e871819b646826ea810a3ef11232055eb20ecd6fc0cebf7e895fc7b053034bc",
       "loader": "0.20.1"
+    },
+    {
+      "file": "fabric-1.20.1-0.20.1.json",
+      "url": "https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.20.1/profile/json",
+      "sha256": "4187686bf4800fddbf2848fe0f884774329cdce0a26e835d15229cba98693742",
+      "loader": "0.20.1"
     }
   ]
 }

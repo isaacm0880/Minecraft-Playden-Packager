@@ -24,7 +24,8 @@ Note: Online play limited to offline mode servers, authentication is not yet imp
 def build(output: Path, downloader: Downloader, source: ClientSource, username: str = 'Player',
           progress: ProgressCallback | None = None, launch_profile: str = profiles.DEFAULT_PROFILE,
           cancellation: CancellationToken | None = None, exclude_saves: bool = False,
-          privacy_cleanup: bool = False, instance_name: str | None = None) -> None:
+          privacy_cleanup: bool = False, instance_name: str | None = None,
+          prepare_fabric: bool = False, remap_java: Path | None = None) -> None:
     def check_cancelled() -> None:
         if cancellation is not None:
             cancellation.check()
@@ -40,12 +41,12 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
     report('source', 'Checking selected client source...')
     version = source.prepare()
     source.configure_downloads(downloader, version)
-    from .compatibility import assess, Status, UNTESTED_WARNING
+    from .compatibility import assess, Status
     compatibility = assess(version, source.content.loaders if source.content else ())
     if not compatibility.permits_build:
         raise ValueError(compatibility.label)
-    if compatibility.status == Status.UNTESTED:
-        report('compatibility', UNTESTED_WARNING)
+    if compatibility.status in (Status.UNTESTED, Status.RETEST):
+        report('compatibility', compatibility.evidence)
     if source.content is not None:
         check_separate(source.content.root, output)
         check_separate(source.content.root, downloader.cache)
@@ -142,6 +143,10 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             files[path.relative_to(root).as_posix()] = digest(path, 'sha256', cancellation)
             report('hashing', 'Hashing immutable package files...', number, len(paths))
         save('package.json', {'schema': 2, 'launch_profile': launch_profile, 'source': source.mode, 'version': version, 'username': username, 'classpath': classpath, 'files': files,  **({'loader': {'name': 'Fabric', 'version': source.fabric.loader}} if source.fabric else {})})
+        if prepare_fabric:
+            from .fabric_remap import prepare_staged
+            report('remapping', 'Preparing Fabric client cache with the selected loader; no Minecraft or mods are launched...')
+            prepare_staged(root, remap_java, cancellation)
         report('validation', 'Validating package inventory and launch configuration...')
         errors = validate(root, cancellation=cancellation, progress=progress)
         if errors:
