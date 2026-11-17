@@ -167,3 +167,53 @@ still blocks producing a new AppImage under the old v0.1 approval.
 The full management wire format and cryptographic construction are documented in
 [the receiver protocol](../ps5/receiver/PROTOCOL.md). This is regression coverage,
 not an independent cryptographic audit of the new protocol composition.
+
+## Automatic CLI startup
+
+`transfer-ps5 --start-receiver` uses the same `Deployment` implementation as the
+GUI, including per-launch RSA encryption of bootstrap credentials and subsequent
+authenticated receiver status. It never enters a code prompt or falls back to
+plaintext credentials. An already-running compatible ELF loader that forwards
+payload stdout is required; the packager does not start the console's loader.
+
+```bash
+.venv/bin/python -m minecraft_playden transfer-ps5 \
+  "$HOME/Minecraft-Playden-Packages/1.20.1 Fabric Modded-2" \
+  --host 192.168.1.50 --destination internal \
+  --name "CLI Progress Test" --start-receiver
+```
+
+SDK/ELF paths and ports come from the GUI's existing per-user receiver settings.
+When no SDK path is set, `PS5_PAYLOAD_SDK`, a `prospero-deploy` installation on
+PATH, and standard `/opt/ps5-payload-sdk` layouts are considered. The default ELF
+is `ps5/receiver/minecraft_playden_receiver.elf` in the source checkout. CLI
+`--sdk PATH`, `--receiver-elf PATH`, `--loader-port PORT`, `--port PORT` and
+`--control-port PORT` override startup configuration without changing preferences.
+
+A missing or stale receiver in a source directory with its Makefile is rebuilt
+with the installed SDK and local `make`. The build uses temporary output and
+replaces the local ELF only after format/startup-slot checks succeed. Failed or
+cancelled builds retain a previous ELF. A custom prebuilt ELF without sources
+can be used directly; a missing custom ELF needs a valid source location or an
+explicit local build. No dependencies, SDK or ELF are downloaded. POSIX SDK
+startup needs `socat`; the Windows deployer needs `plink.exe` and retains the
+existing safe-path restrictions. Encrypted startup needs the installed
+`cryptography` dependency (included in `.[gui]`).
+
+Listening receiver ports prevent another deployment. If the process has an
+existing compatible transfer key in the selected `--token-env` environment
+variable, it attempts management authentication before reuse; a wrong key,
+unsupported receiver, busy receiver or uncertain connection never permits a
+replacement. A fresh CLI cannot recover a GUI's memory-only owner credentials.
+Use its authenticated GUI **Stop Receiver** action and retry, or explicitly use
+`--pair` with an externally launched receiver's still-valid six-digit code.
+`--pair` and `--start-receiver` are mutually exclusive. Pairing is never automatic
+from a guessed or scraped six-digit code.
+
+Startup stages and transfer/verification progress share the existing renderer.
+Keys, codes, private keys and captured loader output are not printed or saved.
+Completion and Ctrl-C close/reap the local SDK process and temporary files; they
+do not send a remote STOP. The receiver can remain running, including after a
+startup failure if deployment occurred. Inspect its state before retrying; never
+assume a closed loader stream proves remote shutdown. A lost publication receipt
+still requires inspection of the PS5 import path before retrying a transfer.

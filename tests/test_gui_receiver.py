@@ -181,7 +181,7 @@ def test_stop_is_disabled_during_local_transfer_and_cannot_be_invoked_directly(u
 def test_cancelled_start_does_not_claim_receiver_stopped(ui):
     window, manager, *_ = ui
     entered = threading.Event()
-    def start(deployment, host, sdk, elf, loader, data, control, cancellation):
+    def start(deployment, host, sdk, elf, loader, data, control, cancellation, **kwargs):
         entered.set()
         cancellation.wait(5)
     with patch.object(Deployment, 'start', autospec=True, side_effect=start):

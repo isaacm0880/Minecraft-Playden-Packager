@@ -8,8 +8,11 @@ a filesystem snapshot. The packager never runs your launcher or signs in.
 
 Select discovered rows, or Add source folder for a custom/portable location. Inspect
 source paths, version, loader and status. Ctrl/Cmd/Shift allows multiple selection.
-Every selected instance must be eligible before Build enables. Deselect Broken or
-Cannot package rows; untested rows may build after the compatibility warning.
+Every selected instance must pass packaging checks before Build enables. The
+status column shows Works, Untested or Broken for Minecraft/loader combinations;
+hover for evidence and inspect the build reason for missing files or unsupported
+formats. Untested configurations may build after a warning; Forge remains blocked.
+A Works label does not certify every installed mod.
 
 Outputs default to sanitised instance names, with collision suffixes. Switching
 instances resets the output folder name to the newly selected instance while

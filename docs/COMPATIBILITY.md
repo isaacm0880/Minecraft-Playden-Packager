@@ -7,15 +7,19 @@ yet verified; there is no required macOS binary. See [installation](INSTALLATION
 
 | Status | Meaning |
 | --- | --- |
-| Tested | A specific configuration has confirmed PS5 success |
-| Unsupported / Untested | No PS5 confirmation; best-effort packaging allowed if technically possible |
-| Failed on PS5 / Retest required | A physical failure is recorded; candidate packages may build, but need a new physical test |
-| Broken | Known unresolved compatibility problems; building blocked |
-| Cannot package | Missing required files/dependencies or unsupported packaging format |
+| Works | A specific Minecraft version and loader combination has confirmed PS5 success; see its evidence and limits |
+| Untested | No applicable PS5 confirmation; packaging still requires supported metadata, dependencies and runtime |
+| Broken | A known launch failure or unresolved compatibility issue is recorded |
+
+These short labels do not replace packaging readiness. Missing files or unsupported
+formats block Build with a detailed reason, even when a row is labelled Untested.
+Physical failures awaiting a retest remain Broken; automated packaging never promotes
+a configuration to Works. Tooltips retain the detailed evidence. Internal states
+also retain whether building is blocked or a candidate may be built for retesting.
 
 Explicit Tested entries are Vanilla Minecraft 1.20.1, Vanilla Minecraft 26.3 and Minecraft 26.3 with Fabric
 Loader 0.20.1 in a configuration without Ixeris. The 1.20.1 Fabric confirmation requires native pre-remapping and establishes reaching the main menu, not world loading or every mod. Other loader versions and arbitrary
-modpacks are not certified. Successful packaging or checksums never add Tested status.
+modpacks are not certified. Successful packaging or checksums never add Works status.
 
 The development source resolves Minecraft metadata, not a version allowlist.
 It adapts structured and legacy game arguments, bounded metadata inheritance,
@@ -136,18 +140,18 @@ This table tracks Minecraft Java Edition versions tested with **Playden on PS5**
 
 | Minecraft Version | Mod Loader | Loader Version | Status | Notes |
 |---|---|---|---|---|
-| 1.20.1 | Vanilla | N/A | ✅ Main menu | Confirmed startup on Playden 0.12.0-nightly.20261116.1; world loading not established |
-| 1.20.1 | Fabric | 0.20.1 | ✅ Main menu with native pre-remapping | User-confirmed startup; world loading and every Fabric mod are not certified. The original unprepared package failed during first-launch remapping |
-| 26.3 | Vanilla | N/A | ✅ Working | Confirmed working |
-| 26.3 | Fabric | 0.20.1 | ✅ Working | Confirmed working |
+| 1.20.1 | Vanilla | N/A | Works | Confirmed startup on Playden 0.12.0-nightly.20261116.1; world loading not established |
+| 1.20.1 | Fabric | 0.20.1 | Works | User-confirmed startup with native pre-remapping; world loading and every Fabric mod are not certified. The original unprepared package failed during first-launch remapping |
+| 26.3 | Vanilla | N/A | Works | Confirmed working |
+| 26.3 | Fabric | 0.20.1 | Works | Confirmed working |
 
 For automatic GUI preparation and the original 1.20.1 failure investigation, see [Fabric preparation and physical test instructions](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/docs/FABRIC_REMAP.md). The failure reaches a Java ZIP filesystem reporting read-only; USB location alone does not establish its cause.
 
 **Status key:**
 
-- ✅ Working — Tested and confirmed working on PS5.
-- ⚠️ Partially working — Runs with known limitations.
-- ❌ Not working — Tested and confirmed broken.
+- Works — This version/loader combination has confirmed PS5 success within the recorded limits.
+- Untested — No applicable physical PS5 result.
+- Broken — A known launch failure or unresolved issue is recorded.
 
 **Note:** Compatibility is specific to the tested configuration. Other versions, Fabric Loader versions and mod combinations are not guaranteed to work.
 
@@ -157,23 +161,20 @@ This table tracks mods that cause issues or break the package on playden. Compat
 
 | Mod                                       | Status        | Notes                                                          |
 | ----------------------------------------- | ------------- | -------------------------------------------------------------- |
-| [Ixeris](https://modrinth.com/mod/ixeris) | ❌ Not working | Known compatibility issues with Playden. Avoid using this mod. |
+| [Ixeris](https://modrinth.com/mod/ixeris) | Broken | Known compatibility issues with Playden. Avoid using this mod. |
 
-**Status key:**
+An unlisted mod means no known issue is recorded; it has not been verified working.
+This tracker records **only known issues**, not a catalogue of working mods.
+Minecraft/loader Works status never certifies every installed mod.
 
-- ✅ Working — Tested and confirmed working on PS5.
-- ⚠️ Partially working — Works with limitations or known issues.
-- ❌ Not working — Known to cause issues or prevent the game from running.
+### Report Mod Issues
 
-### Report Mod Compatibility
-
-Tested a mod that isn't listed? [Open an issue](https://github.com/isaacm0880/Minecraft-Playden-Packager/issues/new) with \:borked-mod
+If a mod causes a reproducible issue, [open an issue](https://github.com/isaacm0880/Minecraft-Playden-Packager/issues/new)
+with `:borked-mod` and include:
 
 - Mod name and version
 - Minecraft and Fabric Loader versions
-- Whether it works, partially works or fails
-- Any errors or limitations encountered
+- Failure symptoms or specific limitations
+- Relevant errors and reproduction steps, with credentials removed
 
-**Note:** Successfully packaging a mod does not guarantee it will work when launched through Playden.
-
-
+Successfully packaging a mod does not establish Playden runtime compatibility.

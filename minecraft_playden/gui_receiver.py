@@ -1,16 +1,15 @@
 """PS5 receiver section: Qt owns UI state; workers own deployment and network I/O."""
-import os
 from pathlib import Path
 import re
 from dataclasses import replace
 
 from PySide6.QtCore import QSettings, QThread, QTimer, Signal, Slot, Qt
-from PySide6.QtWidgets import QCheckBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QLayout, QVBoxLayout, QWidget
 
 from .gui_components import Task, AdvancedSection
-from .network_protocol import lan_address, PORT, NetworkTransferError
+from .network_protocol import lan_address, NetworkTransferError
 from .operations import CancellationToken
-from .receiver_manager import CONTROL_PORT, LOADER_PORT, Deployment, PairedReceiver, ReceiverInfo, ReceiverError, identify, pair_receiver, receiver_status, stop_receiver
+from .receiver_manager import Deployment, ReceiverConfiguration, PairedReceiver, ReceiverInfo, ReceiverError, identify, pair_receiver, receiver_status, stop_receiver
 
 
 class ReceiverManager(QGroupBox):
@@ -32,6 +31,7 @@ class ReceiverManager(QGroupBox):
         self.transfer_active = False
         self.monitoring = True
         layout = QVBoxLayout(self)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         form = QFormLayout()
         self.host = QLineEdit()
         try:
@@ -74,17 +74,17 @@ class ReceiverManager(QGroupBox):
         self.advanced.form.addRow(note)
         self.configuration = QWidget()
         configuration = QFormLayout(self.configuration)
-        self.sdk = QLineEdit(str(settings.value('receiver/sdk', os.environ.get('PS5_PAYLOAD_SDK', ''))))
-        default_elf = Path(__file__).resolve().parent.parent / 'ps5/receiver/minecraft_playden_receiver.elf'
-        self.elf = QLineEdit(str(settings.value('receiver/elf', str(default_elf))))
+        config = ReceiverConfiguration.load(settings)
+        self.sdk = QLineEdit(str(config.sdk))
+        self.elf = QLineEdit(str(config.elf))
         for label, field, picker in (('PS5 Payload SDK', self.sdk, self.choose_sdk), ('Receiver ELF', self.elf, self.choose_elf)):
             row = QHBoxLayout(); row.addWidget(field)
             button = QPushButton('Choose…'); button.clicked.connect(picker); row.addWidget(button)
             configuration.addRow(label, row)
         self.loader_port = QSpinBox(); self.data_port = QSpinBox(); self.control_port = QSpinBox()
-        for label, box, key, default in (('ELF loader port', self.loader_port, 'loaderPort', LOADER_PORT),
-                                         ('Receiver listening port', self.data_port, 'dataPort', PORT),
-                                         ('Receiver control port', self.control_port, 'controlPort', CONTROL_PORT)):
+        for label, box, key, default in (('ELF loader port', self.loader_port, 'loaderPort', config.loader_port),
+                                         ('Receiver listening port', self.data_port, 'dataPort', config.port),
+                                         ('Receiver control port', self.control_port, 'controlPort', config.control_port)):
             box.setRange(1, 65535)
             try:
                 box.setValue(int(str(settings.value('receiver/' + key, default))))
@@ -221,7 +221,7 @@ class ReceiverManager(QGroupBox):
         self.deployment = Deployment()
         deployment = self.deployment
         self.set_state('Starting', 'Deploying through the SDK. Waiting for encrypted startup credentials and an authenticated receiver response…')
-        self._work('start', lambda progress: deployment.start(host, sdk, elf, *ports, self.cancellation))
+        self._work('start', lambda progress: deployment.start(host, sdk, elf, *ports, self.cancellation, progress=progress))
 
     @Slot()
     def pair(self) -> None:

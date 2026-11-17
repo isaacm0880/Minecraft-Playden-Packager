@@ -845,7 +845,7 @@ class GuiTests(unittest.TestCase):
                 self.assertIn(name, self.window.build_reason.text())
                 self.assertIn('1 of 3', self.window.build_reason.text())
                 status = self.window.table.item(2, 6).text()
-                self.assertTrue(status.startswith('Broken' if name == 'Forge' else 'Cannot package'))
+                self.assertTrue(status == ('Broken' if name == 'Forge' else 'Untested'))
                 with patch.object(self.window, 'start_task') as start, patch('minecraft_playden.gui_app.QMessageBox.warning'):
                     self.window.start_build()
                     start.assert_not_called()
@@ -868,7 +868,7 @@ class GuiTests(unittest.TestCase):
                         self.assertEqual(self.window.progress_bar.text(), '100%')
                         self.assertIn('Completed', self.window.queue_table.item(0, 1).text())
                         self.assertIn('Completed', self.window.queue_table.item(1, 1).text())
-                self.assertTrue(self.window.table.item(1, 6).text().startswith('Unsupported / Untested'))
+                self.assertTrue(self.window.table.item(1, 6).text() == 'Untested')
 
     def test_untested_confirmation_shows_exact_warning_and_can_decline(self):
         from minecraft_playden.compatibility import UNTESTED_WARNING
@@ -897,11 +897,11 @@ class GuiTests(unittest.TestCase):
         self.jar.unlink()
         self.window.update_build_button()
         self.assertFalse(self.window.build_button.isEnabled())
-        self.assertTrue(self.window.table.item(0, 6).text().startswith('Cannot package'))
+        self.assertTrue(self.window.table.item(0, 6).text() == 'Untested')
         self.jar.write_bytes(original)
         self.window.update_build_button()
         self.assertTrue(self.window.build_button.isEnabled())
-        self.assertTrue(self.window.table.item(0, 6).text().startswith('Tested'))
+        self.assertTrue(self.window.table.item(0, 6).text() == 'Works')
 
     def test_startup_and_completed_scan_stay_idle_after_selection_changes(self):
         self.assertEqual(self.window.progress_bar.text(), '0%')
@@ -914,7 +914,7 @@ class GuiTests(unittest.TestCase):
         self.window.table.clearSelection()
         self.window.table.selectRow(0)
         self.assertEqual(self.window.progress_bar.text(), '0%')
-        self.assertTrue(self.window.table.item(0, 6).text().startswith('Tested'))
+        self.assertTrue(self.window.table.item(0, 6).text() == 'Works')
         self.assertIn('Vanilla', self.window.build_reason.text())
         with patch('minecraft_playden.gui_app.QMessageBox.warning') as warning:
             self.assertTrue(CONFIRM_UNTESTED(self.window, self.window.build_requests()[0]))

@@ -45,7 +45,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
     from .compatibility import assess, Status
     compatibility = assess(version, source.content.loaders if source.content else ())
     if not compatibility.permits_build:
-        raise ValueError(compatibility.label)
+        raise ValueError(compatibility.details)
     if compatibility.status in (Status.UNTESTED, Status.RETEST):
         report('compatibility', compatibility.evidence)
     if source.content is not None:

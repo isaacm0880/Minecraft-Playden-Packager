@@ -785,7 +785,7 @@ class ReleaseGuiTests(unittest.TestCase):
                     self.assertIn(name, self.window.loader.text())
                     expected_status = 'Broken' if name == 'Forge' else 'Cannot package'
                     self.assertEqual(self.window.selected_installation().compatibility.status.value, expected_status)
-                    self.assertTrue(self.window.table.item(0, 6).text().startswith(expected_status))
+                    self.assertTrue(self.window.table.item(0, 6).text() == ('Broken' if name == 'Forge' else 'Untested'))
                     self.assertFalse(self.window.build_button.isEnabled())
                     self.assertFalse(hasattr(self.window, 'file_only'))
                     output = root / 'imported'

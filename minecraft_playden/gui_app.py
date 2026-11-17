@@ -9,7 +9,7 @@ from PySide6.QtCore import QByteArray, QSettings, QSignalBlocker, QThread, QTime
 from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QAbstractItemView, QCheckBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QComboBox,
+    QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QComboBox, QLayout,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStyledItemDelegate,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -55,7 +55,7 @@ class InstallationItem(QTableWidgetItem):
                 return tuple((0, int(part)) if part.isdecimal() else (1, part.casefold())
                              for part in re.split(r'([0-9]+)', value))
             return natural(self.text()) < natural(other.text())
-        return self.text().casefold() < other.text().casefold()
+        return (self.text().casefold(), self.toolTip().casefold()) < (other.text().casefold(), other.toolTip().casefold())
 
 
 class MainWindow(QMainWindow):
@@ -178,7 +178,6 @@ class MainWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Orientation.Vertical)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(8)
-        self.splitter.setToolTip('Drag the divider to resize the installation list and package settings.')
         self.splitter.addWidget(self.table)
         layout.addWidget(self.splitter, 1)
         self.details_scroll = QScrollArea()
@@ -187,6 +186,7 @@ class MainWindow(QMainWindow):
         self.details_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         details = QWidget()
         details_layout = QVBoxLayout(details)
+        details_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         details_layout.setContentsMargins(0, 0, 0, 0)
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
@@ -229,9 +229,6 @@ class MainWindow(QMainWindow):
         self.prepare_fabric = QCheckBox('Prepare Fabric for Playden')
         self.prepare_fabric.setToolTip("Prepares Fabric's game files before transfer to avoid first-launch remapping issues on Playden.")
         self.build_advanced.form.addRow(self.prepare_fabric)
-        self.fabric_explanation = QLabel("Prepares Fabric's game files before transfer to avoid first-launch remapping issues on Playden.")
-        self.fabric_explanation.setWordWrap(True)
-        self.build_advanced.form.addRow(self.fabric_explanation)
         self.remap_java = QLineEdit(str(self.settings.value('preparation/java', '')))
         self.remap_java.setPlaceholderText('Automatic: host-native JDK 17+ with compiler module')
         self.remap_java.setToolTip('Host preparation Java executable. Separate from the Windows runtime packaged for PS5; no Wine or downloads.')
@@ -349,6 +346,7 @@ class MainWindow(QMainWindow):
         details_layout.addStretch()
         self.details_scroll.setWidget(details)
         self.splitter.addWidget(self.details_scroll)
+        self.splitter.handle(1).setToolTip('Drag the divider to resize the installation list and package settings.')
         self.splitter.setStretchFactor(0, 3)
         self.splitter.setStretchFactor(1, 2)
         self.splitter.setSizes([280, 180])
@@ -508,17 +506,18 @@ class MainWindow(QMainWindow):
                 identity = self.table.item(row, 0)
                 status = self.table.item(row, 6)
                 if identity is not None and status is not None:
-                    label = identity.data(Qt.ItemDataRole.UserRole).compatibility.label
+                    compatibility = identity.data(Qt.ItemDataRole.UserRole).compatibility
+                    label = compatibility.label
                     if status.text() != label:
                         status.setText(label)
-                        status.setToolTip(label)
+                    status.setToolTip(compatibility.details)
             self.table.setSortingEnabled(sorting)
         request, reason = self.build_request()
         self.build_button.setEnabled(request is not None)
         self.build_button.setText(f'Build {len(self.selected_installations())} packages' if len(self.selected_installations()) > 1 else 'Build Playden package')
         self.build_button.setToolTip(reason or 'Build this selected local installation.')
         explanation = 'Ready to build. Each instance is validated independently. For multiple rows, output folders use instance names under the displayed output parent.'
-        notices = '\n'.join(f'{installation.name}: {installation.compatibility.label}'
+        notices = '\n'.join(f'{installation.name}: {installation.compatibility.details}'
                             for installation in self.selected_installations())
         self.build_reason.setText(('Build disabled: ' + reason if reason else explanation) + ('\n' + notices if notices else ''))
         self.username.setEnabled(not self.busy())
@@ -879,7 +878,7 @@ class MainWindow(QMainWindow):
                               installation.compatibility.label]
                     for col, value in enumerate(values):
                         item = InstallationItem(value, version=col == 2)
-                        item.setToolTip(value)
+                        item.setToolTip(installation.compatibility.details if col == 6 else value)
                         if col == 0:
                             item.setData(Qt.ItemDataRole.UserRole, installation)
                         self.table.setItem(row, col, item)

@@ -270,3 +270,10 @@ the main window. The completed transfer state clears; the local package remains
 available for another transfer. Failures retain packages for retry without a
 rebuild. See [FTP feasibility](FTP_FEASIBILITY.md) for the optional transport
 investigation; FTP is not enabled and has no measured PS5 speed claim.
+
+For CLI deployment and encrypted automatic pairing, add `--start-receiver` to
+`transfer-ps5`. It uses the GUI receiver configuration and requires an already
+running ELF loader with payload stdout forwarding. See [automatic CLI
+startup](PS5_RECEIVER_MANAGER.md#automatic-cli-startup) for overrides, local
+receiver builds, existing-receiver recovery and lifecycle behavior. `--pair`
+remains available for receivers started externally.

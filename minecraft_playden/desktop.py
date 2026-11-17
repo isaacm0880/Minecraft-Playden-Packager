@@ -233,7 +233,7 @@ def selection_readiness(installations: list[Installation], output: str, cache: s
                 path = str(target)
             request, reason = build_readiness(installation, path, cache, username=username)
             if not installation.compatibility.permits_build:
-                reason = installation.compatibility.label
+                reason = installation.compatibility.details
             if reason or request is None:
                 problems.append(f'{installation.name} ({installation.loader_label}, {installation.version}): {reason}')
             else:

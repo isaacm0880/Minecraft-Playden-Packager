@@ -24,7 +24,8 @@ import time
 from typing import Any
 
 from .network_protocol import MAGIC, PORT, Session, NetworkTransferError, lan_address
-from .operations import CancellationToken, OperationCancelled
+from .operations import CancellationToken
+from .progress import Progress, ProgressCallback
 from .process_environment import desktop_environment
 
 STARTUP_TIMEOUT = 20.0
@@ -67,6 +68,102 @@ class ReceiverError(NetworkTransferError):
 
 class UnsupportedReceiver(ReceiverError):
     pass
+
+
+@dataclass(frozen=True)
+class ReceiverConfiguration:
+    sdk: Path
+    elf: Path
+    loader_port: int = LOADER_PORT
+    port: int = PORT
+    control_port: int = CONTROL_PORT
+
+    @classmethod
+    def load(cls, settings: Any = None) -> 'ReceiverConfiguration':
+        # Core CLI remains usable without Qt; when installed, read the exact GUI
+        # settings store without creating a window or persisting credentials.
+        if settings is None:
+            try:
+                from PySide6.QtCore import QSettings
+                settings = QSettings('MinecraftPlayden', 'Packager')
+            except ImportError:
+                pass
+        def value(key: str, default: str) -> str:
+            result = str(settings.value('receiver/' + key, default)) if settings is not None else default
+            return result if result.strip() else default
+        candidates = [Path('/opt/ps5-payload-sdk/ps5-payload-sdk'), Path('/opt/ps5-payload-sdk')]
+        deployer = shutil.which('prospero-deploy')
+        if deployer:
+            candidates.insert(0, Path(deployer).resolve().parent.parent)
+        default_sdk = os.environ.get('PS5_PAYLOAD_SDK') or str(next((p for p in candidates if p.is_dir()), candidates[-1]))
+        default_elf = Path(__file__).resolve().parent.parent / 'ps5/receiver/minecraft_playden_receiver.elf'
+        def port(key: str, default: int) -> int:
+            try:
+                result = int(value(key, str(default)))
+                return result if 1 <= result <= 65535 else default
+            except ValueError:
+                return default
+        return cls(Path(value('sdk', default_sdk)).expanduser(), Path(value('elf', str(default_elf))).expanduser(),
+                   port('loaderPort', LOADER_PORT), port('dataPort', PORT), port('controlPort', CONTROL_PORT))
+
+
+def _stop_local_process(process: subprocess.Popen[bytes]) -> None:
+    """Reap a local build/deploy stream; never send a remote STOP command."""
+    if process.poll() is None:
+        try:
+            if sys.platform != 'win32':
+                os.killpg(process.pid, signal.SIGTERM)
+            else:
+                process.terminate()
+            process.wait(timeout=1)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                process.kill()
+            except OSError:
+                pass
+    try:
+        process.wait(timeout=.5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def ensure_receiver_elf(sdk: Path, elf: Path, token: CancellationToken,
+                        progress: ProgressCallback | None = None) -> None:
+    """Build missing/stale source-tree receivers locally; never install tools."""
+    source = elf.parent
+    makefile = source / 'Makefile'
+    inputs = [makefile, *source.rglob('*.c'), *source.rglob('*.h'), source.parent / 'diagnostic/recipe_check.h'] if makefile.is_file() else []
+    if elf.is_file() and not any(p.is_file() and p.stat().st_mtime_ns > elf.stat().st_mtime_ns for p in inputs):
+        return
+    if not makefile.is_file() or not (source / 'main.c').is_file():
+        raise ReceiverError('Receiver ELF was not found or is stale, and its source Makefile is unavailable. Select a built receiver ELF or the source-tree ps5/receiver path.')
+    if not (sdk / 'toolchain/prospero.mk').is_file():
+        raise ReceiverError('Building the receiver requires an installed PS5 Payload SDK with toolchain/prospero.mk. No SDK files were downloaded.')
+    make = shutil.which('make')
+    if make is None:
+        raise ReceiverError('Building the receiver requires make on PATH. Install the local build tools or select a built receiver ELF.')
+    token.check()
+    if progress:
+        progress(Progress('receiver-build', 'Building the receiver ELF using the installed PS5 Payload SDK…'))
+    with tempfile.TemporaryDirectory(prefix='playden-receiver-build-', dir=source) as temporary, tempfile.TemporaryFile() as log:
+        output = Path(temporary) / elf.name
+        env = desktop_environment()
+        env['PS5_PAYLOAD_SDK'] = str(sdk.resolve())
+        process = subprocess.Popen([make, '-C', str(source.resolve()), 'ELF=' + str(output.resolve())],
+                                   stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                   env=env, start_new_session=os.name != 'nt')
+        try:
+            while process.poll() is None:
+                token.wait(.05)
+            token.check()
+            if process.returncode or not output.is_file():
+                raise ReceiverError('Receiver build failed. Check the installed SDK compiler/toolchain with make -C ps5/receiver. No deployment was attempted.')
+            # The real per-launch RSA key is applied by prepare_elf below. Here
+            # validate the format/slot before replacing a previous local ELF.
+            prepare_elf(output, b'\x80' + bytes(382) + b'\x01', PORT, CONTROL_PORT)
+            output.replace(elf)
+        finally:
+            _stop_local_process(process)
 
 
 def _connect(host: str, port: int, token: CancellationToken) -> socket.socket:
@@ -266,32 +363,53 @@ class Deployment:
 
     def start(self, host: str, sdk: Path, elf: Path, loader_port: int = LOADER_PORT,
               port: int = PORT, control_port: int = CONTROL_PORT,
-              cancellation: CancellationToken | None = None) -> PairedReceiver:
+              cancellation: CancellationToken | None = None, *, existing_key: bytes | None = None,
+              progress: ProgressCallback | None = None) -> PairedReceiver:
         token = cancellation or CancellationToken()
         host = lan_address(host)
+        token.check()
+        def report(stage: str, message: str) -> None:
+            if progress:
+                progress(Progress(stage, message))
+        report("receiver-check", "Checking receiver ports before deployment…")
         if not 1 <= loader_port <= 65535 or loader_port in (port, control_port):
             raise ValueError('The ELF loader needs a distinct valid TCP port (normally 9021).')
+        if not all(1 <= value <= 65535 for value in (port, control_port)) or port == control_port:
+            raise ValueError('Choose distinct valid receiver data and control ports.')
+        # Close the probe before management authentication: the receiver handles
+        # control clients serially. Failure to authenticate never permits deploy.
+        for target in (control_port, port):
+            try:
+                with _connect(host, target, token):
+                    pass
+            except ConnectionRefusedError:
+                continue
+            except OSError as exc:
+                raise ReceiverError('Cannot establish whether a receiver is already running. Check the PS5 IP and LAN; deployment was not attempted.') from exc
+            if target == control_port and existing_key is not None:
+                report('receiver-authenticate', 'Authenticating the existing receiver…')
+                try:
+                    info = identify(host, control_port, token)
+                    paired = PairedReceiver(host, info, existing_key)
+                    info = receiver_status(paired, token)
+                except UnsupportedReceiver as exc:
+                    raise ReceiverError('The listening receiver is incompatible with automatic startup. Stop it using its own controls before starting the matching receiver ELF. No service was replaced.') from exc
+                except OSError as exc:
+                    raise ReceiverError('The existing receiver could not be authenticated. Use --pair for an externally launched receiver or its authenticated GUI owner to stop it. No service was replaced.') from exc
+                if info.busy:
+                    raise ReceiverError('The authenticated receiver is busy; finish its active transfer before retrying.')
+                report('receiver-ready', 'Existing receiver authenticated; no ELF deployed.')
+                return PairedReceiver(host, info, existing_key)
+            raise ReceiverError('A service is already listening on the receiver ports. Use --pair for an externally launched receiver, or Stop Receiver from its authenticated GUI owner before retrying --start-receiver. Stop legacy or incompatible services using their own controls. No service was replaced.')
         deployer = sdk / ('win/prospero-deploy.cmd' if os.name == 'nt' else 'bin/prospero-deploy')
         if not deployer.is_file():
             raise ReceiverError('PS5 Payload SDK deployer was not found. Select the SDK root containing bin/prospero-deploy (or win/prospero-deploy.cmd).')
         if os.name != 'nt' and not os.access(deployer, os.X_OK):
             raise ReceiverError('The SDK deployer is not executable. Restore its executable permission, or start the receiver externally and Pair.')
-        if not elf.is_file():
-            raise ReceiverError('Receiver ELF was not found. Build ps5/receiver with the PS5 Payload SDK, then select minecraft_playden_receiver.elf.')
         utility = 'plink.exe' if os.name == 'nt' else 'socat'
         if shutil.which(utility) is None:
             raise ReceiverError(f'The SDK deployer requires {utility} on PATH. Install it, or start the ELF externally and pair with its six-digit code.')
-        # Never deploy a duplicate or replace a receiver the manager cannot identify.
-        for target in (control_port, port):
-            try:
-                with _connect(host, target, token):
-                    raise ReceiverError('A service is already listening on the receiver ports. Refresh and pair with the existing receiver; stop legacy receivers manually before starting a new ELF.')
-            except ConnectionRefusedError:
-                pass
-            except ReceiverError:
-                raise
-            except OSError as exc:
-                raise ReceiverError('Cannot establish whether a receiver is already running. Check the PS5 IP and LAN; deployment was not attempted.') from exc
+        ensure_receiver_elf(sdk, elf, token, progress)
         try:
             from cryptography.hazmat.primitives.asymmetric import rsa
         except ImportError as exc:
@@ -310,6 +428,7 @@ class Deployment:
             raise ReceiverError('The SDK Windows batch deployer does not safely support these SDK/temp paths. Use paths without spaces or shell characters, or start externally and pair.')
         ready: queue.Queue[bytes] = queue.Queue(maxsize=1)
         try:
+            report('receiver-deploy', 'Deploying receiver to the already-running ELF loader; waiting for encrypted startup output…')
             self.attempted = True
             self.process = subprocess.Popen([str(deployer), '-h', host, '-p', str(loader_port), str(path)],
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -339,32 +458,19 @@ class Deployment:
                         raise ReceiverError('SDK deployment ended without encrypted receiver credentials. Check that an ELF loader is running on the selected port; some loaders do not forward payload output. Pair manually if the receiver notification appeared.')
                     continue
                 paired = decode_bootstrap(private, encrypted, host, port, control_port)
+                report('receiver-authenticate', 'Encrypted startup credentials received; authenticating the receiver…')
                 info = receiver_status(paired, token)
+                report('receiver-ready', 'Receiver authenticated and ready for transfer.')
                 return PairedReceiver(host, info, paired.key, paired.pairing_code)
             raise ReceiverError('Receiver startup was not confirmed within 20 seconds. Check the loader and the PS5 notification. If the loader does not forward stdout, use the six-digit code to pair; the ELF may still be running.')
-        except (OSError, ValueError, OperationCancelled):
+        except BaseException:
             self.close()  # This closes only the local SDK stream, never claims remote exit.
             raise
 
     def close(self) -> None:
         process, self.process = self.process, None
-        if process is not None and process.poll() is None:
-            try:
-                if sys.platform != 'win32':
-                    os.killpg(process.pid, signal.SIGTERM)
-                else:
-                    process.terminate()
-                process.wait(timeout=1)
-            except (OSError, subprocess.TimeoutExpired):
-                try:
-                    process.kill()
-                except OSError:
-                    pass
         if process is not None:
-            try:
-                process.wait(timeout=.5)
-            except subprocess.TimeoutExpired:
-                pass
+            _stop_local_process(process)
         if self.reader is not None:
             self.reader.join(timeout=.5)
             if not self.reader.is_alive() and process is not None and process.stdout is not None:

@@ -28,6 +28,14 @@ class Compatibility:
 
     @property
     def label(self) -> str:
+        if self.status == Status.TESTED:
+            return 'Works'
+        if self.status in (Status.BROKEN, Status.RETEST):
+            return 'Broken'
+        return 'Untested'
+
+    @property
+    def details(self) -> str:
         return f'{self.status} — {self.evidence}'
 
 

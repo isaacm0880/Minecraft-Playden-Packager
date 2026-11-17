@@ -9,6 +9,7 @@ from .versions import VersionResolver
 from .sources import ClientSource
 from .profiles import PROFILES, DEFAULT_PROFILE
 from . import __version__
+from .operations import OperationCancelled
 
 
 def main() -> int:
@@ -55,17 +56,24 @@ def main() -> int:
     transfer.add_argument('path', type=Path)
     transfer.add_argument('--host', required=True, help='Private PS5 IPv4 address')
     transfer.add_argument('--destination', choices=['internal', 'usb0'], default='internal')
-    transfer.add_argument('--port', type=int, default=9025)
-    transfer.add_argument('--pair', action='store_true', help='Pair with a management-v2 receiver using a hidden six-digit code prompt')
-    transfer.add_argument('--control-port', type=int, default=9026, help='Management-v2 control port, used with --pair (default 9026)')
+    transfer.add_argument('--port', type=int, help='Receiver data port (configured default with --start-receiver; otherwise 9025)')
+    startup = transfer.add_mutually_exclusive_group()
+    startup.add_argument('--start-receiver', action='store_true', help='Deploy through the installed SDK and pair automatically using encrypted loader output')
+    startup.add_argument('--pair', action='store_true', help='Pair with a management-v2 receiver using a hidden six-digit code prompt')
+    transfer.add_argument('--sdk', type=Path, help='PS5 Payload SDK root override for --start-receiver')
+    transfer.add_argument('--receiver-elf', type=Path, help='Receiver ELF override for --start-receiver')
+    transfer.add_argument('--loader-port', type=int, help='Already-running ELF loader port override for --start-receiver')
+    transfer.add_argument('--control-port', type=int, help='Management-v2 control port (configured default with --start-receiver; otherwise 9026)')
     transfer.add_argument('--name', help='Optional package name override; defaults to the current local package folder name')
     transfer.add_argument('--token-env', default='PLAYDEN_PS5_TOKEN',
-                          help='Legacy receiver token environment variable; otherwise prompt without echo (not used with --pair)')
+                          help='Existing transfer key environment variable: authenticated reuse with --start-receiver; legacy mode otherwise prompts without echo (not used with --pair)')
     transfer.add_argument('--diagnostics', action='store_true', help='Print numeric timing counters to stderr (no token or file paths)')
     transfer.add_argument('--socket-buffer', type=int, help='Experimental socket buffer bytes, 4096..4194304; OS default if omitted')
     transfer.add_argument('--chunk-size', type=int, default=65536, help='Experimental DATA size, 4096..65536 (default 65536)')
     transfer.add_argument('--pipeline-files', action='store_true', help='Experimental: overlap each file ENTRY acknowledgement with DATA; at most two pending ACKs')
     args = parser.parse_args()
+    if args.command == 'transfer-ps5' and not args.start_receiver and any(value is not None for value in (args.sdk, args.receiver_elf, args.loader_port)):
+        parser.error('--sdk, --receiver-elf and --loader-port require --start-receiver')
     try:
         if args.command == 'prepare-fabric':
             from .fabric_remap import prepare_package
@@ -77,21 +85,40 @@ def main() -> int:
             import os
             from .network_transfer import NetworkRequest
             from .terminal_progress import TransferProgress
-            if args.pair:
-                from .receiver_manager import pair_receiver
-                paired = pair_receiver(args.host, getpass.getpass('PS5 receiver six-digit pairing code: '), args.control_port)
-                pairing, args.port = paired.key.hex(), paired.info.port
-            else:
-                pairing = os.environ.get(args.token_env) or getpass.getpass('Legacy PS5 receiver pairing token: ')
+            from .operations import CancellationToken
+            from .receiver_manager import Deployment, ReceiverConfiguration, pair_receiver
+            from .network_protocol import pairing_key
+            token = CancellationToken()
+            deployment: Deployment | None = None
             interactive = sys.stderr.isatty() and sys.stdout.isatty() and 'NO_COLOR' not in os.environ
             import json
             metrics: dict[str, int | float] = {}
             try:
                 with TransferProgress(interactive=interactive) as report:
-                    result = NetworkRequest(args.path, args.host, pairing, args.destination, args.port, args.name,
+                    if args.start_receiver:
+                        config = ReceiverConfiguration.load()
+                        deployment = Deployment()
+                        existing = os.environ.get(args.token_env)
+                        paired = deployment.start(args.host, args.sdk or config.sdk, args.receiver_elf or config.elf,
+                                                  args.loader_port if args.loader_port is not None else config.loader_port,
+                                                  args.port if args.port is not None else config.port,
+                                                  args.control_port if args.control_port is not None else config.control_port,
+                                                  token, existing_key=pairing_key(existing) if existing else None, progress=report)
+                        pairing, port = paired.key.hex(), paired.info.port
+                    elif args.pair:
+                        paired = pair_receiver(args.host, getpass.getpass('PS5 receiver six-digit pairing code: '),
+                                               args.control_port if args.control_port is not None else 9026, token)
+                        pairing, port = paired.key.hex(), paired.info.port
+                    else:
+                        pairing = os.environ.get(args.token_env) or getpass.getpass('Legacy PS5 receiver pairing token: ')
+                        port = args.port if args.port is not None else 9025
+                    result = NetworkRequest(args.path, args.host, pairing, args.destination, port, args.name,
                                             args.socket_buffer, args.chunk_size, args.pipeline_files).run(
-                        report, diagnostics=metrics.update if args.diagnostics else None)
+                        report, cancellation=token, diagnostics=metrics.update if args.diagnostics else None)
             finally:
+                token.cancel()
+                if deployment is not None:
+                    deployment.close()  # Local SDK connection only; no remote STOP.
                 if args.diagnostics:
                     print('sender_metrics ' + json.dumps(metrics, sort_keys=True), file=sys.stderr)
             if args.diagnostics and result.receiver_metrics is not None:
@@ -148,7 +175,7 @@ def main() -> int:
                       prepare_fabric=args.prepare_fabric, remap_java=args.remap_java)
                 print(f'Package validated: {args.output}\n' + INSTRUCTIONS)
         return 0
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, OperationCancelled):
         print('LAN transfer interrupted; local files retained. If publication started, inspect the PS5 import folder.'
               if args.command == 'transfer-ps5' else 'Build cancelled; no package published.', file=sys.stderr)
         return 130
