@@ -71,7 +71,11 @@ Legacy PDLAN/1 receivers still use the CLI's hidden 64-character token prompt or
 `PLAYDEN_PS5_TOKEN`. The current GUI has no manual long-token field.
 
 After transfer, inspect the exact package paths printed in the success receipts, then manually select the corresponding
-folder in Playden's **Play from Import Folder** flow. Do not move files into or
+folder in Playden's **Play from Import Folder** flow. Builds with folder recipe
+detection offer its root `recipe.json`: **Use recipe** applies the launch settings
+and replaces existing settings; **Skip** preserves custom settings. Older builds
+can use the [manual configuration](USAGE.md#playden-import).
+Do not move files into or
 modify Playden-managed game directories. Launch compatibility is separate from
 file-transfer validation; owner-reported successful launches do not guarantee every instance will work.
 

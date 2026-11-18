@@ -123,6 +123,10 @@ class ReleaseGuiTests(unittest.TestCase):
                 with self.subTest(loader=loader, layout=layout, privacy=privacy):
                     root = self.root / f'{loader}-{layout}-{privacy}'
                     instance, metadata, _ = installed(root / 'source', '26.3', '0.20.1', layout)
+                    official = json.loads((Path(__file__).parent / 'fixtures/26.3.json').read_text())
+                    metadata['arguments']['default-user-jvm'] = official['arguments']['default-user-jvm']
+                    if layout == 'official':
+                        (root / 'source/versions/26.3/26.3.json').write_text(json.dumps(metadata))
                     if loader == 'Vanilla' and layout != 'official':
                         (instance / 'mmc-pack.json').write_text(json.dumps({'components': [{'uid': 'net.minecraft', 'version': '26.3'}]}))
                     elif loader == 'Vanilla':
@@ -154,6 +158,13 @@ class ReleaseGuiTests(unittest.TestCase):
                     left = {p.relative_to(output): p.read_bytes() for p in output.rglob('*') if p.is_file()}
                     right = {p.relative_to(cli_output): p.read_bytes() for p in cli_output.rglob('*') if p.is_file()}
                     self.assertEqual(left, right)
+                    from minecraft_playden import arguments, recipe
+                    words = arguments.parse_argfile((output / 'playden.args').read_text())
+                    self.assertNotIn('-XX:+UseZGC', words)
+                    for option in ['-Xms2G', '-Xmx4G', '-XX:+AlwaysPreTouch',
+                                   '-XX:+UseCompactObjectHeaders', '-XX:+UseStringDeduplication']:
+                        self.assertIn(option, words)
+                    self.assertEqual(json.loads((output / 'recipe.json').read_text()), recipe.generate('Minecraft 26.3'))
                     self.assertEqual(validate(output), [])
                     self.assertEqual(check_package(output).kind, 'launch-package')
                     self.assertEqual((output / 'instances/default/minecraft/saves/World/level.dat').exists(), True)

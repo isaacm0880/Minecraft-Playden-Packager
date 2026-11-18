@@ -150,7 +150,9 @@ See [receiver setup and physical testing](PS5_LAN_TRANSFER.md).
 ## Playden import
 
 Use your installed Playden version's supported local-game/folder flow for the copied
-package, then configure manually:
+package. On builds with game-folder recipe detection, choose **Use recipe** when
+the root `recipe.json` is offered. This replaces the game's current settings;
+choose **Skip** to keep custom settings. If no recipe is offered, configure manually:
 
 ```text
 Playden configuration:
@@ -160,7 +162,8 @@ Playden configuration:
 Note: Online play limited to offline mode servers, authentication is not yet implemented
 ```
 
-Internal recipes remain part of validation, not a promised Playden UI feature.
+Discovery is verified on Playden's `develop` branch; older builds retain the manual
+configuration above. See [recipe details and verification](PLAYDEN-RECIPES.md).
 [Tested configurations and limits](COMPATIBILITY.md) · [Troubleshooting](TROUBLESHOOTING.md)
 
 ## Main window and advanced settings

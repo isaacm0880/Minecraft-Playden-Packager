@@ -116,7 +116,9 @@ check is a blocker for that self-build, not a reason to bypass the builder's gat
 ## Playden configuration
 
 Follow [usage](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/v0.1.0/docs/USAGE.md), then add the copied package through your installed
-Playden's supported local-game flow and configure manually:
+Playden's supported local-game flow. Accept the offered `recipe.json` on builds
+with folder recipe detection (this replaces current settings; Skip keeps them).
+If no recipe is offered, configure manually:
 
 ```text
 Playden configuration:
@@ -126,5 +128,6 @@ Playden configuration:
 Note: Online play limited to offline mode servers, authentication is not yet implemented
 ```
 
-The generated internal recipe artifact remains validated but requires no upload
-workflow. Installing the packager does not install Playden, a PS5 payload or Minecraft.
+The generated root recipe is validated and travels with USB and LAN packages.
+See [recipe discovery and version limits](PLAYDEN-RECIPES.md).
+Installing the packager does not install Playden, a PS5 payload or Minecraft.

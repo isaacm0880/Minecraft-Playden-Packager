@@ -3,7 +3,6 @@
 "-XX:+UseCompactObjectHeaders"
 "-XX:+AlwaysPreTouch"
 "-XX:+UseStringDeduplication"
-"-XX:+UseZGC"
 "-XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump"
 "-XX:StackShadowPages=32"
 "--enable-native-access=ALL-UNNAMED"

@@ -9,7 +9,12 @@ import pytest
 from minecraft_playden.cli import main
 from minecraft_playden.exporter import INSTRUCTIONS
 
-EXPECTED = '''Playden configuration:
+EXPECTED = '''Import this package folder in Playden. On builds with game-folder recipe detection,
+choose Use recipe when offered the included recipe.json. Accepting it replaces
+the game's current settings; choose Skip to keep your custom settings.
+
+If no recipe is offered, configure these settings manually:
+Playden configuration:
   Program: java/bin/java.exe
   Launch arguments: @../../playden.args
 
@@ -71,11 +76,14 @@ def test_current_guides_have_exact_configuration_and_no_obsolete_workflows():
     root = Path(__file__).resolve().parents[1]
     guides = ['README.md', 'docs/INSTALLATION.md', 'docs/USAGE.md']
     for guide in guides:
-        assert EXPECTED in (root / guide).read_text(encoding="utf-8"), guide
+        text = (root / guide).read_text(encoding="utf-8")
+        manual = 'Playden configuration:' + EXPECTED.split('Playden configuration:', 1)[1]
+        assert manual in text, guide
+        assert 'recipe.json' in text and 'Skip' in text, guide
     for guide in [root / 'README.md', *sorted((root / 'docs').glob('*.md'))]:
         text = guide.read_text(encoding="utf-8").casefold()
-        for removed in ('import recipe', 'recipe → import', 'recipe > import', 'web recipe import',
-                        '--source microsoft', '--client-id', '--auth-method', 'authentication.md'):
+        for removed in ('recipe → import', 'recipe > import', '--source microsoft',
+                        '--client-id', '--auth-method', 'authentication.md'):
             assert removed not in text, (guide, removed)
 
 

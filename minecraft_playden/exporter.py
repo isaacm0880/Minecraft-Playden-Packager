@@ -15,7 +15,12 @@ from .volumes import publish_without_replace
 from .operations import CancellationToken
 from .progress import Progress, ProgressCallback
 
-INSTRUCTIONS = '''Playden configuration:
+INSTRUCTIONS = '''Import this package folder in Playden. On builds with game-folder recipe detection,
+choose Use recipe when offered the included recipe.json. Accepting it replaces
+the game's current settings; choose Skip to keep your custom settings.
+
+If no recipe is offered, configure these settings manually:
+Playden configuration:
   Program: java/bin/java.exe
   Launch arguments: @../../playden.args
 

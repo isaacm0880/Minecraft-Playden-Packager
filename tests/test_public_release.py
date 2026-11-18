@@ -30,7 +30,7 @@ class PublicReleaseTests(unittest.TestCase):
                 output = Path(temporary)
                 bundle_documentation(ROOT, output, macos=macos)
                 for name in ('README.md', 'INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md',
-                             'TROUBLESHOOTING.md', 'CHANGELOG.md', 'THIRD_PARTY.md', 'LICENSE'):
+                             'TROUBLESHOOTING.md', 'PLAYDEN-RECIPES.md', 'CHANGELOG.md', 'THIRD_PARTY.md', 'LICENSE'):
                     self.assertTrue((output / name).is_file(), name)
                 self.assertEqual((output / 'LICENSE').read_bytes(), (ROOT / 'LICENSE').read_bytes())
                 self.assertEqual((output / 'README-MACOS.md').exists(), macos)

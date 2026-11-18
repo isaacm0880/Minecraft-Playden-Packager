@@ -133,13 +133,14 @@ def argument_lists(doc: dict[str, Any]) -> dict[str, list[Any]]:
     args = doc.get('arguments', {})
     if not isinstance(args, dict) or set(args) - {'jvm', 'game', 'default-user-jvm'}:
         raise ValueError('Unsupported Fabric arguments metadata')
-    result = {'jvm': copy.deepcopy(args.get('jvm', [])), 'game': copy.deepcopy(args.get('game', []))}
+    result = {section: copy.deepcopy(args.get(section, []))
+              for section in ('default-user-jvm', 'jvm', 'game')}
     if any(not isinstance(value, list) for value in result.values()):
         raise ValueError('Fabric argument sections must be lists')
     extras = doc.get('+jvmArgs', [])
     if not isinstance(extras, list):
         raise ValueError('Fabric +jvmArgs must be a list')
-    result['jvm'] = copy.deepcopy(args.get('default-user-jvm', [])) + result['jvm'] + extras
+    result['jvm'] += extras
     if 'minecraftArguments' in doc:
         if not isinstance(doc['minecraftArguments'], str):
             raise ValueError('Invalid installed game argument string')
@@ -160,7 +161,7 @@ def argument_lists(doc: dict[str, Any]) -> dict[str, list[Any]]:
                 stripped = re.sub(r'\$\{[^}]+\}', 'PLACEHOLDER', portable)
                 if (any(c in stripped for c in ('/', '\\', '\n', '\r', '\x00')) or (':' in stripped and not stripped.startswith('-XX:'))
                         or word.startswith(('@', '-javaagent', '-agent', '-Djava.library.path', '-Dorg.lwjgl.librarypath'))
-                        or (section == 'jvm' and (not word.startswith('-') or word in ('-cp', '-classpath', '--class-path')))):
+                        or (section != 'game' and (not word.startswith('-') or word in ('-cp', '-classpath', '--class-path')))):
                     raise ValueError(f'Unsupported or nonportable Fabric {section} argument: {word}')
     game_words = []
     for value in result['game']:
@@ -277,11 +278,11 @@ def derive(base: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
             if required_major > java_major(result):
                 result['javaVersion'] = copy.deepcopy(doc['javaVersion'])
         args = argument_lists(doc)
-        for section in ('jvm', 'game'):
+        for section in ('default-user-jvm', 'jvm', 'game'):
             if 'minecraftArguments' in doc and section == 'game':
                 result['arguments']['game'] = args['game']
             else:
-                result['arguments'][section] += args[section]
+                result['arguments'].setdefault(section, []).extend(args[section])
         if not isinstance(doc.get('libraries', []), list) or not isinstance(doc.get('+libraries', []), list):
             raise ValueError('Invalid Fabric libraries')
         libs = doc.get('libraries', []) + doc.get('+libraries', [])

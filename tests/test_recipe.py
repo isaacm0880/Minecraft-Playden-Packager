@@ -28,6 +28,8 @@ class RecipeTests(unittest.TestCase):
                                          'executable', 'architecture', 'graphics', 'community'})
         self.assertEqual(document['community'], {'format_version': 1, 'status': 'untested'})
         self.assertEqual(document['architecture'], 'pe64')
+        self.assertNotIn('environment', document)
+        self.assertLessEqual((self.root / 'recipe.json').stat().st_size, recipe.MAX_RECIPE_BYTES)
         entry = document['launch_entries'][0]
         self.assertNotIn('working_directory', entry)
         self.assertEqual((self.root / entry['executable']).parent, self.root / 'java/bin')
@@ -124,6 +126,9 @@ class RecipeTests(unittest.TestCase):
         self.assertTrue(recipe.validate(self.root, 'Minecraft 1.21'))
 
     def test_write_does_not_overwrite(self):
+        custom = recipe.generate('Custom Minecraft')
+        custom['launch_entries'][0]['arguments'] = '@my-custom.args'
+        self.save(custom)
         original = (self.root / 'recipe.json').read_bytes()
         with self.assertRaises(FileExistsError):
             recipe.write(self.root, 'Minecraft 1.21')

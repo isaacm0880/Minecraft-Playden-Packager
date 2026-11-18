@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Omit ZGC from automatic JVM defaults while preserving explicit JVM additions.
+  Keep supported metadata defaults and gate compact object headers by Java version.
+- Verify the existing root `recipe.json` against Playden's new folder import
+  implementation, expand package/transfer tests, and explain Use recipe / Skip
+  with manual setup for older Playden builds. See [recipe details](docs/PLAYDEN-RECIPES.md).
+
 ## v0.4.0-beta.2 — 2026-11-17
 
 Experimental source-only beta from `feat/ps5-network-transfer`. Python version:

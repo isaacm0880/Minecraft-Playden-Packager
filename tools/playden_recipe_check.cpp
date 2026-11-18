@@ -3,6 +3,8 @@
 #include "runtime/community_rules.h"
 #include "runtime/game_settings.h"
 #include "runtime/prospero_profile.h"
+#include "community/recipe_import.h"
+#include "stores/local/library_source.h"
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -12,6 +14,15 @@ int main(int argc, char** argv) {
     std::ifstream file(argv[1]);
     if (!file) return 2;
     const std::string text((std::istreambuf_iterator<char>(file)), {});
+    // The folder discovery path uses this same import preparation, including
+    // field allowlists, size limits, serialization and community refusals.
+    if (std::string(playden::stores::local::kFolderRecipeName) != "recipe.json" ||
+        text.size() > playden::stores::local::kMaxFolderRecipeBytes) return 1;
+    std::string import_error;
+    if (!playden::community::PrepareImportedRecipe(text, &import_error)) {
+        std::cerr << import_error << '\n';
+        return 1;
+    }
     namespace rt = playden::runtime;
     rt::GameRecipe game;
     rt::CommunityRecipe community;

@@ -106,7 +106,10 @@ verification, failures and cancellation cannot authorise cleanup of that package
 ## Configure the game in Playden
 
 Packages are copied under `playden/import/<package-name>/`. Use the supported local
-game/folder import in Playden, then select the executable and arguments below.
+game/folder import in Playden. On builds with game-folder recipe detection, accept
+the offered `recipe.json` to set the launch configuration. Accepting replaces the
+game's current settings; choose **Skip** to retain your custom settings.
+If no recipe is offered, configure the executable and arguments below manually.
 
 ```text
 Playden configuration:
@@ -116,8 +119,8 @@ Playden configuration:
 Note: Online play limited to offline mode servers, authentication is not yet implemented
 ```
 
-Configure these settings manually. Included `recipe.json` file cannot be imported yet,
-however it is planned to be introduced into playden eventually. 
+Recipe discovery is verified against Playden's `develop` source, not its current
+`main` release line. See [the recipe contract and manual checks](docs/PLAYDEN-RECIPES.md).
 
 ## Troubleshooting and bug reports
 

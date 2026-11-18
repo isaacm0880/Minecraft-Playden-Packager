@@ -25,6 +25,8 @@ class TransferTests(unittest.TestCase):
         self.usb.mkdir()
         (self.source / 'package.json').write_text('{"fixture":true}')
         (self.source / 'playden.args').write_text('fixture arguments')
+        from minecraft_playden import recipe
+        recipe.write(self.source, 'Minecraft fixture')
         (self.source / 'libraries').mkdir()
         (self.source / 'libraries/data.jar').write_bytes(b'fixture-content-' * 12000)
         (self.source / 'instances/default/minecraft').mkdir(parents=True)
@@ -61,6 +63,7 @@ class TransferTests(unittest.TestCase):
         result = self.request.run(events.append)
         self.assertEqual(result.destination.resolve(), (self.usb / 'playden/import/Minecraft Package').resolve())
         self.assertEqual(self.snapshot(result.destination), self.original)
+        self.assertEqual((result.destination / 'recipe.json').read_bytes(), self.original['recipe.json'])
         self.assertTrue((result.destination / 'instances/default/minecraft').is_dir())
         self.assertEqual(result.files, len(self.original))
         self.assertEqual(result.bytes_copied, sum(len(v) for v in self.original.values()))

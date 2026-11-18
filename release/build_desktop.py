@@ -79,7 +79,7 @@ def licenses(root: Path, stage: Path) -> None:
 
 def bundle_documentation(root: Path, destination: Path, macos: bool = False) -> None:
     """Retain the installation guide's local links and licence/credit notices."""
-    for name in ('INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md', 'TROUBLESHOOTING.md',
+    for name in ('INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md', 'TROUBLESHOOTING.md', 'PLAYDEN-RECIPES.md',
                  'PS5_LAN_TRANSFER.md', 'PS5_LAN_PERFORMANCE.md', 'FTP_FEASIBILITY.md', 'PS5_RECEIVER_SHUTDOWN.md', 'PS5_RECEIVER_MANAGER.md'):
         text = (root / 'docs' / name).read_text(encoding='utf-8')
         text = text.replace('../ps5/receiver/PROTOCOL.md', 'receiver/PROTOCOL.md')
@@ -91,7 +91,12 @@ def bundle_documentation(root: Path, destination: Path, macos: bool = False) -> 
         shutil.copyfile(root / 'docs/benchmarks' / name, destination / 'benchmarks' / name)
     shutil.copyfile(root / 'docs/INSTALLATION.md', destination / 'README.md')
     for name in ('CHANGELOG.md', 'THIRD_PARTY.md', 'LICENSE'):
-        shutil.copyfile(root / name, destination / name)
+        if name == 'CHANGELOG.md':
+            text = (root / name).read_text(encoding='utf-8')
+            text = text.replace('docs/PLAYDEN-RECIPES.md', 'PLAYDEN-RECIPES.md')
+            (destination / name).write_text(text, encoding='utf-8')
+        else:
+            shutil.copyfile(root / name, destination / name)
     if macos:
         shutil.copyfile(root / 'docs/INSTALLATION.md', destination / 'README-MACOS.md')
 

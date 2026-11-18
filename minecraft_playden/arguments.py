@@ -11,6 +11,30 @@ def quote(value: str) -> str:
     return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r') + '"'
 
 
+def default_jvm(metadata: dict[str, Any]) -> list[str]:
+    """Adapt automatic defaults only; installed/user JVM additions stay intact."""
+    from .metadata import java_major
+    major = java_major(metadata)
+    result = []
+    for item in metadata['arguments'].get('default-user-jvm', []):
+        if isinstance(item, str):
+            words = [item]
+        elif allowed(item):
+            value = item['value']
+            words = value if isinstance(value, list) else [value]
+        else:
+            continue
+        for word in words:
+            if word == '-XX:+UseZGC':
+                continue
+            # JEP 450/519: experimental in 24, a product option from 25.
+            if word == '-XX:+UseCompactObjectHeaders' and major < 25:
+                if major != 24 or '-XX:+UnlockExperimentalVMOptions' not in result:
+                    continue
+            result.append(word)
+    return result
+
+
 def generate(metadata: dict[str, Any], classpath: list[str], prefix: str, username: str = 'Player',
              profile: str = DEFAULT_PROFILE, *, metadata_adapter: bool = True) -> str:
     check_profile(metadata, profile)
@@ -46,6 +70,9 @@ def generate(metadata: dict[str, Any], classpath: list[str], prefix: str, userna
         return re.sub(r'\$\{([^}]+)\}', replace, value)
     args = [] if metadata_adapter and metadata['arguments'].get('default-user-jvm') else ['-Xmx4G']
     for section in (('default-user-jvm', 'jvm', 'game') if metadata_adapter else ('jvm', 'game')):
+        if section == 'default-user-jvm':
+            args.extend(expand(word) for word in default_jvm(metadata))
+            continue
         if section == 'game':
             # Use the proven flat native directory instead of Mojang's extraction subdirectory.
             if logging is not None:

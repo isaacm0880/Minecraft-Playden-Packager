@@ -1,4 +1,7 @@
-"""Minimal format-1 recipe artifacts, retained for package compatibility."""
+"""Format-1 recipe at the game folder root, discovered by Playden on import.
+
+See docs/PLAYDEN-RECIPES.md for the verified upstream contract and precedence.
+"""
 import json
 import re
 import unicodedata
