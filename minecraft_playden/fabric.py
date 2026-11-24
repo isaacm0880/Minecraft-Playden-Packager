@@ -44,7 +44,7 @@ def library(raw: dict[str, Any]) -> dict[str, Any]:
         raise ValueError('Invalid Fabric artifact metadata')
     if artifact is not None and not isinstance(artifact.get('url'), str):
         raise ValueError('Invalid Fabric artifact URL')
-    if artifact is None:
+    if artifact is None and not result.get('natives'):
         repository = result.get('url', 'https://maven.fabricmc.net/')
         if not isinstance(repository, str):
             raise ValueError('Invalid Fabric repository URL')
@@ -54,13 +54,15 @@ def library(raw: dict[str, Any]) -> dict[str, Any]:
             if field in result:
                 artifact[field] = result[field]
         result['downloads'] = {'artifact': artifact}
-    elif 'path' not in artifact:
+    elif artifact is not None and 'path' not in artifact:
         parsed = urlsplit(artifact.get('url', ''))
         relative = parsed.path.lstrip('/')
+        if parsed.hostname in ('repo1.maven.org', 'repo.maven.apache.org') and relative.startswith('maven2/'):
+            relative = relative.removeprefix('maven2/')
         # Prism encodes LWJGL/Mojang native classifiers in artifact names.
         # Keep the exact version and use the published Maven file's coordinate.
         group = result['name'].split(':')[0]
-        if group in ('org.lwjgl', 'com.mojang') and parsed.hostname == 'libraries.minecraft.net':
+        if relative != path and group in ('org.lwjgl', 'com.mojang') and parsed.hostname == 'libraries.minecraft.net':
             parts = relative.split('/')
             prefix = group.split('.')
             if len(parts) != len(prefix) + 3 or parts[:len(prefix)] != prefix:
@@ -78,17 +80,45 @@ def library(raw: dict[str, Any]) -> dict[str, Any]:
         if relative != path:
             raise ValueError('Fabric artifact URL does not match its Maven path')
         artifact['path'] = path
-    elif artifact.get('path') != path:
+    elif artifact is not None and artifact.get('path') != path:
         raise ValueError('Fabric library path does not match its Maven coordinate')
-    if not isinstance(artifact.get('url'), str) or not artifact['url'].startswith('https://'):
-        raise ValueError('Fabric artifact URLs must use HTTPS')
-    if 'sha1' in artifact and (not isinstance(artifact['sha1'], str) or not re.fullmatch('[0-9a-f]{40}', artifact['sha1'])):
-        raise ValueError('Invalid Fabric artifact checksum')
-    if 'size' in artifact and (type(artifact['size']) is not int or artifact['size'] <= 0):
-        raise ValueError('Invalid Fabric artifact size')
-    safe_path(Path('/fabric-libraries'), path)
-    if result.get('natives'):
-        raise ValueError('Custom Fabric native classifier maps are unsupported; use Mojang Windows natives')
+    if artifact is not None:
+        if not artifact['url'].startswith('https://'):
+            raise ValueError('Fabric artifact URLs must use HTTPS')
+        if 'sha1' in artifact and (not isinstance(artifact['sha1'], str) or not re.fullmatch('[0-9a-f]{40}', artifact['sha1'])):
+            raise ValueError('Invalid Fabric artifact checksum')
+        if 'size' in artifact and (type(artifact['size']) is not int or artifact['size'] <= 0):
+            raise ValueError('Invalid Fabric artifact size')
+        safe_path(Path('/fabric-libraries'), path)
+    natives = result.get('natives', {})
+    classifiers = downloads.get('classifiers', {})
+    if not isinstance(natives, dict) or not isinstance(classifiers, dict):
+        raise ValueError('Invalid Fabric native classifier metadata')
+    normalized = {}
+    for classifier, spec in classifiers.items():
+        # Reuse the artifact validator, including coordinate/path binding and
+        # HTTPS, checksum and size checks. Classifiers never change the version.
+        if not isinstance(classifier, str) or not re.fullmatch(r'[A-Za-z0-9_.+-]+', classifier):
+            raise ValueError('Invalid Fabric native classifier name')
+        if not isinstance(spec, dict) or not isinstance(spec.get('url'), str):
+            raise ValueError('Invalid Fabric native artifact metadata')
+        name = ':'.join(result['name'].split(':')[:3]) + ':' + classifier
+        normalized[classifier] = library({'name': name, 'downloads': {'artifact': spec}})['downloads']['artifact']
+    for platform, template in natives.items():
+        if not isinstance(platform, str) or not isinstance(template, str):
+            raise ValueError('Invalid Fabric native classifier mapping')
+        selected = template.replace('${arch}', '64')
+        if selected not in normalized:
+            raise ValueError(f'Missing Fabric native classifier: {platform} {selected}')
+        if platform == 'windows' and not windows_library({'name': 'native:library:1:' + selected}):
+            raise ValueError('Fabric Windows native classifier must target x86-64')
+    if 'extract' in result:
+        extract = result['extract']
+        if (not isinstance(extract, dict) or not isinstance(extract.get('exclude', []), list)
+                or any(not isinstance(value, str) or not value for value in extract.get('exclude', []))):
+            raise ValueError('Invalid Fabric native extraction exclusions')
+    if classifiers:
+        result.setdefault('downloads', {})['classifiers'] = normalized
     return result
 
 
@@ -113,12 +143,13 @@ def merge_libraries(layers: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
     # collapse; two versions of one artifact in the same layer are ambiguous.
     result: dict[str, dict[str, Any]] = {}
     for index in reversed(range(len(layers))):
-        layer = coalesce(layers[index]) if index == 0 else layers[index]
+        layer = coalesce(layers[index]) if index == 0 else coalesce([
+            library(raw) for raw in layers[index] if windows_library(raw)])
         seen: dict[str, dict[str, Any]] = {}
         for raw in layer:
             if not windows_library(raw):
                 continue
-            value = library(raw) if index else copy.deepcopy(raw)
+            value = copy.deepcopy(raw)
             key, _ = coordinate(value.get('name', ''))
             if key in seen and seen[key] != value:
                 raise ValueError(f'Conflicting Fabric dependencies in one profile: {key}')
@@ -334,8 +365,7 @@ class FabricInstallation:
         in the worker, exactly as in plan(). This is not console verification.
         """
         layers = [doc.get('libraries', []) + doc.get('+libraries', []) for doc in self.profiles]
-        for raw in merge_libraries([[], *layers]):
-            spec = raw['downloads']['artifact']
+        for spec, _, _ in dependencies({'libraries': merge_libraries([[], *layers])}):
             if not safe_path(self.libraries, spec['path']).is_file() and not downloadable_artifact(spec):
                 raise ValueError(f'Fabric library missing: {spec["path"]}. Complete installation in the launcher first.')
 

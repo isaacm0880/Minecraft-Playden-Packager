@@ -43,12 +43,14 @@ def save(root, relative, data):
 def installed(root, game='1.20.1', loader='0.16.10', layout='prism', full_components=False, minimal_manifest=False, installed_lwjgl_version=None):
     # 26.2 is a synthetic version-generalisation regression, not captured metadata.
     fixture_game = '26.3' if game == '26.2' else game
-    profile = json.loads((FIXTURES / f'fabric/official-{fixture_game}-{loader}.json').read_text().replace(fixture_game, game))
-    component = json.loads((FIXTURES / f'fabric/prism-{fixture_game}-{loader}.json').read_text())
+    profile_path = FIXTURES / ('fabric/native-maps/fabric-1.18.2.json' if game == '1.18.2' else f'fabric/official-{fixture_game}-{loader}.json')
+    profile = json.loads(profile_path.read_text().replace(fixture_game, game))
+    component_game = '26.3' if game == '1.18.2' else fixture_game
+    component = json.loads((FIXTURES / f'fabric/prism-{component_game}-{loader}.json').read_text())
     # Real upstream metadata, synthetic JAR payloads; local hashes fit payloads.
     metadata = json.loads((FIXTURES / 'version.json').read_text())
     metadata['id'] = game
-    metadata['javaVersion']['majorVersion'] = 17 if game == '1.20.1' else 25
+    metadata['javaVersion']['majorVersion'] = 17 if game in ('1.18.2', '1.20.1') else 25
     client = (FIXTURES / 'client.jar').read_bytes()
     metadata['arguments']['game'] += ['--version', '${version_name}', '--userType', '${user_type}']
     if layout in ('prism', 'multimc'):
@@ -136,9 +138,23 @@ def installed(root, game='1.20.1', loader='0.16.10', layout='prism', full_compon
 
 
 class FabricLaunchTests(unittest.TestCase):
-    def build_fixture(self, root, game, loader, layout, exclude_saves=False, desktop=False, fallback=False, full_components=False, mutation=None, official_root=False, cli=False, minimal_manifest=False, installed_lwjgl_version=None, uncached_lwjgl=False):
+    def build_fixture(self, root, game, loader, layout, exclude_saves=False, desktop=False, fallback=False, full_components=False, mutation=None, official_root=False, cli=False, minimal_manifest=False, installed_lwjgl_version=None, uncached_lwjgl=False, native_maps=False):
         launcher = root / 'source'
         instance, base, profile = installed(launcher, game, loader, layout, full_components, minimal_manifest, installed_lwjgl_version)
+        if native_maps:
+            # Captured old classifier-map format on a Java-17 fixture: exercise
+            # packaging without lifting the real old versions' Java-8 blocker.
+            captured = json.loads((FIXTURES / 'fabric/native-maps/prism-1.18.2.json').read_text())
+            libraries = [lib for lib in captured['libraries'] if lib['name'].startswith('com.mojang:text2speech:')]
+            for lib in libraries:
+                for key, spec in [('artifact', lib['downloads']['artifact']), *lib['downloads'].get('classifiers', {}).items()]:
+                    payload = archive({'speech.dll': b'MZspeech'}) if key.startswith('natives-') else archive({'Speech.class': b'class'})
+                    spec.update(sha1=hashlib.sha1(payload).hexdigest(), size=len(payload))
+                    save(launcher, 'libraries/' + spec['url'].split('libraries.minecraft.net/')[1], payload)
+            path = launcher / f'meta/net.minecraft/{game}.json'
+            doc = json.loads(path.read_text())
+            doc['libraries'] = libraries
+            path.write_text(json.dumps(doc))
         if uncached_lwjgl:
             (launcher / 'meta/org.lwjgl3/3.4.3.json').unlink()
         if fallback:
@@ -177,7 +193,7 @@ class FabricLaunchTests(unittest.TestCase):
                 value = blobs[url]
             return io.BytesIO(value)
         def runtime(metadata, downloader, java):
-            self.assertEqual(metadata['javaVersion']['majorVersion'], 17 if game == '1.20.1' else 25)
+            self.assertEqual(metadata['javaVersion']['majorVersion'], 17 if game in ('1.18.2', '1.20.1') else 25)
             return install_runtime(metadata, downloader, java)
         selected = launcher if official_root else instance
         selected_version = profile['id'] if official_root else None
@@ -240,6 +256,13 @@ class FabricLaunchTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(any('meta.fabricmc.net/' in url for url in requested), fallback)
         return output, instance, data, base
+
+    def test_classifier_maps_build_through_cli_and_desktop(self):
+        for desktop in (False, True):
+            with self.subTest(desktop=desktop), tempfile.TemporaryDirectory() as temp:
+                output, _, _, _ = self.build_fixture(Path(temp), '1.18.2', '0.20.1', 'prism',
+                                                       native_maps=True, desktop=desktop, cli=not desktop)
+                self.assertEqual((output / 'natives/speech.dll').read_bytes(), b'MZspeech')
 
     def test_installed_profiles_build_and_validate_across_layouts_versions_and_save_policy(self):
         for game, loader in MATRIX:
