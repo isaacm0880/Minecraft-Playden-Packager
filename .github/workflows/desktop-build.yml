@@ -49,8 +49,26 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
               stream.write('sha=' + requested + '\n')
           PY
-  windows:
+  receiver:
     needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.9'
+      - run: python -m release.receiver --output dist/receiver
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Receiver-${{ needs.source.outputs.sha }}
+          if-no-files-found: error
+          path: dist/receiver/*
+  windows:
+    needs: [source, receiver]
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -65,6 +83,10 @@ jobs:
           architecture: x64
       - run: python -m pip install -r release/requirements.txt
       - run: python -m pip install --no-deps --no-build-isolation -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: Receiver-${{ needs.source.outputs.sha }}
+          path: dist/receiver
       - name: Windows path aliases and GUI worker completion regressions
         env:
           QT_QPA_PLATFORM: offscreen
@@ -72,6 +94,8 @@ jobs:
           python -c "from pathlib import Path; import tempfile; p=Path(tempfile.gettempdir()); print('Temporary path:', p); print('Resolved path:', p.resolve())"
           python -m pytest -vv --tb=long tests/test_gui.py::GuiTests::test_queue_summary_opens_parent_then_selected_successful_package tests/test_gui.py::GuiTests::test_usb_transfer_worker_reports_bytes_and_can_retry_after_failure tests/test_gui.py::GuiTests::test_transfer_result_alias_mismatch_finishes_and_retry_accepts_canonical_source tests/test_gui.py::GuiTests::test_open_shared_queue_parent_resolves_path_aliases tests/test_transfer.py::TransferTests::test_fast_copy_skips_destination_checksum_pass_but_keeps_validation tests/test_cleanup.py
       - run: python -m release.build_desktop --source-sha "${{ needs.source.outputs.sha }}" --output dist/windows
+        env:
+          PLAYDEN_RECEIVER_BUNDLE: dist/receiver
       - uses: actions/upload-artifact@v4
         with:
           name: Windows-x64-${{ needs.source.outputs.sha }}
@@ -83,7 +107,7 @@ jobs:
             dist/windows/build-metadata.json
             dist/windows/content-audit.json
   linux:
-    needs: source
+    needs: [source, receiver]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     container:
@@ -101,7 +125,13 @@ jobs:
       - run: sh release/linux-system-deps.sh
       - run: python -m pip install -r release/requirements.txt
       - run: python -m pip install --no-deps --no-build-isolation -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: Receiver-${{ needs.source.outputs.sha }}
+          path: dist/receiver
       - run: python -m release.build_desktop --source-sha "${{ needs.source.outputs.sha }}" --output dist/linux
+        env:
+          PLAYDEN_RECEIVER_BUNDLE: dist/receiver
       - name: Packaged X11 startup in a clean Linux container
         run: xvfb-run -a env QT_QPA_PLATFORM=xcb dist/linux/frozen/MinecraftPlaydenPackager/MinecraftPlaydenPackager --smoke-test
       - uses: actions/upload-artifact@v4
@@ -117,7 +147,7 @@ jobs:
   macos:
     if: github.event_name == 'workflow_dispatch' && inputs.build_macos
     continue-on-error: true
-    needs: source
+    needs: [source, receiver]
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +174,13 @@ jobs:
           architecture: ${{ matrix.python_architecture }}
       - run: python -m pip install -r release/requirements.txt
       - run: python -m pip install --no-deps --no-build-isolation -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: Receiver-${{ needs.source.outputs.sha }}
+          path: dist/receiver
       - run: python -m release.build_desktop --source-sha "${{ needs.source.outputs.sha }}" --architecture "${{ matrix.architecture }}" --output dist/macos
+        env:
+          PLAYDEN_RECEIVER_BUNDLE: dist/receiver
       - name: Native Cocoa packaged GUI smoke
         run: python -m release.smoke "dist/macos/frozen/Minecraft Playden Packager.app/Contents/MacOS/MinecraftPlaydenPackager" --native-cocoa
       - uses: actions/upload-artifact@v4

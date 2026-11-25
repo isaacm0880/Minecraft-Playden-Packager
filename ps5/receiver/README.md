@@ -3,6 +3,13 @@
 Build with `make PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk`. The result is
 `minecraft_playden_receiver.elf`; building never deploys it.
 
+For a desktop release candidate, use `python -m release.receiver --output
+NEW_DIRECTORY` from the repository root on Linux. It verifies a pinned SDK
+v0.45 archive, builds twice for byte reproducibility and emits a source/SDK/ELF
+manifest. The desktop workflow bundles that exact pair into every native
+candidate. Local `make` builds remain useful for development but are not
+substitutes for the manifest-bound release artifact.
+
 See [setup, recovery and manual physical test commands](../../docs/PS5_LAN_TRANSFER.md)
 and the [wire contract](PROTOCOL.md). The [GUI Receiver Manager](../../docs/PS5_RECEIVER_MANAGER.md) can deploy only on an explicit Start click and stop only an authenticated idle receiver. The payload's only write destinations
 are the import roots `/data/playden-import/`, `/mnt/usb0/playden/import/` and

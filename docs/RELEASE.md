@@ -67,6 +67,8 @@ on a native host using its pinned Python and `release/requirements.txt`:
 ```sh
 python -m pip install -r release/requirements.txt
 python -m pip install --no-deps --no-build-isolation -e .
+python -m release.receiver --output ../new-receiver-candidate
+export PLAYDEN_RECEIVER_BUNDLE=../new-receiver-candidate
 python -m release.build_desktop --source-sha EXACT_PUBLIC_COMMIT --output ../new-candidate-output
 ```
 
@@ -74,6 +76,9 @@ Use a new output directory every time. Linux additionally requires the exact
 container image from `release/toolchain.json` and `release/linux-system-deps.sh`;
 Windows/macOS need matching native hosts. Do not cross-compile an archive and
 claim it passed a native smoke test. Preserve failed attempts and existing archives.
+Build the receiver once on Linux, then use its unchanged ELF and manifest for
+every desktop target from that exact source commit. The source approval gate
+must be updated through review before these commands can produce a candidate.
 After a Linux container build, run the frozen executable under X11 with
 `xvfb-run -a env QT_QPA_PLATFORM=xcb PATH_TO_FROZEN_EXECUTABLE --smoke-test`.
 macOS also requires `python -m release.smoke PATH_TO_FROZEN_EXECUTABLE --native-cocoa`.

@@ -78,6 +78,15 @@ def audit_tree(root: Path, executable: Path, expected: dict) -> dict:
     for name, checksum in branding['files'].items():
         if hashlib.sha256((icon_root / name).read_bytes()).hexdigest() != checksum:
             raise ValueError(f'Bundled official icon mismatch: {name}')
+    if 'receiver' in expected:
+        receiver_root = infos[0].parent / 'receiver'
+        receiver = json.loads((receiver_root / 'receiver-manifest.json').read_text(encoding='utf-8'))
+        for key, value in expected['receiver'].items():
+            if receiver.get(key) != value:
+                raise ValueError(f'Bundled receiver provenance mismatch: {key}')
+        elf = receiver_root / 'minecraft_playden_receiver.elf'
+        if hashlib.sha256(elf.read_bytes()).hexdigest() != receiver['elf_sha256']:
+            raise ValueError('Bundled receiver ELF checksum mismatch')
     windows_icon_verified = None
     if executable.suffix.lower() == '.exe':
         from .verify_windows_icon import verify

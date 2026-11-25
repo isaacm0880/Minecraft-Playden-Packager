@@ -1,5 +1,9 @@
 # Next major release readiness audit
 
+The active follow-up and current decisions are in
+[release preparation](RELEASE-PREPARATION.md). The findings below record the
+`4584b3c` baseline and should not be read as a fresh audit of later edits.
+
 Audited 2026-11-25 against verified development baseline
 `4584b3cd8622ebcc89e3e1b029e61ec8564a93b1`. This is a source/configuration audit,
 not a new Windows/macOS build, PS5 run, security certification or redistribution

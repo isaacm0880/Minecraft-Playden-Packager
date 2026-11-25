@@ -104,10 +104,15 @@ full tests, all type targets, privacy/content audits and frozen smoke tests:
 python3.11 -m venv .venv
 .venv/bin/python -m pip install -r release/requirements.txt
 .venv/bin/python -m pip install --no-deps --no-build-isolation -e .
+PLAYDEN_RECEIVER_BUNDLE=/path/to/receiver-candidate \
 .venv/bin/python -m release.build_desktop --source-sha "$(git rev-parse HEAD)" --output ../my-macos-candidate
 ```
 
 Run this on the actual Mac architecture; cross-compilation is not a substitute.
+The receiver candidate must first be built on Linux from the same approved
+source commit with `python -m release.receiver --output NEW_DIRECTORY`, then
+copied unchanged with its manifest to the Mac. The source approval gate must
+accept that reviewed commit before a binary candidate can be built.
 The output is an experimental local ZIP containing an ad-hoc signed app, not a
 notarized or supported release. Gatekeeper, Finder, Cocoa startup and external-drive
 permissions remain unverified. Do not disable system security globally. A failed

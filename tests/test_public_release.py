@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from release.provenance import application_hash, candidate_source, check_source
+from release.provenance import candidate_source, check_source
 from release.public_audit import audit_paths, SYNTHETIC_CLIENT
 from release.verify_pair import write_report
 from release.build_desktop import bundle_documentation
@@ -17,10 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 class PublicReleaseTests(unittest.TestCase):
     def test_unreleased_features_cannot_reuse_historical_release_approval(self):
         policy = json.loads((ROOT / 'release/source-policy.json').read_text(encoding="utf-8"))
-        self.assertNotEqual(application_hash(ROOT), policy['application_tree_sha256'])
-        # Exercise the source approval gate independently of Git ancestry: CI
-        # intentionally uses shallow checkouts, while ancestry has separate tests.
-        with patch('release.provenance.git', return_value='a' * 40), patch('release.provenance.subprocess.run'), self.assertRaisesRegex(ValueError, 'explicit source review is required'):
+        # A stale application hash must fail even after this source snapshot is
+        # eventually reviewed and the policy is legitimately updated.
+        stale = '0' * 64 if policy['application_tree_sha256'] != '0' * 64 else '1' * 64
+        with patch('release.provenance.application_hash', return_value=stale), patch('release.provenance.git', return_value='a' * 40), patch('release.provenance.subprocess.run'), self.assertRaisesRegex(ValueError, 'explicit source review is required'):
             check_source(ROOT, preview=True)
 
 
@@ -54,7 +54,8 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertNotIn('contents: write', workflow)
         self.assertIn("requested = candidate_source(", workflow)
         self.assertNotIn("  push:", workflow)
-        self.assertEqual(workflow.count('ref: ${{ needs.source.outputs.sha }}'), 4)
+        self.assertEqual(workflow.count('ref: ${{ needs.source.outputs.sha }}'), 5)
+        self.assertIn('Receiver-${{ needs.source.outputs.sha }}', workflow)
         for expected in ('windows-2022', 'macos-15-intel', 'architecture: arm64',
                          'release.verify_pair', 'SHA256SUMS', 'release.public_audit',
                          '--native-cocoa', 'QT_QPA_PLATFORM=xcb'):

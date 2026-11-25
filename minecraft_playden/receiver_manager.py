@@ -96,7 +96,9 @@ class ReceiverConfiguration:
         if deployer:
             candidates.insert(0, Path(deployer).resolve().parent.parent)
         default_sdk = os.environ.get('PS5_PAYLOAD_SDK') or str(next((p for p in candidates if p.is_dir()), candidates[-1]))
-        default_elf = Path(__file__).resolve().parent.parent / 'ps5/receiver/minecraft_playden_receiver.elf'
+        frozen = getattr(sys, '_MEIPASS', None)
+        default_elf = ((Path(frozen) / 'receiver/minecraft_playden_receiver.elf') if frozen
+                       else Path(__file__).resolve().parent.parent / 'ps5/receiver/minecraft_playden_receiver.elf')
         def port(key: str, default: int) -> int:
             try:
                 result = int(value(key, str(default)))
@@ -130,6 +132,17 @@ def _stop_local_process(process: subprocess.Popen[bytes]) -> None:
 def ensure_receiver_elf(sdk: Path, elf: Path, token: CancellationToken,
                         progress: ProgressCallback | None = None) -> None:
     """Build missing/stale source-tree receivers locally; never install tools."""
+    manifest_path = elf.parent / 'receiver-manifest.json'
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        if not elf.is_file() or hashlib.sha256(elf.read_bytes()).hexdigest() != manifest.get('elf_sha256'):
+            raise ReceiverError('Bundled receiver ELF checksum does not match its build manifest')
+        frozen = getattr(sys, '_MEIPASS', None)
+        if frozen:
+            build_info = json.loads((Path(frozen) / 'build-metadata.json').read_text(encoding='utf-8'))
+            if manifest.get('source_commit') != build_info.get('source_commit'):
+                raise ReceiverError('Bundled receiver ELF is from a different application source commit')
+        return
     source = elf.parent
     makefile = source / 'Makefile'
     inputs = [makefile, *source.rglob('*.c'), *source.rglob('*.h'), source.parent / 'diagnostic/recipe_check.h'] if makefile.is_file() else []

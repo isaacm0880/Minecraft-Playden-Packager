@@ -12,6 +12,8 @@ a = Analysis(
     [str(root / 'release/desktop_entry.py')],
     pathex=[str(root)],
     datas=[(str(stage / 'build-metadata.json'), '.'),
+           (str(stage / 'receiver/minecraft_playden_receiver.elf'), 'receiver'),
+           (str(stage / 'receiver/receiver-manifest.json'), 'receiver'),
            *[(str(icon_root / name), 'resources/icons') for name in icon_names],
            (str(root / 'minecraft_playden/resources/java8/Java8Launch.class'), 'minecraft_playden/resources/java8'),
            (str(root / 'minecraft_playden/resources/remap/FabricRemap.java'), 'minecraft_playden/resources/remap'),

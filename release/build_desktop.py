@@ -16,6 +16,7 @@ import zipfile
 from .audit import audit_tree
 from .public_audit import audit_source
 from .provenance import check_source, write_json
+from .receiver import ELF as RECEIVER_ELF, MANIFEST as RECEIVER_MANIFEST, verify as verify_receiver
 from .generate_icons import verify as verify_icons
 from minecraft_playden.branding import ICON_SIZES
 from minecraft_playden import __version__
@@ -86,6 +87,12 @@ def bundle_documentation(root: Path, destination: Path, macos: bool = False) -> 
         (destination / name).write_text(text, encoding='utf-8')
     (destination / 'receiver').mkdir()
     shutil.copyfile(root / 'ps5/receiver/PROTOCOL.md', destination / 'receiver/PROTOCOL.md')
+    notices = destination / 'receiver/notices'
+    notices.mkdir()
+    for source, name in (('ps5/receiver/vendor/LICENSE.md', 'sha-256-LICENSE.md'),
+                         ('ps5/receiver/vendor/bearssl/LICENSE.txt', 'BearSSL-LICENSE.txt'),
+                         ('ps5/receiver/vendor/README.md', 'VENDORED-SOURCES.md')):
+        shutil.copyfile(root / source, notices / name)
     (destination / 'benchmarks').mkdir()
     for name in ('lan-loopback-2026-11-16.jsonl', 'lan-profile-loopback-2026-11-16.jsonl'):
         shutil.copyfile(root / 'docs/benchmarks' / name, destination / 'benchmarks' / name)
@@ -116,6 +123,10 @@ def main() -> int:
     if args.architecture and args.architecture != architecture:
         parser.error('Runner/Python architecture does not match the requested native target')
     source = check_source(root, args.source_sha, args.allow_dirty_preview)
+    receiver_bundle = Path(os.environ['PLAYDEN_RECEIVER_BUNDLE']).resolve()
+    receiver = verify_receiver(root, receiver_bundle, source['source_commit'])
+    if receiver['source_dirty']:
+        raise ValueError('Release receiver was built from dirty source')
     audit_source(root)
     toolchain = json.loads((root / 'release/toolchain.json').read_text())
     if platform.python_version() != toolchain['python'][sys.platform]:
@@ -146,6 +157,11 @@ def main() -> int:
                    'dependencies': {name: packages.version(name) for name in
                                     ('PyInstaller', 'pyinstaller-hooks-contrib', 'PySide6', 'certifi', 'Pillow')}})
     source['branding'] = icons(root, stage)
+    source['receiver'] = {key: receiver[key] for key in ('source_commit', 'receiver_source_sha256',
+                          'sdk_archive_sha256', 'build_options', 'elf_sha256', 'elf_size')}
+    (stage / 'receiver').mkdir()
+    for name in (RECEIVER_ELF, RECEIVER_MANIFEST):
+        shutil.copyfile(receiver_bundle / name, stage / 'receiver' / name)
     write_json(stage / 'build-metadata.json', source)
     licenses(root, stage)
     env.update(PLAYDEN_RELEASE_STAGE=str(stage), PLAYDEN_TARGET_ARCH=architecture, SOURCE_DATE_EPOCH=str(source['source_commit_time']),
