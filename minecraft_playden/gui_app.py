@@ -589,12 +589,14 @@ class MainWindow(QMainWindow):
 
     def confirm_untested(self, requests: list[LocalBuildRequest]) -> bool:
         untested = [request.installation for request in requests
-                    if request.installation.compatibility.status in (Status.UNTESTED, Status.RETEST)]
+                    if request.installation.compatibility.status in (Status.UNTESTED, Status.RETEST, Status.PARTIAL)]
         if not untested:
             return True
         names = '\n'.join(f'• {item.name} ({item.loader_label}, {item.version})' for item in untested)
         warning = ('A selected configuration has a confirmed PS5 launch failure. Headless-prepared packages require physical retesting; no fix is PS5-verified.'
-                   if any(item.compatibility.status == Status.RETEST for item in untested) else UNTESTED_WARNING)
+                   if any(item.compatibility.status == Status.RETEST for item in untested) else
+                   'A selected configuration works only partially on PS5. Check its compatibility details before building.'
+                   if any(item.compatibility.status == Status.PARTIAL for item in untested) else UNTESTED_WARNING)
         answer = QMessageBox.warning(self, 'Build untested versions?', warning + '\n\n' + names,
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                      QMessageBox.StandardButton.No)

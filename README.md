@@ -185,6 +185,7 @@ and Vanilla 1.16 work in the reported configurations. Automatic recipe detection
 controller mappings, automatic Fabric preparation and default/loader artwork work.
 The old Fabric icon was retained Playden game data, resolved by removing that
 data; it was not a packager defect. See [the configuration-specific evidence](docs/COMPATIBILITY.md#physical-acceptance-update--2026-11-25).
-Vanilla 1.0 now has a validated LaunchWrapper package for physical testing; its
-PS5 acceptance and other issue #20 investigations remain pending. See
+Vanilla 1.0 is partially compatible on PS5: gameplay and controller input work
+after a version-specific Java2D workaround, while menu flashing and audio remain
+unresolved. Other issue #20 investigations remain open. See
 [legacy launch evidence and limits](docs/LEGACY-LAUNCH.md).

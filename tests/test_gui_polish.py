@@ -45,14 +45,14 @@ def test_ps5_buttons_have_style_minimum_height_on_first_show(preferences, font_s
         assert button.height() >= button.minimumSizeHint().height()
 
 
-@pytest.mark.parametrize('status,label', [(Status.TESTED, 'Works'), (Status.UNTESTED, 'Untested'),
+@pytest.mark.parametrize('status,label', [(Status.TESTED, 'Works'), (Status.PARTIAL, 'Partial'), (Status.UNTESTED, 'Untested'),
                                          (Status.BROKEN, 'Broken'), (Status.RETEST, 'Broken'),
                                          (Status.CANNOT_PACKAGE, 'Untested')])
 def test_display_labels_do_not_change_internal_policies_or_evidence(status, label):
     result = Compatibility(status, 'Detailed configuration evidence')
     assert result.label == label
     assert result.details == f'{status} — Detailed configuration evidence'
-    assert result.permits_build == (status in (Status.TESTED, Status.UNTESTED, Status.RETEST))
+    assert result.permits_build == (status in (Status.TESTED, Status.PARTIAL, Status.UNTESTED, Status.RETEST))
 
 
 def test_status_cell_tooltips_keep_evidence_and_unlisted_combinations_stay_untested(preferences, tmp_path):

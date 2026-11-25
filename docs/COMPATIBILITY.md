@@ -8,6 +8,7 @@ yet verified; there is no required macOS binary. See [installation](INSTALLATION
 | Status | Meaning |
 | --- | --- |
 | Works | A specific Minecraft version and loader combination has confirmed PS5 success; see its evidence and limits |
+| Partial | A specific configuration plays on PS5 but has a confirmed material limitation |
 | Untested | No applicable PS5 confirmation; packaging still requires supported metadata, dependencies and runtime |
 | Broken | A known launch failure or unresolved compatibility issue is recorded |
 
@@ -111,10 +112,10 @@ adding a version absent from a cached manifest.
 Java 8 packages now use a dedicated same-JVM bootstrap and manifest classpath,
 while retaining the required Windows x64 Java 8 runtime. Java 9+ continues to use
 `java.exe @../../playden.args`. The Java 8 packaging regressions cover Vanilla
-1.16 and Fabric 1.16/1.14.4; no PS5 compatibility rating is inferred from those
-builds. Vanilla 1.0's declared LaunchWrapper entry point is now supported for
-packaging, with a generated physical-test candidate; its PS5 status remains
-Untested. See [legacy entry-point evidence](LEGACY-LAUNCH.md). Forge remains unsupported.
+1.16 and Fabric 1.16/1.14.4. Vanilla 1.0's declared LaunchWrapper entry point
+is supported for packaging and physically plays with a version-specific Java2D
+workaround; its PS5 status is Partial because menu flashing and inaudible audio
+remain. See [legacy entry-point and sound evidence](LEGACY-LAUNCH.md). Forge remains unsupported.
 See [adapter limits, evidence and targeted physical tests](JAVA8-LAUNCH.md).
 
 Arbitrary patched client JARs, non-Fabric custom profiles, legacy tweaker/JAR-mod
@@ -144,7 +145,7 @@ This table tracks Minecraft Java Edition versions tested with **Playden on PS5**
 
 | Minecraft Version | Mod Loader | Loader Version | Status | Notes |
 |---|---|---|---|---|
-| 1.0 | Vanilla | N/A | Untested | Validated Java 8/LaunchWrapper package generated; physical PS5 startup and save/reload pending |
+| 1.0 | Vanilla | N/A | Partial | Java2D workaround resolves white screen; menu flashes, gameplay/controller work, save appears to work, audio inaudible |
 | 1.16 | Vanilla | N/A | Works | User-confirmed PS5 success with the Java 8 launch adapter |
 | 1.16 | Fabric | 0.20.1 | Works | Confirmed prepared Java 8 package: gameplay, controller mappings, world saving and reloading |
 | 1.14.4 | Fabric | 0.20.1 | Works | Confirmed prepared Java 8 package: gameplay, controller mappings, world saving and reloading |
@@ -160,6 +161,7 @@ For automatic GUI preparation and the original 1.20.1 failure investigation, see
 **Status key:**
 
 - Works — This version/loader combination has confirmed PS5 success within the recorded limits.
+- Partial — Playable with a confirmed material limitation.
 - Untested — No applicable physical PS5 result.
 - Broken — A known launch failure or unresolved issue is recorded.
 
@@ -183,9 +185,10 @@ not recorded, so those version-level reports do not promote an arbitrary loader
 identity in the exact-match compatibility registry. They do not certify every mod.
 
 [Issue #20](https://github.com/isaacm0880/Minecraft-Playden-Packager/issues/20)
-remains open: Vanilla 1.0 now packages through its validated declared dependency
-entry point, but its physical acceptance and other issue investigations remain
-outstanding. Successful Java 8 launches of other versions do not certify 1.0.
+remains open: Vanilla 1.0 packages through its validated declared dependency
+entry point and has a partial physical result. Menu flashing and audio remain
+unresolved; world reload was not confirmed. Perfect 1.0 compatibility is not a
+gate for the next stable packager release.
 
 ## Known Mod Compatibility
 

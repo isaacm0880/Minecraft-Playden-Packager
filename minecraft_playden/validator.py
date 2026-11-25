@@ -57,8 +57,14 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
         adapter = runtime_record.get('metadata_adapter', 0)
         if type(adapter) is not int or adapter not in (0, 1):
             raise ValueError('Unsupported package metadata adapter')
+        java2d = inventory.get('legacy_java2d', 0)
+        if type(java2d) is not int or java2d not in (0, 1):
+            raise ValueError('Unsupported legacy Java2D launch record')
         profile = inventory.get('launch_profile', profiles.DEFAULT_PROFILE)
         effective = profiles.effective_metadata(metadata, profile)
+        from .arguments import legacy_java2d_options
+        if java2d and not legacy_java2d_options(effective):
+            raise ValueError('Legacy Java2D workaround is not applicable to this package')
         client = profiles.client_path(metadata, profile)
         fabric_data = None
         if inventory.get('loader') is not None:
@@ -111,7 +117,7 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
         errors.extend(validate_natives(root, effective))
         if inventory['classpath'] != expected_cp:
             errors.append('Classpath does not match resolved Windows x64 dependencies')
-        if (root / 'playden.args').read_text(encoding='utf-8') != generate(effective if fabric_data is not None else metadata, inventory['classpath'], '../../', inventory['username'], profile, metadata_adapter=adapter == 1):
+        if (root / 'playden.args').read_text(encoding='utf-8') != generate(effective if fabric_data is not None else metadata, inventory['classpath'], '../../', inventory['username'], profile, metadata_adapter=adapter == 1, legacy_java2d=bool(java2d)):
             errors.append('Invalid portable arguments: playden.args')
         launch_arguments = recipe.ARGUMENTS
         if check_runtime_requirement(effective) == 8:
@@ -120,7 +126,7 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
                 if name not in inventory['files']:
                     errors.append(f'Required file absent from inventory: {name}')
             preserved = generate(effective, inventory['classpath'], '../../', inventory['username'], profile,
-                                 metadata_adapter=adapter == 1)
+                                 metadata_adapter=adapter == 1, legacy_java2d=bool(java2d))
             errors.extend(java8.validate(root, effective, inventory['classpath'], preserved))
             _, launch_arguments = java8.artifacts(effective, inventory['classpath'], preserved)
         errors.extend(recipe.validate(root, f'Minecraft {inventory["version"]}', launch_arguments=launch_arguments))

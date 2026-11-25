@@ -35,8 +35,17 @@ def default_jvm(metadata: dict[str, Any]) -> list[str]:
     return result
 
 
+def legacy_java2d_options(metadata: dict[str, Any]) -> list[str]:
+    """PS5-confirmed Vanilla 1.0 white-screen workaround; never a global default."""
+    from .entrypoints import legacy_wrapper
+    if metadata.get('id') == '1.0' and legacy_wrapper(metadata) is not None:
+        return ['-Dsun.java2d.d3d=false', '-Dsun.java2d.opengl=false']
+    return []
+
+
 def generate(metadata: dict[str, Any], classpath: list[str], prefix: str, username: str = 'Player',
-             profile: str = DEFAULT_PROFILE, *, metadata_adapter: bool = True) -> str:
+             profile: str = DEFAULT_PROFILE, *, metadata_adapter: bool = True,
+             legacy_java2d: bool = True) -> str:
     check_profile(metadata, profile)
     if profile == REFERENCE_PROFILE:
         args = ['-Xmx4G', '-Djava.library.path=' + prefix + 'natives', '-cp',
@@ -90,6 +99,8 @@ def generate(metadata: dict[str, Any], classpath: list[str], prefix: str, userna
             elif allowed(item):
                 value = item['value']
                 args.extend(expand(v) for v in (value if isinstance(value, list) else [value]))
+    if legacy_java2d:
+        args = [option for option in legacy_java2d_options(metadata) if option not in args] + args
     return '\n'.join(quote(a) for a in args) + '\n'
 
 

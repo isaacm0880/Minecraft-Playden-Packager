@@ -11,6 +11,7 @@ FORGE_BROKEN = 'Broken — known unresolved Playden launch issues for Forge. Bui
 
 class Status(StrEnum):
     TESTED = 'Tested'
+    PARTIAL = 'Partially working'
     UNTESTED = 'Unsupported / Untested'
     RETEST = 'Failed on PS5 / Retest required'
     BROKEN = 'Broken'
@@ -24,12 +25,14 @@ class Compatibility:
 
     @property
     def permits_build(self) -> bool:
-        return self.status in (Status.TESTED, Status.UNTESTED, Status.RETEST)
+        return self.status in (Status.TESTED, Status.PARTIAL, Status.UNTESTED, Status.RETEST)
 
     @property
     def label(self) -> str:
         if self.status == Status.TESTED:
             return 'Works'
+        if self.status == Status.PARTIAL:
+            return 'Partial'
         if self.status in (Status.BROKEN, Status.RETEST):
             return 'Broken'
         return 'Untested'
@@ -41,6 +44,10 @@ class Compatibility:
 
 # Exact Minecraft + loader identities; never infer evidence from a completed build.
 REGISTRY: dict[tuple[str, tuple[ModLoader, ...]], Compatibility] = {
+    ('1.0', ()): Compatibility(
+        Status.PARTIAL, 'Vanilla 1.0 physically reaches the menu and plays with controller input after '
+        'the version-specific Java2D workaround. The menu flashes significantly, audio is inaudible, '
+        'and world saving appears to work but reload is not confirmed. Gameplay has no reported flashing.'),
     ('1.16', ()): Compatibility(
         Status.TESTED, 'User-confirmed working on PS5 through the Java 8 launch adapter. '
         'This does not establish Fabric or other configurations.'),

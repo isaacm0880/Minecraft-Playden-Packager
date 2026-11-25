@@ -93,7 +93,14 @@ references for the later provisioning decision.
   binary CLI promise needs a separate executable or an explicit source-CLI
   requirement.
 
-## Physical PS5 check for the new Vanilla 1.0 candidate
+## Recorded Vanilla 1.0 physical check and optional follow-up
+
+The maintainer has completed the first physical test: package generation and
+LAN transfer passed; gameplay/controller input work after two Java2D properties,
+but menu flashing and inaudible audio make compatibility Partial. The steps
+below are a reference for any focused receiver/audio follow-up, not a release
+gate or a request to replay working Minecraft versions. The original candidate
+requires the two manual properties; fresh 1.0 builds add them automatically.
 
 Use the existing validated local folder
 `dist/physical-vanilla-1.0-20261125/Vanilla-1.0/`. Keep a copy and choose a
@@ -141,14 +148,17 @@ manifest. Do not use an older installed receiver with the same handshake.
    Restart the receiver for a new six-digit code before a second one-shot CLI
    pairing. For both destinations in one receiver session, use the GUI's
    authenticated connection instead.
-4. Import the internal Vanilla 1.0 folder through Playden's folder flow and
-   choose **Use recipe** for `playden/recipe.json`. Program should be
-   `java/bin/java.exe`. If manual arguments are needed, copy the generated
-   Java 8 command from `PLAYDEN.txt` or `playden.java8-command`; do not use
-   `@../../playden.args` for this package.
-5. Check startup/menu, applicable controller actions, sound and mapped resources.
-   Create a disposable world, save, quit and reload it. Confirm its files are
-   under this package's `instances/default/minecraft/saves`. Retain complete
-   Playden/JVM logs on failure and identify whether it is adapter, wrapper/ASM,
-   legacy natives/AWT, game startup or saving. Mark Vanilla 1.0 compatible only
-   after this physical result; no previously working version needs retesting.
+4. Import the internal Vanilla 1.0 folder through Playden's folder flow.
+   Program should be `java/bin/java.exe`. For a fresh package built with this
+   update, choose **Use recipe** for `playden/recipe.json`. For the original
+   candidate, use manual arguments from `PLAYDEN.txt` or
+   `playden.java8-command` and add `-Dsun.java2d.d3d=false` and
+   `-Dsun.java2d.opengl=false` before the main class. Do not use
+   `@../../playden.args` for Java 8.
+5. For an optional focused audio check, confirm the imported game folder retains
+   `instances/default/minecraft/resources/sound3/` and the other indexed sound
+   directories. Capture post-S3-fallback sound registration or Wine audio errors
+   and the game's sound settings. If convenient, reload the saved disposable
+   world; the earlier report established only that saving appeared to work.
+   The menu flashing is a Playden/Wine developer follow-up, not a packager
+   release gate. Previously working versions need no retest.

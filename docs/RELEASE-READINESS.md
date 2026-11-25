@@ -190,8 +190,11 @@ These are declared boundaries, not requests to implement unrelated features:
   separately from the legacy client target, while retaining integrity checks,
   the Java 8 adapter and modern launch paths. Its 24 focused tests pass. The
   real Vanilla 1.0 package at `dist/physical-vanilla-1.0-20261125/Vanilla-1.0/`
-  passes current package validation. Startup, resources, controller behavior and
-  saving still require a physical PS5 test; see `docs/LEGACY-LAUNCH.md`.
+  passes package validation. Subsequent physical testing established Partial
+  compatibility: the scoped Java2D workaround resolves the white screen and
+  gameplay/controller input work, while menu flashing and inaudible audio remain.
+  Perfect 1.0 compatibility is not a stable packager release gate; see
+  `docs/LEGACY-LAUNCH.md`.
 - **#22 source work:** the mounted USB sender removes completed owned sessions
   and empty temporary parents, retaining interrupted checkpoints for validated
   retry. The LAN receiver removes its stage on handled outcomes and an empty

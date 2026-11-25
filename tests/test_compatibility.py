@@ -38,6 +38,15 @@ def test_real_blocker_overrides_tested_evidence():
     assert assess('26.3', (), 'Missing client').status == Status.CANNOT_PACKAGE
 
 
+def test_vanilla_1_0_partial_evidence_remains_buildable_and_specific():
+    result = assess('1.0', ())
+    assert result.status == Status.PARTIAL and result.label == 'Partial'
+    assert result.permits_build
+    assert 'audio is inaudible' in result.evidence
+    assert assess('1.5.2', ()).status == Status.UNTESTED
+    assert assess('1.0', (ModLoader('Fabric', '0.20.1'),)).status == Status.UNTESTED
+
+
 def fixture(root: Path, name: str, **kwargs) -> Installation:
     instance = root / name
     instance.mkdir()

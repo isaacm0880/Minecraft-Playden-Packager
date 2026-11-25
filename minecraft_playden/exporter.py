@@ -54,7 +54,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
     compatibility = assess(version, source.content.loaders if source.content else ())
     if not compatibility.permits_build:
         raise ValueError(compatibility.details)
-    if compatibility.status in (Status.UNTESTED, Status.RETEST):
+    if compatibility.status in (Status.UNTESTED, Status.RETEST, Status.PARTIAL):
         report('compatibility', compatibility.evidence)
     if source.content is not None:
         check_separate(source.content.root, output)
@@ -161,7 +161,9 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
         for number, path in enumerate(paths, 1):
             files[path.relative_to(root).as_posix()] = digest(path, 'sha256', cancellation)
             report('hashing', 'Hashing immutable package files...', number, len(paths))
-        save('package.json', {'schema': 2, 'launch_profile': launch_profile, 'source': source.mode, 'version': version, 'username': username, 'classpath': classpath, 'files': files,  **({'loader': {'name': 'Fabric', 'version': source.fabric.loader}} if source.fabric else {})})
+        save('package.json', {'schema': 2, 'launch_profile': launch_profile, 'source': source.mode, 'version': version, 'username': username, 'classpath': classpath, 'files': files,
+                              **({'legacy_java2d': 1} if arguments.legacy_java2d_options(effective) else {}),
+                              **({'loader': {'name': 'Fabric', 'version': source.fabric.loader}} if source.fabric else {})})
         if prepare_fabric and fabric_data is not None:
             from .fabric_remap import prepare_staged, package_status
             state = package_status(root, validated=False, cancellation=cancellation)

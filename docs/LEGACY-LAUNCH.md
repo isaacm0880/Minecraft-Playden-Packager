@@ -1,8 +1,9 @@
 # Legacy Vanilla entry points (#20)
 
-Investigated 2026-11-25 from verified baseline `4584b3c`. This change addresses
-Vanilla 1.0's packaging failure; it does not certify new PS5 compatibility, add
-other loaders, rewrite clients or change the existing Java 8 bootstrap class.
+Investigated 2026-11-25 from verified baseline `4584b3c` and updated after the
+first physical Vanilla 1.0 result. The entry-point change addressed packaging;
+the physical result is Partial. No other loaders or client rewrites were added,
+and the Java 8 bootstrap class remains unchanged.
 
 ## Confirmed cause
 
@@ -76,7 +77,7 @@ network requests or encounter legacy native/graphics/audio problems. Package and
 static checks do not establish those behaviors under Playden. Do not replace the
 runtime major or remove validation to conceal such failures.
 
-## Generated physical-test candidate
+## Original physical-test candidate
 
 A real installed, checksum-matching Vanilla 1.0 client was built to:
 
@@ -96,20 +97,63 @@ recipe/profile checker and PNG decoder accept it. Detailed build/validation logs
 JAR inventories and `javap` output remain local under
 `dist/legacy-1.0-investigation-20261125/`, excluded from commits and releases.
 
-For the only newly required Minecraft physical test:
+The existing candidate predates the automatic Java2D properties below. Its
+successful physical run used manual JVM additions; its bytes were not changed.
 
-1. Transfer this new 1.0 package to a fresh destination with existing USB/LAN
-   validation. Use the receiver built from the corresponding source revision.
-2. Import it and accept `playden/recipe.json`. Program remains `java/bin/java.exe`;
-   manual Java 8 arguments must come from its `PLAYDEN.txt` or
-   `playden.java8-command`, not `@../../playden.args`.
-3. Check startup/menu, controller actions applicable to 1.0, a disposable world,
-   sound/resources, saving and reloading. Confirm the world stays inside this
-   package's `instances/default/minecraft/saves`, not another installation.
-4. Retain complete Playden/JVM logs on failure; distinguish adapter, wrapper/ASM,
-   legacy natives/AWT, game startup and saving. Record Playden/kit/firmware and
-   storage. Do not promote 1.0 from Untested until physically confirmed.
+## Physical PS5 result and scoped Java2D workaround
 
-Previously working Minecraft configurations do not need physical gameplay
-retesting for this fix. Issue #20 also contains other historical investigations;
-this package alone is not a reason to close it.
+The maintainer reports package generation and LAN transfer passed. Adding both
+`-Dsun.java2d.d3d=false` and `-Dsun.java2d.opengl=false` resolved the white
+screen. The main menu loads but flashes significantly; world creation and
+gameplay work without flashing. Controller input works and saving appears to
+work. Audio is inaudible. World reload was not reported. Overall status is
+**Partial**, not Works. The observed workaround is now emitted automatically
+only for the verified Vanilla 1.0 LaunchWrapper metadata contract; neither
+other legacy releases nor modern/Fabric launch paths receive it. It appears in
+both generated `playden.args` and the actual Java 8 command. Previously built
+packages still need the two manual properties or a fresh build; they are not
+silently modified.
+
+The menu flashing should be handed to the Playden developer as a potential
+Playden/Wine Java2D presentation issue. The useful reproduction is the exact
+Vanilla 1.0 package, Java 8 command with both properties, PS5 firmware/loader,
+Playden/kit revisions, and a short menu versus in-world comparison. Gameplay's
+absence of flashing narrows the symptom; it does not prove which upstream
+component is responsible. No broad rendering workaround or launcher change is
+proposed here.
+
+## Sound asset investigation
+
+The original package's official `pre-1.6` asset index has
+`map_to_resources: true` and 749 entries. All 749 files are present under
+`instances/default/minecraft/resources/` and match their indexed size and
+SHA-1. Of these, 743 are in `sound/` (16), `sound3/` (417), `newsound/` (283),
+`music/` (3), `newmusic/` (9) or `streaming/` (15). The exporter downloads the
+content-addressed objects and materializes the indexed paths there; validation
+checks both object and mapped copies. A synthetic sound fixture now exercises
+that exact layout during packaging.
+
+This matches PrismLauncher at `d2095469`:
+[asset index handling](https://github.com/PrismLauncher/PrismLauncher/blob/d2095469e22ed260cc1b2dd9121cb6e4a1069b02/launcher/minecraft/AssetsUtils.cpp):
+`map_to_resources` selects the instance's `resources` folder and reconstruction
+copies each indexed object there. Its [launch task](https://github.com/PrismLauncher/PrismLauncher/blob/d2095469e22ed260cc1b2dd9121cb6e4a1069b02/launcher/minecraft/launch/ReconstructAssets.cpp)
+passes the instance's `resourcesDir()`, which
+[resolves beneath the game root](https://github.com/PrismLauncher/PrismLauncher/blob/d2095469e22ed260cc1b2dd9121cb6e4a1069b02/launcher/minecraft/MinecraftInstance.cpp).
+The packager's resource placement therefore agrees with Prism's legacy path.
+
+The maintainer's latest logs report successful OpenAL initialisation and a
+`FileNotFoundException` from the obsolete `MinecraftResources` S3 endpoint.
+Targeted static inspection of the verified 1.0 client (`ng.class`) shows its
+resource thread first requests that endpoint, then catches an exception and
+recursively registers files already present in its local `resources/` folder.
+The S3 exception alone is therefore not proof that packaged sounds are missing.
+The remaining audio cause is unresolved; possible next evidence is the exact
+imported PS5 `resources/` tree after Playden's folder import, audio options and
+any post-fallback sound registration or Wine audio errors in the full log.
+There is no basis here to fetch assets from the obsolete endpoint or change
+the verified asset layout.
+
+Previously working Minecraft configurations do not need gameplay retesting.
+Perfect Vanilla 1.0 compatibility is not required for the next stable packager
+release. Issue #20 remains open for its other historical investigations and
+these known partial-compatibility limits.

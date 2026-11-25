@@ -78,8 +78,9 @@ formats have not changed. Do not alter the package's relative launch directory.
 The entry-point scope is standard `net.minecraft.client.main.Main`, the two
 supported Fabric Knot client classes, and the validated official Vanilla
 LaunchWrapper contract described in [legacy launch support](LEGACY-LAUNCH.md).
-Vanilla 1.0 now has a validated physical-test candidate, not a confirmed PS5
-rating. This does not introduce Forge support. System properties, custom JVM
+Vanilla 1.0 now has a partial PS5 result: its version-specific Java2D properties
+resolve the white screen, gameplay/controller input work, and menu flashing/audio
+remain unresolved. This does not introduce Forge support. System properties, custom JVM
 flags and mods can have their own runtime constraints.
 
 ## Technical reference and provenance
@@ -162,6 +163,6 @@ versions do not need retesting):
 5. Record firmware, Playden build, kit, destination and logs. Distinguish JVM
    startup, adapter/classpath, Fabric remapping, native loading and gameplay
    failures. A validated copy or successful owned probe alone proves none of
-   these physical game milestones. Keep issue #20 open pending the new legacy candidate's physical acceptance
-   and its other tracked investigations; the older successful Java 8 results do
-   not certify Vanilla 1.0.
+   these physical game milestones. Vanilla 1.0's separate partial physical result
+   is recorded in the legacy investigation; issue #20 remains open for its
+   unresolved limits and other tracked investigations.

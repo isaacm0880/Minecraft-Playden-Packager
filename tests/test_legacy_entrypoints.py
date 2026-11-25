@@ -1,5 +1,6 @@
 """Official legacy metadata, synthetic bytecode: no Minecraft code executes."""
 import copy
+from contextlib import nullcontext
 import hashlib
 import io
 import json
@@ -61,7 +62,20 @@ def test_official_legacy_metadata_names_a_dependency_entrypoint(version, tmp_pat
     assert entrypoints.legacy_wrapper(doc) == 'libraries/net/minecraft/launchwrapper/1.5/launchwrapper-1.5.jar'
     assert doc['mainClass'] == before['mainClass'] == entrypoints.LEGACY_MAIN
     assert assess_metadata(doc).can_package
-    assert assess(version, ()).status == Status.UNTESTED
+    assert assess(version, ()).status == (Status.PARTIAL if version == '1.0' else Status.UNTESTED)
+
+
+def test_java2d_workaround_applies_only_to_physically_affected_legacy_version():
+    options = ['-Dsun.java2d.d3d=false', '-Dsun.java2d.opengl=false']
+    assert arguments.legacy_java2d_options(metadata('1.0')) == options
+    assert arguments.legacy_java2d_options(metadata('1.5.2')) == []
+    words_152 = arguments.parse_argfile(arguments.generate(metadata('1.5.2'), ['versions/client.jar'], '../../'))
+    assert not any(word.startswith('-Dsun.java2d.') for word in words_152)
+    words_old_10 = arguments.parse_argfile(arguments.generate(metadata('1.0'), ['versions/client.jar'], '../../', legacy_java2d=False))
+    assert not any(word.startswith('-Dsun.java2d.') for word in words_old_10)
+    other = metadata('1.0')
+    other['mainClass'] = 'net.minecraft.client.main.Main'
+    assert arguments.legacy_java2d_options(other) == []
 
 
 @pytest.mark.parametrize('fault', ['missing-library', 'duplicate-library', 'unverified-library', 'other-assets', 'other-runtime'])
@@ -117,7 +131,7 @@ def test_legacy_asset_view_must_actually_be_mapped(mapped):
         entrypoints.check_assets(metadata(), {'map_to_resources': mapped})
 
 
-def build_fixture(tmp_path):
+def build_fixture(tmp_path, *, pre_workaround=False):
     doc = metadata()
     source = client(tmp_path, doc)
     blobs = {}
@@ -136,16 +150,22 @@ def build_fixture(tmp_path):
                 data = blobs[spec['url']];spec.update(sha1=hashlib.sha1(data).hexdigest(), size=len(data))
     asset = b'owned asset'
     asset_sha = hashlib.sha1(asset).hexdigest()
-    index = json.dumps({'map_to_resources': True, 'objects': {'icons/icon_16x16.png': {'hash': asset_sha, 'size': len(asset)}}}).encode()
+    sound = b'owned synthetic Ogg fixture'
+    sound_sha = hashlib.sha1(sound).hexdigest()
+    index = json.dumps({'map_to_resources': True, 'objects': {
+        'icons/icon_16x16.png': {'hash': asset_sha, 'size': len(asset)},
+        'sound3/random/click.ogg': {'hash': sound_sha, 'size': len(sound)}}}).encode()
     doc['assetIndex'].update(sha1=hashlib.sha1(index).hexdigest(), size=len(index))
     blobs[doc['assetIndex']['url']] = index
     blobs[f'https://resources.download.minecraft.net/{asset_sha[:2]}/{asset_sha}'] = asset
+    blobs[f'https://resources.download.minecraft.net/{sound_sha[:2]}/{sound_sha}'] = sound
     data = json.dumps(doc).encode()
     blobs['https://fixture/legacy'] = data
     blobs[MANIFEST] = json.dumps({'versions': [{'id': '1.0', 'url': 'https://fixture/legacy', 'sha1': hashlib.sha1(data).hexdigest()}]}).encode()
     java = runtime(tmp_path / 'java8', 8)
     output = tmp_path / 'Legacy Package'
-    with patch('urllib.request.urlopen', side_effect=lambda request, **_: io.BytesIO(blobs[request.full_url])):
+    workaround = patch('minecraft_playden.arguments.legacy_java2d_options', return_value=[]) if pre_workaround else nullcontext()
+    with patch('urllib.request.urlopen', side_effect=lambda request, **_: io.BytesIO(blobs[request.full_url])), workaround:
         build(output, Downloader(tmp_path / 'cache', runtime_paths=(java,)), ClientSource('local', version='1.0', client_jar=source), 'Legacy Player')
     return output
 
@@ -159,12 +179,23 @@ def test_legacy_package_keeps_official_main_runtime_assets_and_java8_adapter(tmp
     words = arguments.parse_argfile((root / 'playden.args').read_text())
     assert words[words.index(entrypoints.LEGACY_MAIN) + 1:words.index('--gameDir')] == ['Legacy Player', '0']
     assert words[words.index('--assetsDir') + 1] == '../../instances/default/minecraft/resources'
+    assert words[:2] == ['-Dsun.java2d.d3d=false', '-Dsun.java2d.opengl=false']
+    assert json.loads((root / 'package.json').read_text())['legacy_java2d'] == 1
     assert (root / 'instances/default/minecraft/resources/icons/icon_16x16.png').read_bytes() == b'owned asset'
+    assert (root / 'instances/default/minecraft/resources/sound3/random/click.ogg').read_bytes() == b'owned synthetic Ogg fixture'
     with zipfile.ZipFile(root / java8.JAR) as jar:
         assert hashlib.sha256(jar.read(java8.CLASS)).hexdigest() == java8.BOOTSTRAP_SHA256
     command = (root / java8.COMMAND).read_text()
+    assert all(option in command for option in ('-Dsun.java2d.d3d=false', '-Dsun.java2d.opengl=false'))
     assert java8.MAIN in command
     assert '${' not in (root / 'playden.args').read_text()
+
+
+def test_pre_workaround_legacy_package_keeps_its_original_validated_launch(tmp_path):
+    root = build_fixture(tmp_path, pre_workaround=True)
+    assert 'legacy_java2d' not in json.loads((root / 'package.json').read_text())
+    assert '-Dsun.java2d.d3d=false' not in (root / 'playden.args').read_text()
+    assert validate(root) == []
 
 
 @pytest.mark.parametrize('fault', ['missing-wrapper', 'wrapper-hash', 'bad-wrapper-main', 'missing-client-target'])
