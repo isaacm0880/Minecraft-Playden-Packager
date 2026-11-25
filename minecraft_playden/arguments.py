@@ -48,12 +48,14 @@ def generate(metadata: dict[str, Any], classpath: list[str], prefix: str, userna
                 '--versionType', metadata.get('type', 'release')]
         return '\n'.join(quote(arg) if not arg or any(c.isspace() or c in '\\\"\'#' for c in arg) else arg for arg in args) + '\n'
     from .metadata import logging_spec
+    from .entrypoints import legacy_wrapper
     logging = None if not metadata_adapter or '_fabric_logging' in metadata else logging_spec(metadata)
     values = {
         'auth_player_name': username, 'version_name': metadata.get('launch_version', metadata['id']),
         'game_directory': prefix + 'instances/default/minecraft', 'assets_root': prefix + 'assets',
         'assets_index_name': metadata['assetIndex']['id'],
         'game_assets': prefix + 'assets/virtual/' + metadata['assetIndex']['id'], 'auth_uuid': '00000000-0000-0000-0000-000000000000',
+        'auth_session': '0',
         'user_type': 'legacy', 'user_properties': '{}',
         'auth_access_token': '0', 'clientid': '0', 'auth_xuid': '0',
         'version_type': metadata.get('type', 'release'), 'natives_directory': prefix + 'natives',
@@ -61,6 +63,10 @@ def generate(metadata: dict[str, Any], classpath: list[str], prefix: str, userna
         'classpath': ';'.join(prefix + p for p in classpath), 'classpath_separator': ';',
         'library_directory': prefix + 'libraries',
     }
+    if legacy_wrapper(metadata) is not None:
+        # Mojang's pre-1.6 index maps resources into the game directory. Its
+        # VanillaTweaker also reads window icons from this same asset view.
+        values['game_assets'] = prefix + game_directory(profile) + '/resources'
     def expand(value: str) -> str:
         def replace(match: re.Match[str]) -> str:
             key = match.group(1)

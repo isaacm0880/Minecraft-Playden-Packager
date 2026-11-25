@@ -112,7 +112,9 @@ Java 8 packages now use a dedicated same-JVM bootstrap and manifest classpath,
 while retaining the required Windows x64 Java 8 runtime. Java 9+ continues to use
 `java.exe @../../playden.args`. The Java 8 packaging regressions cover Vanilla
 1.16 and Fabric 1.16/1.14.4; no PS5 compatibility rating is inferred from those
-builds. Minecraft 1.0's separate entry-point issue and Forge remain unsupported.
+builds. Vanilla 1.0's declared LaunchWrapper entry point is now supported for
+packaging, with a generated physical-test candidate; its PS5 status remains
+Untested. See [legacy entry-point evidence](LEGACY-LAUNCH.md). Forge remains unsupported.
 See [adapter limits, evidence and targeted physical tests](JAVA8-LAUNCH.md).
 
 Arbitrary patched client JARs, non-Fabric custom profiles, legacy tweaker/JAR-mod
@@ -142,6 +144,7 @@ This table tracks Minecraft Java Edition versions tested with **Playden on PS5**
 
 | Minecraft Version | Mod Loader | Loader Version | Status | Notes |
 |---|---|---|---|---|
+| 1.0 | Vanilla | N/A | Untested | Validated Java 8/LaunchWrapper package generated; physical PS5 startup and save/reload pending |
 | 1.16 | Vanilla | N/A | Works | User-confirmed PS5 success with the Java 8 launch adapter |
 | 1.16 | Fabric | 0.20.1 | Works | Confirmed prepared Java 8 package: gameplay, controller mappings, world saving and reloading |
 | 1.14.4 | Fabric | 0.20.1 | Works | Confirmed prepared Java 8 package: gameplay, controller mappings, world saving and reloading |
@@ -180,8 +183,9 @@ not recorded, so those version-level reports do not promote an arbitrary loader
 identity in the exact-match compatibility registry. They do not certify every mod.
 
 [Issue #20](https://github.com/isaacm0880/Minecraft-Playden-Packager/issues/20)
-remains open: legacy Minecraft main-class detection, including Minecraft 1.0,
-is unresolved. Successful Java 8 launches do not resolve that separate issue.
+remains open: Vanilla 1.0 now packages through its validated declared dependency
+entry point, but its physical acceptance and other issue investigations remain
+outstanding. Successful Java 8 launches of other versions do not certify 1.0.
 
 ## Known Mod Compatibility
 

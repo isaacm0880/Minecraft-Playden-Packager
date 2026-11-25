@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from .arguments import classpath_argument, parse_argfile
 from .downloads import safe_path
+from .entrypoints import LEGACY_MAIN, legacy_wrapper
 
 JAR = 'playden-java8.jar'
 COMMAND = 'playden.java8-command'
@@ -60,8 +61,9 @@ def artifacts(metadata: dict[str, Any], classpath: list[str], argfile: str) -> t
     words = parse_argfile(argfile)
     main = metadata['mainClass']
     if main not in ('net.minecraft.client.main.Main', 'net.fabricmc.loader.impl.launch.knot.KnotClient',
-                    'net.fabricmc.loader.launch.knot.KnotClient'):
+                    'net.fabricmc.loader.launch.knot.KnotClient', LEGACY_MAIN):
         raise ValueError('Unsupported Java 8 Minecraft main class')
+    legacy_wrapper(metadata)  # Refuse undeclared or unsupported VanillaTweaker contracts.
     if classpath_argument(words, main) != ';'.join('../../' + path for path in classpath):
         raise ValueError('Java 8 classpath differs from resolved dependencies')
     boundary = words.index(main)

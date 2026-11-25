@@ -2,8 +2,9 @@
 
 Java 8 packages use the required Windows x64 Java 8 runtime. Java 9+ packages
 keep their existing `java.exe @../../playden.args` recipe and argument bytes.
-No runtime major is upgraded to avoid a launch problem. Forge and legacy
-Minecraft entry-point detection remain outside this change.
+No runtime major is upgraded to avoid a launch problem. Forge remains
+unsupported. The separate legacy Vanilla entry-point contract and physical-test
+candidate are documented in [legacy launch support](LEGACY-LAUNCH.md).
 
 ## Invocation and validation
 
@@ -74,9 +75,11 @@ Playden's `controller_layout` support and a kit with `input-map`. Older receiver
 ELFs must be rebuilt/restarted to recognize Java 8 recipes; protocol and pairing
 formats have not changed. Do not alter the package's relative launch directory.
 
-The entry-point scope is standard `net.minecraft.client.main.Main` and the two
-supported Fabric Knot client classes. This does not fix Minecraft 1.0's separate
-entry-point problem or introduce Forge support. System properties, custom JVM
+The entry-point scope is standard `net.minecraft.client.main.Main`, the two
+supported Fabric Knot client classes, and the validated official Vanilla
+LaunchWrapper contract described in [legacy launch support](LEGACY-LAUNCH.md).
+Vanilla 1.0 now has a validated physical-test candidate, not a confirmed PS5
+rating. This does not introduce Forge support. System properties, custom JVM
 flags and mods can have their own runtime constraints.
 
 ## Technical reference and provenance
@@ -159,5 +162,6 @@ versions do not need retesting):
 5. Record firmware, Playden build, kit, destination and logs. Distinguish JVM
    startup, adapter/classpath, Fabric remapping, native loading and gameplay
    failures. A validated copy or successful owned probe alone proves none of
-   these physical game milestones. Keep issue #20 open: legacy main-class detection remains unresolved regardless
-   of these successful Java 8 physical results.
+   these physical game milestones. Keep issue #20 open pending the new legacy candidate's physical acceptance
+   and its other tracked investigations; the older successful Java 8 results do
+   not certify Vanilla 1.0.

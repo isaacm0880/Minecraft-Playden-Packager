@@ -6,6 +6,7 @@ from typing import Any
 from .arguments import parse_argfile, classpath_argument
 from .dependencies import resolve
 from .downloads import digest, safe_path
+from .entrypoints import client_main, legacy_wrapper, verify_legacy_class, LEGACY_MAIN, LEGACY_CLASSES
 
 # Stable public entry points for modern vanilla dependencies. This is a smoke
 # check for known failure modes, not exhaustive JVM linkage or console testing.
@@ -66,7 +67,14 @@ def validate_classpath(root: Path, metadata: dict[str, Any], expected: list[str]
             coordinate = ':'.join(library['name'].split(':')[:2])
             if len(library['name'].split(':')) == 3 and coordinate in CRITICAL_CLASSES:
                 required_by_path['libraries/' + artifact['path']] = set(CRITICAL_CLASSES[coordinate])
-    required_by_path[client] = {(client_main_class or metadata['mainClass']).replace('.', '/') + '.class'}
+    client_metadata = {**metadata, 'mainClass': client_main_class or metadata['mainClass']}
+    target = client_main(client_metadata)
+    wrapper = legacy_wrapper(client_metadata)
+    required_by_path[client] = {target.replace('.', '/') + '.class'}
+    if wrapper is not None:
+        if wrapper not in expected:
+            errors.append('Declared legacy LaunchWrapper is missing from the launch classpath')
+        required_by_path.setdefault(wrapper, set()).update(LEGACY_CLASSES)
     # Modern vanilla requires Fastutil even if broken metadata/resolution omitted
     # the entire library. Inventory self-consistency alone cannot detect that.
     remaining = {FLOAT_LIST} if (client_main_class or metadata['mainClass']) == 'net.minecraft.client.main.Main' else set()
@@ -92,6 +100,10 @@ def validate_classpath(root: Path, metadata: dict[str, Any], expected: list[str]
                         if not archive.read(class_name):
                             errors.append(f'Critical dependency class is empty: {class_name} in {relative}')
                         remaining.discard(class_name)
+                if wrapper is not None and relative == wrapper:
+                    verify_legacy_class(archive, LEGACY_MAIN)
+                if wrapper is not None and relative == client:
+                    verify_legacy_class(archive, target, game_directory=True)
         except (OSError, ValueError, zipfile.BadZipFile, KeyError, RuntimeError, NotImplementedError) as exc:
             errors.append(f'Invalid classpath JAR {relative}: {exc}')
     for class_name in sorted(remaining):

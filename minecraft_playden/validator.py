@@ -92,6 +92,8 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
         index_path = f'assets/indexes/{metadata["assetIndex"]["id"]}.json'
         required.append(index_path)
         index = json.loads(safe_path(root, index_path).read_text(encoding='utf-8'))
+        from .entrypoints import check_assets
+        check_assets(metadata, index)
         index_spec = metadata['assetIndex']
         if index_spec.get('sha1') and digest(safe_path(root, index_path)) != index_spec['sha1']:
             errors.append('Minecraft asset index checksum mismatch')

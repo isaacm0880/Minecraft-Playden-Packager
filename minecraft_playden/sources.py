@@ -8,6 +8,7 @@ from .operations import CancellationToken
 from .importers import resolve_local
 from .fabric import FabricInstallation, inspect as inspect_fabric
 from .instance_content import InstanceContent, inspect, copy_into
+from .entrypoints import client_main, legacy_wrapper, verify_legacy_class
 
 
 def verify_client(path: Path, metadata: dict[str, Any]) -> None:
@@ -22,8 +23,10 @@ def verify_client(path: Path, metadata: dict[str, Any]) -> None:
         raise ValueError('Client JAR hash does not match the selected official version')
     try:
         with zipfile.ZipFile(path) as jar:
-            if metadata['mainClass'].replace('.', '/') + '.class' not in jar.namelist():
+            if client_main(metadata).replace('.', '/') + '.class' not in jar.namelist():
                 raise ValueError('Minecraft main class is missing from the client JAR')
+            if legacy_wrapper(metadata) is not None:
+                verify_legacy_class(jar, client_main(metadata), game_directory=True)
     except zipfile.BadZipFile:
         raise ValueError('Client is not a valid JAR') from None
 

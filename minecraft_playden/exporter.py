@@ -112,6 +112,8 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
         source.acquire(metadata, downloader, root / client)
         index_spec = {**metadata['assetIndex'], 'path': f'assets/indexes/{metadata["assetIndex"]["id"]}.json'}
         index = downloader.json(index_spec)
+        from .entrypoints import check_assets
+        check_assets(metadata, index)
         downloader.fetch(index_spec, safe_path(root, f'assets/indexes/{index_spec["id"]}.json'))
         asset_files = assets.files(index, index_spec['id'], profiles.game_directory(launch_profile))
         def asset(item: dict) -> None:

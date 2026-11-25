@@ -185,4 +185,6 @@ and Vanilla 1.16 work in the reported configurations. Automatic recipe detection
 controller mappings, automatic Fabric preparation and default/loader artwork work.
 The old Fabric icon was retained Playden game data, resolved by removing that
 data; it was not a packager defect. See [the configuration-specific evidence](docs/COMPATIBILITY.md#physical-acceptance-update--2026-11-25).
-Legacy main-class detection remains unresolved; issue #20 stays open.
+Vanilla 1.0 now has a validated LaunchWrapper package for physical testing; its
+PS5 acceptance and other issue #20 investigations remain pending. See
+[legacy launch evidence and limits](docs/LEGACY-LAUNCH.md).
