@@ -42,11 +42,11 @@ def receiver_binary(tmp_path_factory):
 @pytest.fixture
 def receiver(receiver_binary, tmp_path):
     @contextlib.contextmanager
-    def start(*options, usb=True):
-        sandbox = tmp_path / f'console-{len(list(tmp_path.glob("console-*")))}'
-        sandbox.mkdir()
+    def start(*options, usb=True, sandbox_root=None):
+        sandbox = sandbox_root if sandbox_root is not None else tmp_path / f'console-{len(list(tmp_path.glob("console-*")))}'
+        sandbox.mkdir(exist_ok=sandbox_root is not None)
         if usb:
-            (sandbox / 'usb0').mkdir()
+            (sandbox / 'usb0').mkdir(exist_ok=sandbox_root is not None)
         process = subprocess.Popen([str(receiver_binary), '--bind', '127.0.0.1', '--port', '0', '--test-legacy-token',
                                     '--test-root', str(sandbox), *options],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -142,7 +142,13 @@ def upload(session, files, *, destination=0, name='Package'):
 
 def wait_clean(sandbox):
     def stages():
-        return list((sandbox / 'playden-packager-temp').glob('.pdlan-*')) + list((sandbox / 'usb0/playden-packager-temp').glob('.pdlan-*'))
+        found = []
+        for relative in ('playden-packager-temp', 'usb0/playden-packager-temp'):
+            try:
+                found.extend((sandbox / relative).glob('.pdlan-*'))
+            except FileNotFoundError:
+                pass  # The receiver may remove this empty parent during scandir.
+        return found
     deadline = time.monotonic() + 3
     while stages() and time.monotonic() < deadline:
         time.sleep(.01)
@@ -1013,3 +1019,112 @@ def test_receiver_current_metadata_layout_and_artwork_are_strict(receiver, fault
         else:
             with pytest.raises(NetworkTransferError, match='Invalid recipe'):
                 verify(session)
+
+
+@pytest.mark.parametrize('destination,import_path,temp_path', [
+    (0, 'internal', 'playden-packager-temp'),
+    (1, 'usb0/playden/import', 'usb0/playden-packager-temp'),
+])
+@pytest.mark.parametrize('outcome', ['success', 'disconnect', 'verify-failure', 'publish-failure', 'no-space'])
+def test_owned_stage_and_empty_parent_are_removed_on_all_transfer_outcomes(
+        receiver, destination, import_path, temp_path, outcome):
+    options = ('--test-free-bytes', '0') if outcome == 'no-space' else (
+        ('--test-rename-errno', str(errno.EIO)) if outcome == 'publish-failure' else ())
+    files = contents()
+    files['package.json'] = inventory(files)
+    if outcome == 'verify-failure':
+        files['recipe.json'] = b'broken recipe'
+        files['package.json'] = inventory(files)
+    with receiver(*options) as (sandbox, port, token):
+        with paired(port, token) as session:
+            if outcome == 'no-space':
+                with pytest.raises(NetworkTransferError, match='Insufficient storage'):
+                    begin(session, 1, 100, destination=destination)
+            else:
+                upload(session, files, destination=destination)
+                assert (sandbox / temp_path).is_dir()
+                if outcome == 'verify-failure':
+                    with pytest.raises(NetworkTransferError, match='Invalid recipe'):
+                        verify(session)
+                elif outcome != 'disconnect':
+                    verify(session)
+                    session.send(COMMIT)
+                    if outcome == 'publish-failure':
+                        with pytest.raises(NetworkTransferError, match='Publication failed'):
+                            session.ack()
+                    else:
+                        assert session.ack().endswith(b'/Package')
+        deadline = time.monotonic() + 3
+        while (sandbox / temp_path).exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert not (sandbox / temp_path).exists()
+        assert (sandbox / import_path / 'Package').exists() is (outcome == 'success')
+
+
+@pytest.mark.parametrize('destination,import_path,temp_path', [
+    (0, 'internal', 'playden-packager-temp'),
+    (1, 'usb0/playden/import', 'usb0/playden-packager-temp'),
+])
+def test_concurrent_receiver_stages_survive_other_transfer_completion(
+        receiver, tmp_path, destination, import_path, temp_path):
+    shared = tmp_path / 'shared-console'
+    files = contents()
+    files['package.json'] = inventory(files)
+    with receiver(sandbox_root=shared) as (_, port_a, token_a), receiver(sandbox_root=shared) as (_, port_b, token_b):
+        with paired(port_b, token_b) as session_b:
+            upload(session_b, files, destination=destination, name='Second')
+            with paired(port_a, token_a) as session_a:
+                upload(session_a, files, destination=destination, name='First')
+                verify(session_a)
+                session_a.send(COMMIT)
+                session_a.ack()
+            deadline = time.monotonic() + 3
+            while len(list((shared / temp_path).glob('.pdlan-*'))) > 1 and time.monotonic() < deadline:
+                time.sleep(.01)
+            assert len(list((shared / temp_path).glob('.pdlan-*/package'))) == 1
+            verify(session_b)
+            session_b.send(COMMIT)
+            session_b.ack()
+        deadline = time.monotonic() + 3
+        while (shared / temp_path).exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert not (shared / temp_path).exists()
+        for name in ('First', 'Second'):
+            assert (shared / import_path / name / 'recipe.json').read_bytes() == files['recipe.json']
+
+
+@pytest.mark.parametrize('destination,temp_path', [(0, 'playden-packager-temp'), (1, 'usb0/playden-packager-temp')])
+def test_cleanup_failure_is_logged_without_revoking_publication(receiver, destination, temp_path):
+    files = contents()
+    files['package.json'] = inventory(files)
+    with receiver('--test-cleanup-errno', str(errno.EACCES)) as (sandbox, port, token):
+        with paired(port, token) as session:
+            upload(session, files, destination=destination)
+            verify(session)
+            session.send(COMMIT)
+            assert session.ack().endswith(b'/Package')
+        wait_clean(sandbox)
+        assert (sandbox / temp_path).is_dir()
+    assert 'receiver_cleanup ' in receiver.diagnostics[-1]
+    assert 'complete=0 parent_removed=0 errno=13' in receiver.diagnostics[-1]
+
+
+def test_empty_replacement_temporary_parent_is_preserved(receiver):
+    files = contents()
+    files['package.json'] = inventory(files)
+    with receiver() as (sandbox, port, token):
+        temporary = sandbox / 'playden-packager-temp'
+        with paired(port, token) as session:
+            upload(session, files)
+            verify(session)
+            temporary.rename(sandbox / 'moved-original-temp')
+            temporary.mkdir()
+            session.send(COMMIT)
+            with pytest.raises(NetworkTransferError, match='Publication failed'):
+                session.ack()
+        wait_clean(sandbox)
+        assert temporary.is_dir() and not list(temporary.iterdir())
+        deadline = time.monotonic() + 3
+        while list((sandbox / 'moved-original-temp').iterdir()) and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert not list((sandbox / 'moved-original-temp').iterdir())

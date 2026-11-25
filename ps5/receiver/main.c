@@ -35,6 +35,7 @@ static char test_root[1024];
 static uint64_t test_free = UINT64_MAX;
 static uint64_t test_write_limit = UINT64_MAX, test_written;
 static int test_stage_device_mismatch, test_rename_errno, test_pause_cleanup, test_permission_errno;
+static int test_cleanup_errno;
 #endif
 static void stop_receiver(int sig) {
     (void)sig;
@@ -214,6 +215,38 @@ static int root_identity(int fd, const char *absolute_root) {
     if (!same_root)
         errno = ENODEV;
     return same_root;
+}
+/* Empty-parent cleanup never walks the shared directory. Another transfer's
+   stage or any unrelated entry makes rmdir refuse it. A replacement/moved root
+   is left untouched rather than removing whichever directory has its name. */
+static int remove_empty_temporary_root(int temporary, const char *path, int *removed) {
+    char parent_path[2048];
+    if (strlen(path) >= sizeof(parent_path)) { errno = ENAMETOOLONG; return 0; }
+    strcpy(parent_path, path);
+    char *leaf = strrchr(parent_path, '/');
+    if (!leaf || leaf == parent_path || !leaf[1]) { errno = EINVAL; return 0; }
+    *leaf++ = 0;
+    int parent = open_absolute(parent_path, 0);
+    if (parent < 0) return 0;
+    int ok = same_inode(temporary, parent, leaf);
+    if (!ok) errno = ESTALE;
+    if (ok) {
+#ifdef HOST_TEST
+        if (test_cleanup_errno) { errno = test_cleanup_errno; ok = 0; }
+        else
+#endif
+        if (unlinkat(parent, leaf, AT_REMOVEDIR) == 0) {
+            *removed = 1;
+            ok = sync_dir(parent);
+        } else {
+            /* Occupied shared parents are expected, not cleanup failures. */
+            ok = errno == ENOTEMPTY || errno == EEXIST;
+        }
+    }
+    int saved_error = errno;
+    close(parent);
+    errno = saved_error;
+    return ok;
 }
 static int storage_pair(int root, int temporary) {
     struct stat a, b;
@@ -493,7 +526,8 @@ static void connection(int client) {
     }
     metric_phase(PH_SETUP);
     uint8_t *body = malloc(FRAME_MAX);
-    int root = -1, temporary = -1, stage = -1, package = -1, file = -1;
+    int root = -1, temporary = -1, stage = -1, package = -1, file = -1, made_stage = 0;
+    struct stat created_stage = {0};
     Inventory inventory = {0};
     char stage_name[64] = {0}, package_name[121] = {0}, root_path[2048] = {0};
     char temporary_path[2048] = {0};
@@ -596,7 +630,23 @@ static void connection(int client) {
     arc4random_buf(random, 16);
     hex(random, 16, random_hex);
     snprintf(stage_name, sizeof(stage_name), ".pdlan-%s", random_hex);
-    if (mkdirat(temporary, stage_name, 0700) < 0 ||
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (mkdirat(temporary, stage_name, 0700) == 0) {
+            made_stage = 1;
+            if (stat_nofollow_at(temporary, stage_name, &created_stage, NULL) < 0)
+                memset(&created_stage, 0, sizeof(created_stage));
+            break;
+        }
+        if (errno != ENOENT) break;
+        /* Another finishing receiver may remove an empty shared parent after
+           this connection opened it but before its stage is created. Reopen
+           the named root; never write a stage into an unlinked directory. */
+        close(temporary);
+        temporary = storage_root(destination, 1, temporary_path);
+        if (temporary < 0 || !storage_pair(root, temporary) ||
+            !root_identity(root, root_path) || !root_identity(temporary, temporary_path)) break;
+    }
+    if (!made_stage ||
         (stage = openat(temporary, stage_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) <
             0 ||
         mkdirat(stage, "package", 0700) < 0 ||
@@ -829,7 +879,7 @@ cleanup:
         (void)getchar();
 #endif
     double cleanup_started = metric_clock();
-    int cleanup_error = 0;
+    int cleanup_error = 0, parent_removed = 0;
     if (file >= 0)
         close(file);
     if (package >= 0)
@@ -844,11 +894,24 @@ cleanup:
             cleanup_error = ESTALE;
         }
         close(stage);
+    } else if (made_stage) {
+        /* If opening our new stage failed, only its proven, still-empty inode
+           can be removed; never descend without a held directory descriptor. */
+        struct stat current;
+        if (!created_stage.st_ino || temporary < 0 ||
+            stat_nofollow_at(temporary, stage_name, &current, NULL) < 0 ||
+            !S_ISDIR(current.st_mode) || current.st_dev != created_stage.st_dev ||
+            current.st_ino != created_stage.st_ino ||
+            unlinkat(temporary, stage_name, AT_REMOVEDIR) < 0)
+            cleanup_error = errno ? errno : ESTALE;
     }
     if (root >= 0)
         close(root);
-    if (temporary >= 0)
+    if (temporary >= 0) {
+        if (!cleanup_error && !remove_empty_temporary_root(temporary, temporary_path, &parent_removed))
+            cleanup_error = errno ? errno : EIO;
         close(temporary);
+    }
     if (inventory.items)
         for (size_t i = 0; i < inventory.count; i++)
             free(inventory.items[i].path);
@@ -857,9 +920,9 @@ cleanup:
     free(body);
     free(wire.rx);
     wipe(wire.key, sizeof(wire.key));
-    if (diagnostics_enabled) {
-        printf("receiver_cleanup wall_s=%.6f complete=%d errno=%d (%s)\n",
-               metric_clock() - cleanup_started, !cleanup_error, cleanup_error,
+    if (diagnostics_enabled || temporary >= 0) {
+        printf("receiver_cleanup wall_s=%.6f complete=%d parent_removed=%d errno=%d (%s)\n",
+               metric_clock() - cleanup_started, !cleanup_error, parent_removed, cleanup_error,
                strerror(cleanup_error));
         fflush(stdout);
     }
@@ -968,6 +1031,11 @@ int main(int argc, char **argv) {
             buffered_reads = 0;
         } else if (!strcmp(argv[i], "--test-pause-cleanup")) {
             test_pause_cleanup = 1;
+        } else if (!strcmp(argv[i], "--test-cleanup-errno") && i + 1 < argc) {
+            char *end;
+            long value = strtol(argv[++i], &end, 10);
+            if (*end || value <= 0 || value > 4095) return 2;
+            test_cleanup_errno = (int)value;
         } else if (!strcmp(argv[i], "--test-stage-device-mismatch")) {
             test_stage_device_mismatch = 1;
         } else if (!strcmp(argv[i], "--test-rename-errno") && i + 1 < argc) {

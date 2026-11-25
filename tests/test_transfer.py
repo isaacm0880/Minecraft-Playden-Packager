@@ -316,3 +316,196 @@ class TransferTests(unittest.TestCase):
         with self.assertRaisesRegex(TransferError, 'changed'):
             self.request.run()
         self.assertFalse(self.request.destination.exists())
+
+
+class CompletedSessionCleanupTests(unittest.TestCase):
+    setUp = TransferTests.setUp
+    snapshot = staticmethod(TransferTests.snapshot)
+    assert_source_untouched = TransferTests.assert_source_untouched
+
+    def test_completed_checkpoint_session_and_empty_parent_are_removed(self):
+        result = self.request.run()
+        self.assertEqual(self.snapshot(result.destination), self.original)
+        self.assertFalse((self.usb / 'playden/.packager-transfers').exists())
+        self.assertTrue((self.usb / 'playden/import').is_dir())
+
+    def test_other_sessions_and_unrelated_files_are_preserved(self):
+        sessions = self.usb / 'playden/.packager-transfers'
+        other = sessions / 'other-transfer/payload'
+        other.mkdir(parents=True)
+        (other / 'keep').write_bytes(b'active transfer')
+        (sessions / 'notes.txt').write_text('unrelated')
+        self.request.run()
+        self.assertEqual((other / 'keep').read_bytes(), b'active transfer')
+        self.assertEqual((sessions / 'notes.txt').read_text(), 'unrelated')
+        self.assertEqual(sorted(x.name for x in sessions.iterdir()), ['notes.txt', 'other-transfer'])
+
+    def test_cancelled_transfer_retains_retry_state_then_cleans_after_success(self):
+        token = CancellationToken()
+        def cancel(event):
+            if event.stage == 'transfer-copy':
+                token.cancel()
+        with self.assertRaises(OperationCancelled):
+            self.request.run(cancel, token)
+        sessions = self.usb / 'playden/.packager-transfers'
+        checkpoint = next(sessions.glob('*/state.json'))
+        self.assertEqual(json.loads(checkpoint.read_text())['status'], 'copying')
+        self.assertTrue((checkpoint.parent / 'payload').is_dir())
+        self.request.run()
+        self.assertFalse(sessions.exists())
+
+    def test_cleanup_failure_reports_success_and_keeps_recoverable_checkpoint(self):
+        original = Path.unlink
+        def unlink(path, *args, **kwargs):
+            if path.name == 'state.json':
+                raise PermissionError(errno.EACCES, 'Injected checkpoint cleanup failure')
+            return original(path, *args, **kwargs)
+        events = []
+        with patch.object(Path, 'unlink', unlink):
+            result = self.request.run(events.append)
+        self.assertEqual(self.snapshot(result.destination), self.original)
+        self.assertEqual(events[-1].stage, 'transfer-complete')
+        self.assertTrue(any('cleanup incomplete' in event.message for event in events))
+        sessions = self.usb / 'playden/.packager-transfers'
+        self.assertEqual(json.loads(next(sessions.glob('*/state.json')).read_text())['status'], 'complete')
+        self.request.run()
+        self.assertFalse(sessions.exists())
+
+    def test_empty_replacement_session_is_not_treated_as_our_completed_session(self):
+        from minecraft_playden.transfer import _cleanup_completed
+        staging = self.usb / 'playden/.packager-transfers/session'
+        staging.mkdir(parents=True)
+        info = staging.stat()
+        staging.rename(staging.with_name('moved-session'))
+        staging.mkdir()
+        state = {'status': 'complete'}
+        (staging / 'state.json').write_text(json.dumps(state))
+        message = _cleanup_completed(staging, state, (info.st_dev, info.st_ino), self.drive)
+        self.assertIn('cleanup incomplete', message)
+        self.assertTrue((staging / 'state.json').exists())
+
+    def test_failed_initial_checkpoint_write_does_not_leave_its_temporary_file(self):
+        with patch('minecraft_playden.transfer.flush_file', side_effect=OSError(errno.EIO, 'Injected state flush failure')):
+            with self.assertRaises(TransferError):
+                self.request.run()
+        self.assertFalse((self.usb / 'playden/.packager-transfers').exists())
+        self.assertFalse(self.request.destination.exists())
+
+    def test_same_content_active_session_is_not_resumed_or_cleaned_by_another_process(self):
+        import queue
+        import subprocess
+        import sys
+        import threading
+        token = CancellationToken()
+        def cancel(event):
+            if event.stage == 'transfer-copy':
+                token.cancel()
+        with self.assertRaises(OperationCancelled):
+            self.request.run(cancel, token)
+        sessions = self.usb / 'playden/.packager-transfers'
+        checkpoint = next(sessions.glob('*/state.json'))
+        original_session = checkpoint.parent
+        before = self.snapshot(original_session)
+        script = r'''
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from minecraft_playden.transfer import _SessionLease
+# The parent created this simulated USB root; no real volume is contacted.
+drive = SimpleNamespace(root=Path(sys.argv[2]), check=lambda: None)
+lease = _SessionLease.acquire(Path(sys.argv[1]), drive)
+assert lease is not None
+print('owned', flush=True)
+sys.stdin.read(1)
+lease.close()
+'''
+        process = subprocess.Popen([sys.executable, '-c', script, str(original_session), str(self.usb)],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        lines = queue.Queue()
+        reader = threading.Thread(target=lambda: lines.put(process.stdout.readline()), daemon=True)
+        reader.start()
+        try:
+            self.assertEqual(lines.get(timeout=10), 'owned\n')
+            events = []
+            result = self.request.run(events.append)
+            self.assertEqual(self.snapshot(result.destination), self.original)
+            self.assertEqual(self.snapshot(original_session), before)
+            self.assertEqual(list(sessions.iterdir()), [original_session])
+            self.assertTrue(any('other transfer sessions retained' in event.message for event in events))
+        finally:
+            process.stdin.write('x')
+            process.stdin.flush()
+            try:
+                _, error = process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                _, error = process.communicate(timeout=5)
+            reader.join(1)
+        self.assertEqual(process.returncode, 0, error)
+
+    def test_finishing_transfer_can_remove_parent_before_next_session_mkdir(self):
+        original_mkdir = Path.mkdir
+        first_results = []
+        injected = False
+        def interleave(path, *args, **kwargs):
+            nonlocal injected
+            if path.parent.name == '.packager-transfers' and not injected:
+                injected = True
+                # B has acquired the empty parent but not created its session.
+                # Finish A now: publication succeeds and removes that parent.
+                result = TransferRequest(self.source, self.drive, destination_name='First-Package').run()
+                first_results.append(result)
+                self.assertFalse(path.parent.exists())
+            return original_mkdir(path, *args, **kwargs)
+        with patch.object(Path, 'mkdir', interleave):
+            second_result = self.request.run()
+        self.assertTrue(injected)
+        self.assertEqual(self.snapshot(first_results[0].destination), self.original)
+        self.assertEqual(self.snapshot(second_result.destination), self.original)
+        self.assertFalse((self.usb / 'playden/.packager-transfers').exists())
+        self.assert_source_untouched()
+
+    def test_continually_disappearing_session_parent_fails_with_a_bound(self):
+        original_mkdir = Path.mkdir
+        attempts = []
+        def disappear(path, *args, **kwargs):
+            if path.parent.name == '.packager-transfers':
+                attempts.append(path)
+                path.parent.rmdir()
+            return original_mkdir(path, *args, **kwargs)
+        with patch.object(Path, 'mkdir', disappear):
+            with self.assertRaisesRegex(TransferError, 'parent changed repeatedly'):
+                self.request.run()
+        self.assertEqual(len(attempts), 3)
+        self.assertFalse(self.request.destination.exists())
+        self.assert_source_untouched()
+
+    def test_directory_creation_race_validates_eexist_component(self):
+        from minecraft_playden.transfer import _directory
+        original_mkdir = Path.mkdir
+        injected = False
+        def create_first(path, *args, **kwargs):
+            nonlocal injected
+            if path == self.usb / 'playden' and not injected:
+                injected = True
+                original_mkdir(path)
+                raise FileExistsError(errno.EEXIST, 'Created by another transfer')
+            return original_mkdir(path, *args, **kwargs)
+        with patch.object(Path, 'mkdir', create_first):
+            result = _directory(self.usb, 'playden/import', self.drive)
+        self.assertEqual(result, self.usb / 'playden/import')
+        self.assertTrue(result.is_dir())
+
+    def test_directory_creation_race_rejects_non_directory_eexist(self):
+        from minecraft_playden.transfer import _directory
+        original_mkdir = Path.mkdir
+        def create_file(path, *args, **kwargs):
+            if path == self.usb / 'playden':
+                path.write_text('unrelated file')
+                raise FileExistsError(errno.EEXIST, 'Non-directory created concurrently')
+            return original_mkdir(path, *args, **kwargs)
+        with patch.object(Path, 'mkdir', create_file):
+            with self.assertRaisesRegex(TransferError, 'Unsafe transfer directory'):
+                _directory(self.usb, 'playden/import', self.drive)
+        self.assertEqual((self.usb / 'playden').read_text(), 'unrelated file')
+        self.assert_source_untouched()
