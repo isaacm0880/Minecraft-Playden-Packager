@@ -71,7 +71,7 @@ def test_external_receiver_requires_pairing_before_send_or_stop_then_sends_exist
         assert not manager.stop_button.isEnabled()
         pump_until(lambda: not window.busy())
         assert window.outcome == 'succeeded', window.log.toPlainText()
-        assert (running.sandbox / 'internal' / window.network_results[0].destination.split('/')[-1] / 'recipe.json').exists()
+        assert (running.sandbox / 'internal' / window.network_results[0].destination.split('/')[-1] / 'playden/recipe.json').exists()
         assert key.hex() not in window.log.toPlainText()
         assert not any(str(settings().value(k)) in (running.code, key.hex()) for k in settings().allKeys())
         manager.stop_button.click()

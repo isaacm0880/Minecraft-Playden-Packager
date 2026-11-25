@@ -164,7 +164,7 @@ class ReleaseGuiTests(unittest.TestCase):
                     for option in ['-Xms2G', '-Xmx4G', '-XX:+AlwaysPreTouch',
                                    '-XX:+UseCompactObjectHeaders', '-XX:+UseStringDeduplication']:
                         self.assertIn(option, words)
-                    self.assertEqual(json.loads((output / 'recipe.json').read_text()), recipe.generate('Minecraft 26.3'))
+                    self.assertEqual(json.loads((output / 'playden/recipe.json').read_text()), recipe.generate('Minecraft 26.3'))
                     self.assertEqual(validate(output), [])
                     self.assertEqual(check_package(output).kind, 'launch-package')
                     self.assertEqual((output / 'instances/default/minecraft/saves/World/level.dat').exists(), True)
@@ -174,7 +174,7 @@ class ReleaseGuiTests(unittest.TestCase):
                         self.assertIn('loader', events)
                     self.assertEqual(source_before, {p.relative_to(root / 'source'): p.read_bytes() for p in (root / 'source').rglob('*') if p.is_file()})
                     if checker := os.environ.get('PLAYDEN_RECIPE_CHECK'):
-                        result = subprocess.run([checker, str(output / 'recipe.json')], capture_output=True, text=True)
+                        result = subprocess.run([checker, str(output / 'playden/recipe.json')], capture_output=True, text=True)
                         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_privacy_cleanup_in_real_fabric_build_precedes_hashing_and_validation(self):
@@ -762,7 +762,7 @@ class ReleaseGuiTests(unittest.TestCase):
                              {p.relative_to(other):p.read_bytes() for p in other.rglob('*') if p.is_file()})
             self.assertFalse((output/'instances/test/minecraft/saves').exists())
             if checker:=os.environ.get('PLAYDEN_RECIPE_CHECK'):
-                self.assertEqual(subprocess.run([checker,str(output/'recipe.json')],capture_output=True).returncode,0)
+                self.assertEqual(subprocess.run([checker,str(output/'playden/recipe.json')],capture_output=True).returncode,0)
 
     def test_reference_profile_blocks_fabric_and_copyable_error_log(self):
         instance,_,_=installed(self.root/'source','26.3','0.20.1');self.select(instance)
@@ -803,7 +803,7 @@ class ReleaseGuiTests(unittest.TestCase):
                     request = LocalBuildRequest(self.window.selected_installation(), output, self.root / 'cache',
                                                 exclude_saves=exclude, file_only=True)
                     self.assertEqual(request.run().kind, 'instance-import')
-                    self.assertFalse((output / 'recipe.json').exists())
+                    self.assertFalse((output / 'playden/recipe.json').exists())
                     self.assertFalse((output / 'playden.args').exists())
                     other = root / 'cli import'
                     argv = ['packager', 'import-instance', '--instance', str(instance), '--output', str(other)]

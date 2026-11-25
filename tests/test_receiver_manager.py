@@ -207,7 +207,7 @@ def test_pairing_credential_can_transfer_and_preserve_import_verification(manage
     with managed() as running:
         paired = pair_receiver('127.0.0.1', running.code, running.control_port)
         result = NetworkRequest(package, '127.0.0.1', paired.key.hex(), port=running.port).run()
-        assert (running.sandbox / 'internal' / result.destination.split('/')[-1] / 'recipe.json').is_file()
+        assert (running.sandbox / 'internal' / result.destination.split('/')[-1] / 'playden/recipe.json').is_file()
         stop_receiver(paired)
         assert package.is_dir()
 

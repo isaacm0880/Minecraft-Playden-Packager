@@ -107,9 +107,16 @@ verification, failures and cancellation cannot authorise cleanup of that package
 
 Packages are copied under `playden/import/<package-name>/`. Use the supported local
 game/folder import in Playden. On builds with game-folder recipe detection, accept
-the offered `recipe.json` to set the launch configuration. Accepting replaces the
+the offered `playden/recipe.json` to set the launch configuration. Accepting replaces the
 game's current settings; choose **Skip** to retain your custom settings.
 If no recipe is offered, configure the executable and arguments below manually.
+
+Vanilla and Fabric recipes include a Minecraft keyboard/mouse controller layout
+by default. Turn off **Use Minecraft keyboard/mouse controller layout** in the
+GUI (remembered), or pass `--no-controller-layout` when building from the CLI,
+for Controlify or other controller mods. This assumes default Minecraft keybinds
+and needs Playden's `controller_layout` setting and a runtime kit with `input-map`.
+[Bindings and runtime requirements](docs/PLAYDEN-RECIPES.md#optional-minecraft-controller-layout).
 
 ```text
 Playden configuration:
@@ -118,6 +125,16 @@ Playden configuration:
 
 Note: Online play limited to offline mode servers, authentication is not yet implemented
 ```
+
+Packages also include `playden/icon.png` and `playden/background.png`, using the
+bundled Minecraft artwork for Vanilla and the supplied Fabric icon for Fabric.
+Choose custom PNGs in **Build advanced options** (remembered), or use CLI
+`--icon PATH --background PATH`. **Use default** restores automatic loader artwork.
+[Artwork requirements and legacy packages](docs/ARTWORK-METADATA.md).
+
+Java 8 packages use a dedicated adapter instead of the argument-file launch
+shown above. Use the generated recipe or copy its exact command from `PLAYDEN.txt`.
+[Java 8 support and physical testing](docs/JAVA8-LAUNCH.md).
 
 Recipe discovery is verified against Playden's `develop` source, not its current
 `main` release line. See [the recipe contract and manual checks](docs/PLAYDEN-RECIPES.md).
@@ -142,6 +159,11 @@ The CLI uses locally installed clients only:
 python -m minecraft_playden build --source local --instance /path/to/instance --output ./My-Package
 python -m minecraft_playden validate ./My-Package
 ```
+
+Fabric preparation runs automatically when its mappings require it, using a
+separate native JDK 17+. Select that tool with `--remap-java PATH` if discovery
+cannot find it. The packaged game runtime keeps its required Java major.
+`--no-prepare-fabric` is an explicit troubleshooting opt-out with a warning.
 
 [Source installation and CLI](docs/INSTALLATION.md#source-installation) ·
 [Changelog](CHANGELOG.md) · [Release provenance](docs/RELEASE.md)

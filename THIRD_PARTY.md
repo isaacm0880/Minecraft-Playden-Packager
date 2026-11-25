@@ -2,13 +2,18 @@
 
 Minecraft Playden Packager code is MIT licensed; see [LICENSE](LICENSE).
 Application artwork was supplied for this project. Original/derived icon hashes
-and generation details are retained in `minecraft_playden/resources/`.
+and generation details are retained in `minecraft_playden/resources/`. The separate
+default Minecraft package icon/background and Fabric, Forge, NeoForge and Quilt
+icon variants were supplied by the maintainer and
+are retained unchanged in `minecraft_playden/resources/artwork/`; their sizes and
+hashes are documented in [artwork metadata](docs/ARTWORK-METADATA.md).
 
 | Component/project | Role and notices |
 | --- | --- |
 | [Playden](https://github.com/leolobato/playden-ps5) | Target runtime; installed separately, not bundled |
 | [Python](https://www.python.org/) | Application runtime; Python licence included in frozen builds |
 | [Qt for Python / PySide6](https://doc.qt.io/qtforpython-6/licenses.html) and Shiboken | Desktop bindings/shared libraries; LGPL option and bundled component notices |
+| [Pillow](https://python-pillow.org/) | PNG-only artwork validation for GUI and CLI; installed Pillow/PIL licence notices retained in frozen builds |
 | [PyInstaller](https://pyinstaller.org/) | Freezer; distribution retains its licence and applicable bootloader exception |
 | [AppImage](https://appimage.org/) | Linux distribution tooling/runtime; pinned build tools and notices retained |
 | [Fabric](https://fabricmc.net/), [Prism Launcher](https://prismlauncher.org/), MultiMC | Installed-profile metadata/resolution compatibility; metadata fixture provenance retained |

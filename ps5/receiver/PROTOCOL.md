@@ -46,6 +46,12 @@ command except DATA, or ERROR (129) containing a bounded UTF-8 error, then close
 4. VERIFY (5), empty payload, after exactly the declared entries and total bytes.
    Receiver re-reads and hashes every staged file, rejects links and extra entries,
    and checks the recipe, required runtime/argument files and immutable inventory.
+   It accepts either the current `playden/recipe.json` plus inventoried PNG artwork,
+   or a legacy root recipe. Ambiguous locations, malformed/oversized PNGs and
+   missing artwork inventory entries are refused.
+   Recipes may omit controller defaults or carry exactly the packager's Minecraft
+   keyboard/mouse layout. Unknown, partial or changed defaults are refused; every
+   existing required recipe field remains mandatory.
    VERIFY_PROGRESS (130) replies contain verified_bytes:u64, total_bytes:u64.
    ACK `verified` means staging passed; it does not publish. Cancellation remains
    available throughout this phase. After VERIFY only COMMIT is accepted.

@@ -29,7 +29,7 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
             if progress is not None:
                 progress(Progress('validation', 'Verifying package inventory and SHA-256 hashes…', number, total, name))
         if inventory.get('kind') == 'instance-import':
-            if (root / 'recipe.json').exists() or (root / 'recipe.json').is_symlink():
+            if any((root / name).exists() or (root / name).is_symlink() for name in (recipe.PATH, recipe.LEGACY_PATH)):
                 errors.append('A file-only instance import must not contain a launch recipe')
             if inventory.get('launch_status') != 'unverified':
                 errors.append('An instance import cannot claim a verified launch')
@@ -44,10 +44,12 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
             if any(name.startswith('instances/') for name in inventory['files']):
                 errors.append('Imported user data must be separate from immutable files')
             return errors
-        recipe_path = recipe.PATH
+        recipe_path = recipe.location(root)
         for name in ('java/bin/java.exe', 'java/bin/server/jvm.dll', 'java/release', 'playden.args', recipe_path, 'metadata/version.json'):
             if name not in inventory['files']:
                 errors.append(f'Required file absent from inventory: {name}')
+        from . import artwork
+        errors.extend(artwork.validate(root, inventory['files'], required=recipe_path == recipe.PATH))
         metadata = json.loads((root / 'metadata/version.json').read_text(encoding='utf-8'))
         if metadata['id'] != inventory['version']:
             errors.append('Package version does not match exported Minecraft metadata')

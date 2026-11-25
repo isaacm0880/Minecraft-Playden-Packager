@@ -199,10 +199,10 @@ def test_rehashed_java8_package_tampering_cannot_bypass_validation(tmp_path, fau
     elif fault == 'command-and-recipe':
         command = (root / java8.COMMAND).read_text().replace('-Xmx4G', '-Xmx8G')
         (root / java8.COMMAND).write_text(command)
-        recipe = json.loads((root / 'recipe.json').read_text())
+        recipe = json.loads((root / 'playden/recipe.json').read_text())
         recipe['launch_entries'][0]['arguments'] = command
-        (root / 'recipe.json').write_text(json.dumps(recipe))
-        changed += [java8.COMMAND, 'recipe.json']
+        (root / 'playden/recipe.json').write_text(json.dumps(recipe))
+        changed += [java8.COMMAND, 'playden/recipe.json']
     elif fault == 'inventory':
         del inventory['files'][java8.JAR]
     else:
@@ -248,7 +248,7 @@ def test_java8_cli_builds_exact_runtime_and_preserves_controller_optout(tmp_path
         assert main() == 0
     assert validate(output) == []
     assert json.loads((output / 'metadata/runtime.json').read_text())['major'] == 8
-    recipe = json.loads((output / 'recipe.json').read_text())
+    recipe = json.loads((output / 'playden/recipe.json').read_text())
     assert 'defaults' not in recipe and recipe['launch_entries'][0]['arguments'] == (output / java8.COMMAND).read_text()
 
 
@@ -260,6 +260,6 @@ def test_actual_playden_parser_and_old_argument_budget(tmp_path):
     root = build_package(tmp_path, legacy=True)
     assert len((root / java8.COMMAND).read_bytes()) <= 512
     for flags in ([], ['--no-long-arguments'], ['--no-input-map']):
-        result = subprocess.run([checker, str(root / 'recipe.json'), *flags], capture_output=True, text=True)
+        result = subprocess.run([checker, str(root / 'playden/recipe.json'), *flags], capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         assert java8.MAIN in result.stdout

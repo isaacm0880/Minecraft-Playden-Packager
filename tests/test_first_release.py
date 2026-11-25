@@ -10,7 +10,7 @@ from minecraft_playden.cli import main
 from minecraft_playden.exporter import INSTRUCTIONS
 
 EXPECTED = '''Import this package folder in Playden. On builds with game-folder recipe detection,
-choose Use recipe when offered the included recipe.json. Accepting it replaces
+choose Use recipe when offered the included playden/recipe.json. Accepting it replaces
 the game's current settings; choose Skip to keep your custom settings.
 
 If no recipe is offered, configure these settings manually:
@@ -79,7 +79,7 @@ def test_current_guides_have_exact_configuration_and_no_obsolete_workflows():
         text = (root / guide).read_text(encoding="utf-8")
         manual = 'Playden configuration:' + EXPECTED.split('Playden configuration:', 1)[1]
         assert manual in text, guide
-        assert 'recipe.json' in text and 'Skip' in text, guide
+        assert 'playden/recipe.json' in text and 'Skip' in text, guide
     for guide in [root / 'README.md', *sorted((root / 'docs').glob('*.md'))]:
         text = guide.read_text(encoding="utf-8").casefold()
         for removed in ('recipe → import', 'recipe > import', '--source microsoft',

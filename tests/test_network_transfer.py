@@ -22,8 +22,9 @@ from test_network_receiver import receiver, receiver_binary, wait_clean
 
 
 @pytest.fixture
-def built_package(tmp_path):
-    return build_package(tmp_path)
+def built_package(tmp_path, request):
+    return build_package(tmp_path, controller_layout=getattr(request, 'param', True) is not False,
+                         legacy=getattr(request, 'param', True) == 'java8')
 
 
 def snapshot(path):
@@ -106,6 +107,7 @@ def test_client_streams_complete_package_on_every_host(built_package, pipeline):
     assert result.files == len(received)
 
 
+@pytest.mark.parametrize('built_package', [True, False, 'java8'], indirect=True, ids=['controller-on', 'controller-off', 'java8'])
 @pytest.mark.parametrize('destination,root', [('internal', 'internal'), ('usb0', 'usb0/playden/import')])
 def test_complete_client_transfer_preserves_every_local_byte(receiver, built_package, destination, root):
     before = snapshot(built_package)
@@ -161,7 +163,7 @@ def test_cancellation_after_commit_resolves_receipt(receiver, built_package):
     with receiver() as (sandbox, port, token), patch.object(Session, 'send', send):
         result = NetworkRequest(built_package, '127.0.0.1', token, port=port).run(cancellation=cancellation)
         assert result.destination.endswith('/' + built_package.name)
-        assert (sandbox / 'internal' / built_package.name / 'recipe.json').is_file()
+        assert (sandbox / 'internal' / built_package.name / 'playden/recipe.json').is_file()
 
 
 def test_lost_completion_receipt_reports_uncertainty_and_keeps_files(receiver, built_package):
@@ -412,7 +414,7 @@ def test_lost_or_invalid_optional_metrics_never_revoke_confirmed_publication(rec
         with patch.object(Session, 'send', send), patch.object(Session, 'ack', ack):
             result = NetworkRequest(built_package, '127.0.0.1', token, port=port).run()
         assert metrics_requested and result.receiver_metrics is None
-        assert (sandbox / 'internal' / built_package.name / 'recipe.json').is_file()
+        assert (sandbox / 'internal' / built_package.name / 'playden/recipe.json').is_file()
 
 
 def test_custom_name_can_override_invalid_recorded_instance_name(receiver, built_package):
@@ -505,10 +507,11 @@ def test_invalid_profile_is_discarded_without_losing_schema_one_metrics(receiver
         assert (sandbox / 'internal' / built_package.name).is_dir()
 
 
-def test_prepared_fabric_cache_survives_actual_receiver_publication(receiver, tmp_path):
+@pytest.mark.parametrize('version', ['1.20.1', '1.16', '1.14.4'])
+def test_prepared_fabric_cache_survives_actual_receiver_publication(receiver, tmp_path, version):
     from test_fabric_remap import fixture_package
     from minecraft_playden.fabric_remap import RECORD
-    package, _ = fixture_package(tmp_path / 'remapping', prepared=True)
+    package, _ = fixture_package(tmp_path / 'remapping', version, prepared=True)
     before = snapshot(package)
     with receiver() as (sandbox, port, token):
         NetworkRequest(package, '127.0.0.1', token, 'internal', port).run()

@@ -20,16 +20,16 @@ class RecipeTests(unittest.TestCase):
         recipe.write(self.root, 'Minecraft 26.3')
 
     def save(self, document):
-        (self.root / 'recipe.json').write_text(json.dumps(document), encoding='utf-8')
+        (self.root / 'playden/recipe.json').write_text(json.dumps(document), encoding='utf-8')
 
     def test_minimal_contract_and_working_folder(self):
-        document = json.loads((self.root / 'recipe.json').read_text())
+        document = json.loads((self.root / 'playden/recipe.json').read_text())
         self.assertEqual(set(document), {'recipe_id', 'recipe_version', 'game', 'launch_entries',
                                          'executable', 'architecture', 'graphics', 'community', 'defaults'})
         self.assertEqual(document['community'], {'format_version': 1, 'status': 'untested'})
         self.assertEqual(document['architecture'], 'pe64')
         self.assertNotIn('environment', document)
-        self.assertLessEqual((self.root / 'recipe.json').stat().st_size, recipe.MAX_RECIPE_BYTES)
+        self.assertLessEqual((self.root / 'playden/recipe.json').stat().st_size, recipe.MAX_RECIPE_BYTES)
         entry = document['launch_entries'][0]
         self.assertNotIn('working_directory', entry)
         self.assertEqual((self.root / entry['executable']).parent, self.root / 'java/bin')
@@ -91,7 +91,7 @@ class RecipeTests(unittest.TestCase):
                 self.assertEqual(recipe.validate(self.root, name), [])
 
     def test_missing_launch_files(self):
-        for name in [recipe.PROGRAM, 'playden.args', 'recipe.json']:
+        for name in [recipe.PROGRAM, 'playden.args', 'playden/recipe.json']:
             with self.subTest(name=name):
                 path = self.root / name
                 original = path.read_bytes()
@@ -121,7 +121,7 @@ class RecipeTests(unittest.TestCase):
     def test_escaping_symlinks(self):
         outside = Path(self.temporary.name) / 'outside'
         outside.write_text('outside')
-        for name in [recipe.PROGRAM, 'playden.args', 'recipe.json']:
+        for name in [recipe.PROGRAM, 'playden.args', 'playden/recipe.json']:
             with self.subTest(name=name):
                 path = self.root / name
                 original = path.read_bytes()
@@ -141,7 +141,7 @@ class RecipeTests(unittest.TestCase):
                 self.save(document)
                 self.assertTrue(recipe.validate(self.root))
         for text in ['{', '\ufffd', ' ' * (recipe.MAX_RECIPE_BYTES + 1)]:
-            (self.root / 'recipe.json').write_text(text, encoding='utf-8')
+            (self.root / 'playden/recipe.json').write_text(text, encoding='utf-8')
             self.assertTrue(recipe.validate(self.root))
         for field, value in [('architecture', 'pe32'), ('graphics', 'dxvk'),
                              ('recipe_version', True), ('recipe_version', 1.0), ('defaults', {}),
@@ -159,10 +159,10 @@ class RecipeTests(unittest.TestCase):
         custom = recipe.generate('Custom Minecraft')
         custom['launch_entries'][0]['arguments'] = '@my-custom.args'
         self.save(custom)
-        original = (self.root / 'recipe.json').read_bytes()
+        original = (self.root / 'playden/recipe.json').read_bytes()
         with self.assertRaises(FileExistsError):
             recipe.write(self.root, 'Minecraft 1.21')
-        self.assertEqual((self.root / 'recipe.json').read_bytes(), original)
+        self.assertEqual((self.root / 'playden/recipe.json').read_bytes(), original)
 
     @unittest.skipUnless(os.environ.get('PLAYDEN_RECIPE_CHECK'), 'Set PLAYDEN_RECIPE_CHECK for upstream integration')
     def test_upstream_parser_rules_and_effective_launch(self):
@@ -170,13 +170,13 @@ class RecipeTests(unittest.TestCase):
         for name in ['Minecraft 26.3', 'Crème Brûlée & Clockwork — déjà vu', 'ＦＵＬＬ　ＷＩＤＴＨ', '世界', 'x' * 120]:
             with self.subTest(name=name):
                 self.save(recipe.generate(name))
-                result = subprocess.run([checker, str(self.root / 'recipe.json')], capture_output=True, text=True)
+                result = subprocess.run([checker, str(self.root / 'playden/recipe.json')], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn('cwd java/bin, opengl', result.stdout)
         for enabled in (True, False):
             for capability in (True, False):
                 self.save(recipe.generate('Minecraft 26.3', controller_layout=enabled))
-                command = [checker, str(self.root / 'recipe.json')]
+                command = [checker, str(self.root / 'playden/recipe.json')]
                 if not capability:
                     command.append('--no-input-map')
                 result = subprocess.run(command, capture_output=True, text=True)
@@ -186,5 +186,5 @@ class RecipeTests(unittest.TestCase):
                 document = recipe.generate('Minecraft 26.3')
                 del document[field]
                 self.save(document)
-                result = subprocess.run([checker, str(self.root / 'recipe.json')], capture_output=True, text=True)
+                result = subprocess.run([checker, str(self.root / 'playden/recipe.json')], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)

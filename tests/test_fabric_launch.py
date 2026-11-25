@@ -252,9 +252,9 @@ class FabricLaunchTests(unittest.TestCase):
             self.assertIn('-Dlog4j.configurationFile=../../assets/log_configs/client.xml', words)
             self.assertEqual(any('libraries.minecraft.net/org/lwjgl/' in url for url in requested), not uncached_lwjgl)
         self.assertFalse((output / 'launch.args').exists())
-        self.assertTrue((output / 'recipe.json').is_file())
+        self.assertTrue((output / 'playden/recipe.json').is_file())
         if checker := os.environ.get('PLAYDEN_RECIPE_CHECK'):
-            result = subprocess.run([checker, str(output / 'recipe.json')], capture_output=True, text=True)
+            result = subprocess.run([checker, str(output / 'playden/recipe.json')], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(any('meta.fabricmc.net/' in url for url in requested), fallback)
         return output, instance, data, base
@@ -269,7 +269,7 @@ class FabricLaunchTests(unittest.TestCase):
                         output, _, _, _ = self.build_fixture(root / f'{desktop}-{enabled}', '1.20.1', '0.16.10',
                                                              'prism', desktop=desktop, cli=not desktop,
                                                              controller_layout=enabled)
-                        document = json.loads((output / 'recipe.json').read_text())
+                        document = json.loads((output / 'playden/recipe.json').read_text())
                         self.assertEqual('defaults' in document, enabled)
                         if enabled:
                             self.assertEqual(document['defaults']['controller'], 'keyboard')

@@ -973,3 +973,43 @@ def test_receiver_java8_adapter_is_bound_to_inventory_and_recipe(receiver, fault
         else:
             with pytest.raises(NetworkTransferError, match='Invalid recipe'):
                 verify(session)
+
+
+@pytest.mark.parametrize('fault', ['valid', 'missing-icon', 'unlisted-art', 'bad-crc', 'bad-dimensions', 'both-recipes', 'legacy-unlisted-art'])
+def test_receiver_current_metadata_layout_and_artwork_are_strict(receiver, fault):
+    from test_artwork import png
+    files = contents()
+    if fault != 'legacy-unlisted-art':
+        files['playden/recipe.json'] = files.pop('recipe.json')
+        files['playden/background.png'] = png((48, 24))
+    files['playden/icon.png'] = png()
+    if fault == 'missing-icon':
+        del files['playden/icon.png']
+    elif fault == 'bad-crc':
+        data = bytearray(files['playden/icon.png'])
+        data[-1] ^= 1
+        files['playden/icon.png'] = bytes(data)
+    elif fault == 'bad-dimensions':
+        import struct
+        data = bytearray(files['playden/icon.png'])
+        struct.pack_into('>I', data, 16, 8193)
+        files['playden/icon.png'] = bytes(data)
+    elif fault == 'both-recipes':
+        files['recipe.json'] = files['playden/recipe.json']
+    files['package.json'] = inventory(files)
+    if fault in ('unlisted-art', 'legacy-unlisted-art'):
+        record = json.loads(files['package.json'])
+        del record['files']['playden/icon.png']
+        files['package.json'] = json.dumps(record).encode()
+    with receiver() as (sandbox, port, token), paired(port, token) as session:
+        upload(session, files)
+        if fault == 'valid':
+            verify(session)
+            session.send(COMMIT)
+            session.ack()
+            output = sandbox / 'internal/Package/playden'
+            assert (output / 'recipe.json').read_bytes() == files['playden/recipe.json']
+            assert (output / 'icon.png').read_bytes() == files['playden/icon.png']
+        else:
+            with pytest.raises(NetworkTransferError, match='Invalid recipe'):
+                verify(session)

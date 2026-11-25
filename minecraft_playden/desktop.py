@@ -47,8 +47,13 @@ class LocalBuildRequest:
     remap_java: Path | None = None
     offline: bool = False
     controller_layout: bool = True
+    icon_artwork: Path | None = None
+    background_artwork: Path | None = None
 
     def validate(self) -> None:
+        if not self.file_only:
+            from .artwork import check_sources
+            check_sources(self.icon_artwork, self.background_artwork)
         if self.installation.build_problem and not self.file_only:
             raise ValueError(self.installation.build_problem)
         if self.file_only:
@@ -121,7 +126,8 @@ class LocalBuildRequest:
               progress=progress, cancellation=cancellation, exclude_saves=self.exclude_saves,
               launch_profile=self.launch_profile, privacy_cleanup=self.privacy_cleanup,
               instance_name=self.installation.name, prepare_fabric='auto' if self.prepare_fabric else False,
-              remap_java=self.remap_java, controller_layout=self.controller_layout)
+              remap_java=self.remap_java, controller_layout=self.controller_layout,
+              icon_artwork=self.icon_artwork, background_artwork=self.background_artwork)
         protected = tuple(path for path in (self.installation.instance, self.installation.launcher_root,
                                              self.installation.libraries_root,
                                              self.installation.client.parent if self.installation.client else None)
@@ -216,13 +222,19 @@ def selection_readiness(installations: list[Installation], output: str, cache: s
                         busy: bool = False, *, username: str = 'Player',
                         privacy_cleanup: bool = True, allow_runtime_download: bool = True, offline: bool = False,
                         prepare_fabric: bool = True, remap_java: Path | None = None,
-                        controller_layout: bool = True) -> tuple[list[LocalBuildRequest], str]:
+                        controller_layout: bool = True, icon_artwork: Path | None = None,
+                        background_artwork: Path | None = None) -> tuple[list[LocalBuildRequest], str]:
     """Capture every selected row; no partial queue if any input is blocked."""
     from dataclasses import replace
     if busy:
         return [], 'An operation is in progress. Wait for it to finish.'
     if not installations:
         return [], 'Select a detected installation or add a source folder.'
+    try:
+        from .artwork import check_sources
+        check_sources(icon_artwork, background_artwork)
+    except (OSError, ValueError) as exc:
+        return [], f'Cannot use artwork: {exc}'
     requests = []
     problems = []
     reserved: set[Path] = set()
@@ -241,7 +253,8 @@ def selection_readiness(installations: list[Installation], output: str, cache: s
             else:
                 requests.append(replace(request, privacy_cleanup=privacy_cleanup, allow_runtime_download=allow_runtime_download,
                                         prepare_fabric=prepare_fabric, remap_java=remap_java, offline=offline,
-                                        controller_layout=controller_layout))
+                                        controller_layout=controller_layout, icon_artwork=icon_artwork,
+                                        background_artwork=background_artwork))
         except (OSError, ValueError, RuntimeError) as exc:
             problems.append(f'{installation.name}: {exc}')
     if problems:

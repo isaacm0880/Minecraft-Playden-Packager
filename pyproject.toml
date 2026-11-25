@@ -8,6 +8,7 @@ dynamic = ["version"]
 description = "Package local Minecraft Java instances for Playden with a desktop GUI and offline CLI"
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = ["Pillow>=12,<13"]
 license = "MIT"
 
 [project.scripts]
@@ -30,7 +31,7 @@ version = {attr = "minecraft_playden.__version__"}
 include = ["minecraft_playden*"]
 
 [tool.setuptools.package-data]
-minecraft_playden = ["resources/icons/*.png", "resources/icons/*.ico", "resources/icons/*.icns", "resources/icons/*.json", "resources/remap/*.java", "resources/java8/*.java", "resources/java8/*.class"]
+minecraft_playden = ["resources/icons/*.png", "resources/icons/*.ico", "resources/icons/*.icns", "resources/icons/*.json", "resources/remap/*.java", "resources/java8/*.java", "resources/java8/*.class", "resources/artwork/*.png"]
 
 [tool.mypy]
 python_version = "3.11"

@@ -23,5 +23,5 @@ beside its native map. Fabric Meta profiles inherit the corresponding Mojang bas
 Live inspection also confirmed the Prism map format in every stable release from
 1.14 through 1.18.2 (including intermediate patch releases). 1.19, 1.19.1 and
 1.19.2 use standalone native artifacts instead. This is a metadata-format boundary,
-not a hardcoded supported-version boundary. 1.14.4 and 1.16 remain blocked by
-the existing Java 8 argument-file restriction. No runtime substitution is made.
+not a hardcoded supported-version boundary. 1.14.4 and 1.16 now use the dedicated Java 8 adapter. No runtime substitution
+is made; package success is not physical compatibility evidence.

@@ -24,6 +24,7 @@ int main(int argc, char** argv) {
     // The folder discovery path uses this same import preparation, including
     // field allowlists, size limits, serialization and community refusals.
     if (std::string(playden::stores::local::kFolderRecipeName) != "recipe.json" ||
+        std::string(playden::stores::local::kGameFolderDirectory) != "playden" ||
         text.size() > playden::stores::local::kMaxFolderRecipeBytes) return 1;
     std::string import_error;
     if (!playden::community::PrepareImportedRecipe(text, &import_error)) {

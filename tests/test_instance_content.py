@@ -66,7 +66,7 @@ class InstanceContentTests(unittest.TestCase):
         self.assertFalse(any(name.startswith('instances/') for name in manifest['files']))
         self.assertEqual(manifest['launch_status'], 'unverified')
         self.assertFalse((self.output / 'playden.args').exists())
-        self.assertFalse((self.output / 'recipe.json').exists())
+        self.assertFalse((self.output / 'playden/recipe.json').exists())
         self.assertFalse((self.output / 'launch.args').exists())
         self.assertFalse((self.output / 'java').exists())
         # Playing/changing imported data never invalidates immutable metadata.
@@ -260,7 +260,7 @@ class InstanceContentTests(unittest.TestCase):
     def test_user_recipe_file_is_preserved_as_data_without_root_launch_recipe(self):
         self.put('recipe.json', '{"custom mod data":true}')
         import_instance(self.instance, self.output)
-        self.assertFalse((self.output / 'recipe.json').exists())
+        self.assertFalse((self.output / 'playden/recipe.json').exists())
         self.assertEqual((self.output / 'instances/default/minecraft/recipe.json').read_bytes(),
                          (self.game / 'recipe.json').read_bytes())
         self.assertEqual(validate(self.output), [])

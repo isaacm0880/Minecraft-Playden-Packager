@@ -54,7 +54,7 @@ def licenses(root: Path, stage: Path) -> None:
             if copyright_file.is_file():
                 shutil.copyfile(copyright_file, native / (copyright_file.parent.name + '.txt'))
     notices = []
-    for name in ('PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'certifi', 'PyInstaller', 'cryptography', 'cffi', 'pycparser'):
+    for name in ('PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'certifi', 'PyInstaller', 'cryptography', 'cffi', 'pycparser', 'Pillow'):
         distribution = packages.distribution(name)
         headers = distribution.metadata.json
         notices.append(f'{name} {distribution.version}\n{headers.get("license_expression") or headers.get("license", "See bundled license files")}')
@@ -79,7 +79,7 @@ def licenses(root: Path, stage: Path) -> None:
 
 def bundle_documentation(root: Path, destination: Path, macos: bool = False) -> None:
     """Retain the installation guide's local links and licence/credit notices."""
-    for name in ('INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md', 'TROUBLESHOOTING.md', 'PLAYDEN-RECIPES.md',
+    for name in ('INSTALLATION.md', 'USAGE.md', 'COMPATIBILITY.md', 'TROUBLESHOOTING.md', 'PLAYDEN-RECIPES.md', 'JAVA8-LAUNCH.md', 'ARTWORK-METADATA.md',
                  'PS5_LAN_TRANSFER.md', 'PS5_LAN_PERFORMANCE.md', 'FTP_FEASIBILITY.md', 'PS5_RECEIVER_SHUTDOWN.md', 'PS5_RECEIVER_MANAGER.md'):
         text = (root / 'docs' / name).read_text(encoding='utf-8')
         text = text.replace('../ps5/receiver/PROTOCOL.md', 'receiver/PROTOCOL.md')
@@ -91,9 +91,10 @@ def bundle_documentation(root: Path, destination: Path, macos: bool = False) -> 
         shutil.copyfile(root / 'docs/benchmarks' / name, destination / 'benchmarks' / name)
     shutil.copyfile(root / 'docs/INSTALLATION.md', destination / 'README.md')
     for name in ('CHANGELOG.md', 'THIRD_PARTY.md', 'LICENSE'):
-        if name == 'CHANGELOG.md':
+        if name in ('CHANGELOG.md', 'THIRD_PARTY.md'):
             text = (root / name).read_text(encoding='utf-8')
             text = text.replace('docs/PLAYDEN-RECIPES.md', 'PLAYDEN-RECIPES.md')
+            text = text.replace('docs/ARTWORK-METADATA.md', 'ARTWORK-METADATA.md')
             (destination / name).write_text(text, encoding='utf-8')
         else:
             shutil.copyfile(root / name, destination / name)
@@ -143,7 +144,7 @@ def main() -> int:
                    'machine': platform.machine(), 'architecture': architecture, 'libc': platform.libc_ver(),
                    'python_distributions': subprocess.check_output([sys.executable, '-m', 'pip', 'freeze', '--all'], text=True).splitlines(),
                    'dependencies': {name: packages.version(name) for name in
-                                    ('PyInstaller', 'pyinstaller-hooks-contrib', 'PySide6', 'certifi')}})
+                                    ('PyInstaller', 'pyinstaller-hooks-contrib', 'PySide6', 'certifi', 'Pillow')}})
     source['branding'] = icons(root, stage)
     write_json(stage / 'build-metadata.json', source)
     licenses(root, stage)

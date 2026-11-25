@@ -103,7 +103,7 @@ def test_cli_deploys_real_encrypted_receiver_and_transfers_without_a_code_prompt
          patch('minecraft_playden.receiver_manager.stop_receiver') as stop, patch('getpass.getpass') as prompt:
         assert main() == 0, error.getvalue()
     prompt.assert_not_called(); stop.assert_not_called()
-    assert (sandbox / 'internal/CLI Progress Test/recipe.json').is_file()
+    assert (sandbox / 'internal/CLI Progress Test/playden/recipe.json').is_file()
     text = output.getvalue() + error.getvalue()
     assert sessions[0].key.hex() not in text and sessions[0].pairing_code not in text
     assert 'PDLAN2_BOOTSTRAP' not in text
@@ -204,7 +204,7 @@ def test_cli_reuses_authenticated_receiver_without_sdk_or_stopping_it(managed, t
             assert main() == 0
         launch.assert_not_called(); prompt.assert_not_called()
         assert running.process.poll() is None
-        assert (running.sandbox / 'internal' / package.name / 'recipe.json').is_file()
+        assert (running.sandbox / 'internal' / package.name / 'playden/recipe.json').is_file()
         logs = capsys.readouterr()
         assert 'Existing receiver authenticated' in logs.err
         assert running.master.hex() not in logs.out + logs.err and running.code not in logs.out + logs.err

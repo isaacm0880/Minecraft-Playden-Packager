@@ -44,6 +44,8 @@ def main() -> int:
     prepare.add_argument('path', type=Path)
     prepare.add_argument('--output', type=Path, required=True)
     prepare.add_argument('--remap-java', type=Path, help='Host-native JDK java executable (Linux/Windows/macOS)')
+    package.add_argument('--icon', dest='icon_artwork', type=Path, help='Custom Playden icon PNG (default: automatic loader artwork, Minecraft fallback)')
+    package.add_argument('--background', dest='background_artwork', type=Path, help='Custom Playden background PNG (default: automatic loader artwork, Minecraft fallback)')
     package.add_argument('--no-controller-layout', dest='controller_layout', action='store_false',
                          help='Omit built-in keyboard/mouse controller mappings for Controlify or other controller mods')
     package.add_argument('--exclude-saves', action='store_true', help='Omit world saves; worlds are included by default')
@@ -182,7 +184,8 @@ def main() -> int:
                 instance_name = installations[0].name if len(installations) == 1 else args.output.name
                 build(args.output, downloader, source, args.username, launch_profile=args.launch_profile,
                       exclude_saves=args.exclude_saves, instance_name=instance_name,
-                      prepare_fabric=args.prepare_fabric, remap_java=args.remap_java, controller_layout=args.controller_layout)
+                      prepare_fabric=args.prepare_fabric, remap_java=args.remap_java, controller_layout=args.controller_layout,
+                      icon_artwork=args.icon_artwork, background_artwork=args.background_artwork)
                 instructions = INSTRUCTIONS
                 from .java8 import COMMAND
                 if (args.output / COMMAND).is_file():

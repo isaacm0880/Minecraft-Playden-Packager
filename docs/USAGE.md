@@ -31,7 +31,7 @@ matching verified local or cached runtime is available. **Build advanced options
 contains **Allow Windows Java runtime download if missing** and an **Offline**
 option to forbid all downloads. You can also provide
 a matching Java home at `CACHE/runtimes/java-MAJOR-windows-x64`; known local launcher
-runtime locations are also checked. Java 8 remains blocked because the preserved
+runtime locations are also checked. Java 8 uses a dedicated adapter; the original
 Playden launch command uses Java launcher argument files, introduced in Java 9.
 See [compatibility](COMPATIBILITY.md) for the tested metadata matrix and limitations.
 
@@ -67,8 +67,10 @@ are retained; no receiver protocol change is involved.
 
 Minecraft 1.20.1 Vanilla and 1.20.1 + Fabric Loader 0.20.1 with native pre-remapping
 are confirmed reaching the PS5 main menu. This does not establish world loading
-or compatibility with every mod. Optional manual CLI preparation remains available;
-see [compatibility](COMPATIBILITY.md) for its scope and limits.
+or compatibility with every mod. CLI builds now prepare automatically too;
+`--remap-java PATH` selects the native JDK, while `--no-prepare-fabric` explicitly
+opts out with a warning. Validation reports required/prepared status separately
+from structural validity. See [compatibility](COMPATIBILITY.md) for scope and limits.
 
 Build runs instances sequentially. Each keeps its own progress, result and error;
 a failure during an accepted queue does not stop later items. Cancel stops current
@@ -151,7 +153,7 @@ See [receiver setup and physical testing](PS5_LAN_TRANSFER.md).
 
 Use your installed Playden version's supported local-game/folder flow for the copied
 package. On builds with game-folder recipe detection, choose **Use recipe** when
-the root `recipe.json` is offered. This replaces the game's current settings;
+`playden/recipe.json` is offered. This replaces the game's current settings;
 choose **Skip** to keep custom settings. If no recipe is offered, configure manually:
 
 ```text

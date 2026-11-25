@@ -10,6 +10,12 @@ their separate staging roots `/data/playden-packager-temp/`,
 `/mnt/usb0/playden-packager-temp/`. Existing package names
 are refused. A six-digit, short-lived PAKE code is generated each session and shown in the PS5 notification. The strong transfer credential is never printed.
 
+The strict recipe check accepts both the built-in Minecraft controller layout and
+recipes without controller defaults. Rebuild and restart the receiver from this
+checkout before transferring enabled-layout packages: older receiver binaries
+reject the added defaults. Opt-out packages retain the previous recipe format.
+The wire protocol, pairing and inventory checks are unchanged.
+
 Host integration compiles these same sources with `HOST_TEST`. Host binaries
 require `--test-root` and redirect both destinations into a temporary sandbox;
 they cannot default to physical import paths. Test-only quota/fault options are
@@ -32,3 +38,10 @@ Use `make -B DIAGNOSTICS=1` for numeric per-connection timings. Optional
 OS buffers. `-B` is required when changing these build variables. Host binaries
 also accept `--diagnostics` and `--socket-buffer BYTES`. See the
 [benchmark investigation](../../docs/PS5_LAN_PERFORMANCE.md) before changing defaults.
+
+New packages use `playden/recipe.json`, `playden/icon.png` and
+`playden/background.png`. The receiver accepts legacy root-level recipes too,
+but refuses both locations together. New-layout artwork must be inventoried,
+bounded PNG data with valid dimensions, complete chunks and CRCs. The Python
+packager also fully decodes the PNG before sending. Restart a receiver rebuilt
+from this checkout for these packages; the pairing/wire formats are unchanged.

@@ -146,8 +146,9 @@ class NetworkRequest:
         errors = validate(source, token)
         if errors:
             raise ValueError('Package validation failed: ' + '\n'.join(errors))
-        if not (source / 'recipe.json').is_file():
-            raise ValueError('PS5 transfer requires a launch package with recipe.json.')
+        from .recipe import location
+        if not (source / location(source)).is_file():
+            raise ValueError('PS5 transfer requires a launch package with a Playden recipe.')
         name = package_destination_name(source, self.package_name)
         encoded_name = safe_relative(name, package=True)
         report('network-details', f'Local package: {source.name}\nPS5 destination: {name}\nStorage: {self.destination.upper()}\nTransfer method: Playden Receiver\nDestination path: {ROOTS[self.destination]}/{name}')

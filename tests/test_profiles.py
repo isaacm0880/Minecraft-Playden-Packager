@@ -117,10 +117,10 @@ class ProfileTests(unittest.TestCase):
                 return
             build(output, Downloader(root / 'cache'), ClientSource('local', version='26.3', instance=instance, client_jar=FIXTURES / 'client.jar'), progress=events.append, launch_profile=profile, exclude_saves=exclude_saves)
             self.assertEqual(validate(output), [])
-            self.assertEqual(json.loads((output / 'recipe.json').read_text()), recipe.generate('Minecraft 26.3'))
+            self.assertEqual(json.loads((output / 'playden/recipe.json').read_text()), recipe.generate('Minecraft 26.3'))
             self.assertFalse((output / 'launch.args').exists())
             inventory = json.loads((output / 'package.json').read_text())
-            self.assertIn('recipe.json', inventory['files'])
+            self.assertIn('playden/recipe.json', inventory['files'])
             self.assertNotIn('launch.args', inventory['files'])
             game = output / profiles.game_directory(profile)
             self.assertEqual((game / 'saves/world/level.dat').exists(), not exclude_saves)
@@ -128,7 +128,7 @@ class ProfileTests(unittest.TestCase):
             tokens = arguments.parse_argfile((output / 'playden.args').read_text())
             self.assertEqual((output / 'java/bin' / tokens[tokens.index('--gameDir') + 1]).resolve(), game.resolve())
             if checker := os.environ.get('PLAYDEN_RECIPE_CHECK'):
-                result = subprocess.run([checker, str(output / 'recipe.json')], capture_output=True, text=True)
+                result = subprocess.run([checker, str(output / 'playden/recipe.json')], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
             # Runtime user data stays mutable for both launch profiles.
             (game / 'custom-mod-data/token').write_bytes(b'changed')

@@ -66,7 +66,8 @@ static void scan_imports(const char *root, const char *label) {
         struct stat info;
         /* Never traverse a symlinked package directory. */
         if (lstat(folder, &info) != 0 || !S_ISDIR(info.st_mode)) continue;
-        int recipe = regular_file(folder, "recipe.json");
+        const char *recipe_path = recipe_name(folder);
+        int recipe = recipe_path && regular_file(folder, recipe_path);
         int args = regular_file(folder, "playden.args");
         int java = regular_file(folder, "java/bin/java.exe");
         printf("package_root=%s package=%s recipe=%s args=%s java=%s status=%s\n",

@@ -145,7 +145,7 @@ def test_gui_uses_folder_name_and_receives_metrics(ready, tmp_path, request):
         assert window.network_results[0].destination.endswith('/' + package.name)
         assert window.network_results[0].receiver_metrics['published'] == 1
         assert 'Receiver:' in window.log.toPlainText()
-        assert (sandbox / 'internal' / package.name / 'recipe.json').is_file()
+        assert (sandbox / 'internal' / package.name / 'playden/recipe.json').is_file()
 
 
 def test_folder_default_and_pipeline_survive_repeat_with_completion_return(ready):

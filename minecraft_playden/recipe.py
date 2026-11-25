@@ -1,14 +1,16 @@
-"""Format-1 recipe at the game folder root, discovered by Playden on import.
+"""Format-1 recipe in the game's playden metadata directory, discovered on import.
 
 See docs/PLAYDEN-RECIPES.md for the verified upstream contract and precedence.
 """
 import json
 import re
+import stat
 import unicodedata
 from pathlib import Path
 from .downloads import safe_path
 
-PATH = 'recipe.json'
+PATH = 'playden/recipe.json'
+LEGACY_PATH = 'recipe.json'
 PROGRAM = 'java/bin/java.exe'
 ARGUMENTS = '@../../playden.args'
 MAX_RECIPE_BYTES = 16 * 1024
@@ -24,6 +26,24 @@ CONTROLLER_LAYOUT = ';'.join([
     'touchpad_left = key:tab', 'touchpad_right = key:f5',
     'left_stick = keys', 'left_stick_keys = w,s,a,d', 'right_stick = mouse',
 ])
+
+
+def location(root: Path) -> str:
+    """Prefer the new format, with an unambiguous, no-symlink legacy fallback."""
+    folder = root / 'playden'
+    current, legacy = root / PATH, root / LEGACY_PATH
+    try:
+        info = folder.lstat()
+    except FileNotFoundError:
+        info = None
+    if info is not None and (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                             or getattr(info, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0)):
+        raise ValueError('Playden metadata directory must be a real directory without links')
+    if current.is_symlink() or legacy.is_symlink():
+        raise ValueError('Playden recipe symlinks are unsupported')
+    if current.exists() and legacy.exists():
+        raise ValueError('Ambiguous package: both current and legacy recipes are present')
+    return PATH if current.exists() else LEGACY_PATH
 
 
 def name_key(name: str) -> str:
@@ -66,7 +86,11 @@ def generate(name: str, controller_layout: bool = True, *, launch_arguments: str
 
 def write(root: Path, name: str, controller_layout: bool = True, *, launch_arguments: str = ARGUMENTS) -> None:
     text = json.dumps(generate(name, controller_layout, launch_arguments=launch_arguments), indent=2, ensure_ascii=False) + '\n'
+    if (root / LEGACY_PATH).exists() or (root / LEGACY_PATH).is_symlink():
+        raise FileExistsError('Refusing to replace a legacy recipe')
+    location(root)  # Refuse linked metadata directories before creating files.
     target = safe_path(root, PATH)
+    target.parent.mkdir(parents=True, exist_ok=True)
     with target.open('x', encoding='utf-8', newline='\n') as stream:
         stream.write(text)
 
@@ -79,7 +103,7 @@ def validate(root: Path, name: str | None = None, *, launch_arguments: str = ARG
     """
     errors = []
     try:
-        with safe_path(root, PATH).open('rb') as stream:
+        with safe_path(root, location(root)).open('rb') as stream:
             data = stream.read(MAX_RECIPE_BYTES + 1)
         if len(data) > MAX_RECIPE_BYTES:
             raise ValueError('recipe exceeds Playden\'s 16 KB import limit')

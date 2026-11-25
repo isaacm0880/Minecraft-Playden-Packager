@@ -110,9 +110,30 @@ static int java8_command(const char *folder,char *json,size_t cap){
  }
  json[z++]='\"';json[z]=0;return 1;
 }
+/* New metadata layout, with a strict unambiguous legacy fallback. */
+static const char *recipe_name(const char *folder){
+ char path[1024];struct stat metadata,current,legacy;
+ int n=snprintf(path,sizeof(path),"%s/playden",folder);
+ if(n<0||(size_t)n>=sizeof(path))return NULL;
+ if(lstat(path,&metadata)==0){if(!S_ISDIR(metadata.st_mode)||S_ISLNK(metadata.st_mode))return NULL;}
+ else if(errno!=ENOENT)return NULL;
+ n=snprintf(path,sizeof(path),"%s/playden/recipe.json",folder);
+ if(n<0||(size_t)n>=sizeof(path))return NULL;
+ int modern=lstat(path,&current)==0;
+ if(!modern&&errno!=ENOENT)return NULL;
+ n=snprintf(path,sizeof(path),"%s/recipe.json",folder);
+ if(n<0||(size_t)n>=sizeof(path))return NULL;
+ int old=lstat(path,&legacy)==0;
+ if(!old&&errno!=ENOENT)return NULL;
+ if(modern&&old)return NULL;
+ if(modern)return S_ISREG(current.st_mode)&&!S_ISLNK(current.st_mode)?"playden/recipe.json":NULL;
+ return old&&S_ISREG(legacy.st_mode)&&!S_ISLNK(legacy.st_mode)?"recipe.json":NULL;
+}
 static int recipe_check(const char *folder,char *reason,size_t cap){
  char path[1024];struct stat st;
- int n=snprintf(path,sizeof(path),"%s/recipe.json",folder);
+ const char *name=recipe_name(folder);
+ if(!name){snprintf(reason,cap,"recipe-path-invalid");return 0;}
+ int n=snprintf(path,sizeof(path),"%s/%s",folder,name);
  if(n<0||(size_t)n>=sizeof(path)){snprintf(reason,cap,"path-too-long");return 0;}
  /* Open without following the final symlink, then inspect the opened inode.
     This avoids the lstat/fopen time-of-check/time-of-use race. */

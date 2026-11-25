@@ -16,7 +16,7 @@ from .operations import CancellationToken
 from .progress import Progress, ProgressCallback
 
 INSTRUCTIONS = '''Import this package folder in Playden. On builds with game-folder recipe detection,
-choose Use recipe when offered the included recipe.json. Accepting it replaces
+choose Use recipe when offered the included playden/recipe.json. Accepting it replaces
 the game's current settings; choose Skip to keep your custom settings.
 
 If no recipe is offered, configure these settings manually:
@@ -31,7 +31,8 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
           progress: ProgressCallback | None = None, launch_profile: str = profiles.DEFAULT_PROFILE,
           cancellation: CancellationToken | None = None, exclude_saves: bool = False,
           privacy_cleanup: bool = False, instance_name: str | None = None,
-          prepare_fabric: bool | Literal['auto'] = False, remap_java: Path | None = None, controller_layout: bool = True) -> None:
+          prepare_fabric: bool | Literal['auto'] = False, remap_java: Path | None = None, controller_layout: bool = True,
+          icon_artwork: Path | None = None, background_artwork: Path | None = None) -> None:
     def check_cancelled() -> None:
         if cancellation is not None:
             cancellation.check()
@@ -41,6 +42,8 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             progress(Progress(stage, message, completed, total))
         elif completed == 0 or stage == 'complete':
             print(message, flush=True)
+    from . import artwork
+    artwork.check_sources(icon_artwork, background_artwork)
     output = output.absolute()
     if output.exists() or output.is_symlink():
         raise ValueError(f'Refusing to overwrite existing output: {output}')
@@ -144,6 +147,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             from .java8 import write as write_java8
             launch_arguments = write_java8(root, effective, classpath)
         recipe.write(root, f'Minecraft {version}', controller_layout=controller_layout, launch_arguments=launch_arguments)
+        artwork.write(root, icon_artwork, background_artwork)
         if instance_name is not None:
             save('metadata/instance-name.json', {'schema': 1, 'name': instance_name})
         instructions = INSTRUCTIONS.replace(recipe.ARGUMENTS, launch_arguments)

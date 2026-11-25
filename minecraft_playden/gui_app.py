@@ -247,6 +247,25 @@ class MainWindow(QMainWindow):
         self.controller_layout.setToolTip('Include the built-in Minecraft layout in the Playden recipe. '
                                           'Turn off for Controlify or other controller mods. Assumes default Minecraft keybinds.')
         form.addRow(self.controller_layout)
+        self.icon_artwork = QLineEdit(str(self.settings.value('artwork/icon', '')))
+        self.background_artwork = QLineEdit(str(self.settings.value('artwork/background', '')))
+        self.artwork_buttons: list[QPushButton] = []
+        for label, field, key in (('Playden icon', self.icon_artwork, 'icon'),
+                                  ('Playden background', self.background_artwork, 'background')):
+            field.setPlaceholderText('Automatic artwork for selected loader')
+            field.setToolTip('Optional PNG. Empty selects bundled artwork for the detected loader, '
+                             'with Minecraft artwork as fallback. Playden crops and scales the picture.')
+            choose, reset = QPushButton('Choose PNG…'), QPushButton('Use default')
+            row = QHBoxLayout()
+            row.addWidget(field)
+            row.addWidget(choose)
+            row.addWidget(reset)
+            self.build_advanced.form.addRow(label, row)
+            choose.clicked.connect(lambda checked=False, target=field: self.choose_artwork(target))
+            reset.clicked.connect(lambda checked=False, target=field: target.clear())
+            field.textChanged.connect(lambda value, setting=key: self.settings.setValue('artwork/' + setting, value))
+            field.textChanged.connect(self.update_build_button)
+            self.artwork_buttons.extend((choose, reset))
         self.username = QLineEdit(offline_player_name(self.settings.value('player/offlineName', 'Player')))
         self.save_offline_name(self.username.text())
         self.username.setToolTip('Remembered for this user on this device. Offline display name only; this does not sign in or enable authenticated services.')
@@ -563,6 +582,8 @@ class MainWindow(QMainWindow):
         return selection_readiness(self.selected_installations(), self.output.text(), self.cache.text(), self.busy(),
                                    username=offline_player_name(self.username.text()), privacy_cleanup=self.privacy_cleanup.isChecked(),
                                    controller_layout=self.controller_layout.isChecked(),
+                                   icon_artwork=Path(self.icon_artwork.text().strip()).expanduser() if self.icon_artwork.text().strip() else None,
+                                   background_artwork=Path(self.background_artwork.text().strip()).expanduser() if self.background_artwork.text().strip() else None,
                                    allow_runtime_download=self.allow_runtime_download.isChecked(), offline=self.offline.isChecked(), prepare_fabric=self._prepare_fabric_requested,
                                    remap_java=Path(self.remap_java.text().strip()).expanduser() if self.remap_java.text().strip() else None)
 
@@ -619,7 +640,7 @@ class MainWindow(QMainWindow):
 
     def operation_controls(self) -> tuple[QWidget, ...]:
         return (self.scan_button, self.folder_button, self.validate_button, self.output_button,
-                self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.allow_runtime_download, self.username, self.controller_layout,
+                self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.allow_runtime_download, self.username, self.controller_layout, self.icon_artwork, self.background_artwork, *self.artwork_buttons,
                 self.prepare_fabric, self.remap_java, self.remap_java_button, self.prepare_existing_button,
                 self.cleanup_after_usb, self.ps5_destination, self.receiver_manager, self.offline, self.ps5_pipeline)
 
@@ -754,6 +775,11 @@ class MainWindow(QMainWindow):
     def fabric_preparation_toggled(self, enabled: bool) -> None:
         self._prepare_fabric_requested = enabled
         self.update_build_button()
+
+    def choose_artwork(self, target: QLineEdit) -> None:
+        filename, _ = QFileDialog.getOpenFileName(self, 'Choose Playden artwork PNG', target.text(), 'PNG pictures (*.png)')
+        if filename:
+            target.setText(filename)
 
     @Slot(str)
     def save_remap_java(self, value: str) -> None:

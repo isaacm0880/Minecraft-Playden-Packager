@@ -209,41 +209,41 @@ class PackagerTests(unittest.TestCase):
                 return
             action()
             self.assertEqual(validate(output), [])
-            self.assertTrue((output / 'recipe.json').is_file())
-            document = json.loads((output / 'recipe.json').read_text())
+            self.assertTrue((output / 'playden/recipe.json').is_file())
+            document = json.loads((output / 'playden/recipe.json').read_text())
             self.assertEqual('defaults' in document, controller_layout)
             self.assertFalse((output / 'launch.args').exists())
             self.assertIn('Minecraft fixture', (output / 'PLAYDEN.txt').read_text())
             inventory = json.loads((output / 'package.json').read_text())
-            self.assertIn('recipe.json', inventory['files'])
+            self.assertIn('playden/recipe.json', inventory['files'])
             self.assertNotIn('launch.args', inventory['files'])
             # Even a rehashed recipe must match the package's version and paths.
             from minecraft_playden.recipe import generate as generate_recipe
-            recipe_path = output / 'recipe.json'
+            recipe_path = output / 'playden/recipe.json'
             original_recipe = recipe_path.read_bytes()
             manifest_path = output / 'package.json'
             original_manifest = manifest_path.read_bytes()
             invalid = generate_recipe('Minecraft other')
             recipe_path.write_text(json.dumps(invalid))
-            inventory['files']['recipe.json'] = hashlib.sha256(recipe_path.read_bytes()).hexdigest()
+            inventory['files']['playden/recipe.json'] = hashlib.sha256(recipe_path.read_bytes()).hexdigest()
             manifest_path.write_text(json.dumps(inventory))
             self.assertTrue(any('Recipe differs' in error for error in validate(output)))
             recipe_path.write_bytes(original_recipe)
             manifest_path.write_bytes(original_manifest)
-            for missing in ('recipe.json', 'playden.args', 'java/bin/java.exe'):
+            for missing in ('playden/recipe.json', 'playden.args', 'java/bin/java.exe'):
                 path = output / missing
                 original = path.read_bytes()
                 path.unlink()
                 self.assertTrue(validate(output), missing)
                 path.write_bytes(original)
             inventory = json.loads(original_manifest)
-            del inventory['files']['recipe.json']
+            del inventory['files']['playden/recipe.json']
             manifest_path.write_text(json.dumps(inventory))
-            self.assertIn('Required file absent from inventory: recipe.json', validate(output))
+            self.assertIn('Required file absent from inventory: playden/recipe.json', validate(output))
             manifest_path.write_bytes(original_manifest)
             self.assertEqual(validate(output), [])
             if checker := os.environ.get('PLAYDEN_RECIPE_CHECK'):
-                result = subprocess.run([checker, str(output / 'recipe.json')], capture_output=True, text=True)
+                result = subprocess.run([checker, str(output / 'playden/recipe.json')], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
             if mode == 'local-instance':
                 game = output / 'instances/default/minecraft'

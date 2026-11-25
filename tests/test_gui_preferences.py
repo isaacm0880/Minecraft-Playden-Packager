@@ -199,3 +199,56 @@ def test_controller_layout_preference_and_build_queue_capture(preferences, tmp_p
     assert window.build_requests()[0][0].controller_layout is True
     window.close()
     assert create().controller_layout.isChecked()
+
+
+def test_artwork_paths_persist_reset_and_snapshot_build_queue(preferences, tmp_path):
+    from test_artwork import png
+    create, settings = preferences
+    icon, background = tmp_path / 'custom icon.png', tmp_path / 'custom background.png'
+    icon.write_bytes(png())
+    background.write_bytes(png((80, 40)))
+    first = create()
+    assert first.icon_artwork.text() == first.background_artwork.text() == ''
+    with patch('minecraft_playden.gui_app.QFileDialog.getOpenFileName', return_value=(str(icon), 'PNG pictures (*.png)')):
+        first.artwork_buttons[0].click()
+    first.background_artwork.setText(str(background))
+    assert settings().value('artwork/icon') == str(icon)
+    assert settings().value('artwork/background') == str(background)
+    first.close()
+    window = create()
+    assert window.icon_artwork.text() == str(icon)
+    assert window.background_artwork.text() == str(background)
+    source = tmp_path / 'source'
+    source.mkdir()
+    client = source / 'client.jar'
+    client.write_bytes(b'client')
+    window.operation = 'scan'
+    window.task_result(DiscoveryResult((Installation('Vanilla', 'Portable', '26.3', source, client),)))
+    window.output.setText(str(tmp_path / 'package'))
+    requests, reason = window.build_requests()
+    assert len(requests) == 1, reason
+    assert requests[0].icon_artwork == icon and requests[0].background_artwork == background
+    window.artwork_buttons[1].click()
+    assert window.icon_artwork.text() == '' and settings().value('artwork/icon') == ''
+    assert requests[0].icon_artwork == icon
+    assert window.build_requests()[0][0].icon_artwork is None
+    window.background_artwork.setText(str(tmp_path / 'missing.png'))
+    assert window.build_requests()[0] == []
+    window.artwork_buttons[3].click()
+    assert window.build_requests()[0][0].background_artwork is None
+    window.close()
+    assert create().icon_artwork.text() == create().background_artwork.text() == ''
+
+
+def test_cli_artwork_does_not_inherit_gui_preferences(preferences, tmp_path):
+    create, _ = preferences
+    window = create()
+    window.icon_artwork.setText('/saved/icon.png')
+    window.background_artwork.setText('/saved/background.png')
+    for options in ([], ['--icon', str(tmp_path / 'icon.png'), '--background', str(tmp_path / 'background.png')]):
+        argv = ['packager', 'build', '--source', 'local', '--client-jar', str(tmp_path / 'client.jar'),
+                '--version', '26.3', '--output', str(tmp_path / 'out'), *options]
+        with patch('sys.argv', argv), patch('minecraft_playden.cli.build') as build, contextlib.redirect_stdout(io.StringIO()):
+            assert main() == 0
+        assert build.call_args.kwargs['icon_artwork'] == (tmp_path / 'icon.png' if options else None)
+        assert build.call_args.kwargs['background_artwork'] == (tmp_path / 'background.png' if options else None)
