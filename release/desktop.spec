@@ -17,6 +17,9 @@ a = Analysis(
            (str(root / 'minecraft_playden/resources/remap/FabricRemap.java'), 'minecraft_playden/resources/remap'),
            *[(str(root / 'minecraft_playden/resources/artwork' / name), 'minecraft_playden/resources/artwork')
              for name in ('icon.png', 'background.png')],
+           *[(str(root / 'minecraft_playden/resources/artwork/modloaders' / (loader + '.png')),
+              'minecraft_playden/resources/artwork/modloaders')
+             for loader in ('fabric', 'forge', 'neoforge', 'quilt')],
            (str(root / 'LICENSE'), 'licenses'),
            (str(stage / 'licenses'), 'licenses/third-party')],
     hiddenimports=['PySide6.QtSvg', 'certifi'],

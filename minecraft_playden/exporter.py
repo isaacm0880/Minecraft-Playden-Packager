@@ -147,7 +147,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             from .java8 import write as write_java8
             launch_arguments = write_java8(root, effective, classpath)
         recipe.write(root, f'Minecraft {version}', controller_layout=controller_layout, launch_arguments=launch_arguments)
-        artwork.write(root, icon_artwork, background_artwork)
+        artwork.write(root, icon_artwork, background_artwork, loader='Fabric' if fabric_data is not None else None)
         if instance_name is not None:
             save('metadata/instance-name.json', {'schema': 1, 'name': instance_name})
         instructions = INSTRUCTIONS.replace(recipe.ARGUMENTS, launch_arguments)

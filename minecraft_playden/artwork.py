@@ -15,7 +15,11 @@ from PIL import Image
 from .downloads import safe_path
 
 NAMES = ('icon.png', 'background.png')
-LOADER_ARTWORK: dict[str, dict[str, str]] = {}
+# Artwork availability does not grant launch support to these loaders.
+LOADER_ARTWORK = {
+    loader: {'icon.png': f'modloaders/{loader}.png'}
+    for loader in ('fabric', 'forge', 'neoforge', 'quilt')
+}
 MAX_BYTES = 32 * 1024 * 1024
 MAX_SIDE = 8192
 MAX_PIXELS = 3840 * 2160

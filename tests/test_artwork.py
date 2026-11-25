@@ -170,6 +170,29 @@ def test_cli_custom_artwork_preserves_runtime_and_launch_mode(tmp_path, monkeypa
     assert json.loads((output / 'metadata/runtime.json').read_text())['major'] == (8 if legacy else 25)
 
 
+@pytest.mark.parametrize('loader,digest', [
+    ('Fabric', '3e9fe8dfe5b9a7e16a3fd4d245078ecb8e874dea35bce0cca5ce02bd3e599b82'),
+    ('Forge', '0a4286920f4019b20bf23bf2eb36ba3cde377efb6b961c6b17388883d0315bb2'),
+    ('NeoForge', 'b3857715b41a1a9c773645d6a8bc95fceffb6e74d1a7ad8cd9e3211e3d7a27cf'),
+    ('Quilt', 'a607ffc904266ea7c35810b623f154f9c2df9ea6879582b04ca48f3ae6828fef'),
+])
+def test_bundled_loader_icons_are_exact_and_keep_default_background(tmp_path, loader, digest):
+    artwork.write(tmp_path, loader=loader)
+    data = (tmp_path / 'playden/icon.png').read_bytes()
+    assert hashlib.sha256(data).hexdigest() == digest
+    assert artwork.validate_png(data) == (512, 512)
+    assert data == artwork.default('icon.png', loader.lower())
+    assert (tmp_path / 'playden/background.png').read_bytes() == artwork.default('background.png')
+    assert sorted(p.name for p in (tmp_path / 'playden').iterdir()) == list(reversed(artwork.NAMES))
+
+
+@pytest.mark.parametrize('loader', [None, 'Vanilla', 'Unknown', '../../fabric'])
+def test_missing_loader_artwork_falls_back_to_minecraft(tmp_path, loader):
+    artwork.write(tmp_path, loader=loader)
+    for name in artwork.NAMES:
+        assert (tmp_path / 'playden' / name).read_bytes() == artwork.default(name)
+
+
 @pytest.mark.parametrize('custom_icon,custom_background', [(True, False), (False, True), (True, True)])
 def test_explicit_overrides_take_priority_independently(tmp_path, custom_icon, custom_background):
     icon, background = tmp_path / 'custom-icon.png', tmp_path / 'custom-background.png'

@@ -31,7 +31,7 @@ version = {attr = "minecraft_playden.__version__"}
 include = ["minecraft_playden*"]
 
 [tool.setuptools.package-data]
-minecraft_playden = ["resources/icons/*.png", "resources/icons/*.ico", "resources/icons/*.icns", "resources/icons/*.json", "resources/remap/*.java", "resources/java8/*.java", "resources/java8/*.class", "resources/artwork/*.png"]
+minecraft_playden = ["resources/icons/*.png", "resources/icons/*.ico", "resources/icons/*.icns", "resources/icons/*.json", "resources/remap/*.java", "resources/java8/*.java", "resources/java8/*.class", "resources/artwork/*.png", "resources/artwork/modloaders/*.png"]
 
 [tool.mypy]
 python_version = "3.11"
