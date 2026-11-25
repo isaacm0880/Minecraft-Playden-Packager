@@ -23,10 +23,10 @@ from test_packager import archive
 from test_version_matrix import installation, put, spec_payload
 
 
-def fixture_package(tmp_path, version='1.20.1', prepared=False):
+def fixture_package(tmp_path, version='1.20.1', prepared=False, mapping_format='v1'):
     source = tmp_path / 'source'
     instance, metadata, blobs, _ = installation(source, version, True, 'official', loader_override='0.20.1')
-    if version == '1.20.1':
+    if version != '26.3':
         client = archive({'net/minecraft/client/main/Main.class': b'fixture Main', 'a.class': b'fixture a'})
         spec_payload(metadata['downloads']['client'], client, blobs)
         put(source, f'versions/{version}/{version}.jar', client)
@@ -37,7 +37,9 @@ def fixture_package(tmp_path, version='1.20.1', prepared=False):
         manifest = json.loads(blobs[manifest_url])
         manifest['versions'][0]['sha1'] = hashlib.sha1(base).hexdigest()
         blobs[manifest_url] = json.dumps(manifest).encode()
-        mappings = archive({'mappings/mappings.tiny': b'v1\tofficial\tintermediary\nCLASS\ta\tnet/minecraft/class_1\n'})
+        mappings = archive({'mappings/mappings.tiny': (
+            b'v1\tofficial\tintermediary\nCLASS\ta\tnet/minecraft/class_1\n' if mapping_format == 'v1'
+            else b'tiny\t2\t0\tofficial\tintermediary\nc\ta\tnet/minecraft/class_1\n')})
         put(source, f'libraries/net/fabricmc/intermediary/{version}/intermediary-{version}.jar', mappings)
         path = instance / f'{instance.name}.json'
         profile = json.loads(path.read_text())
@@ -54,10 +56,10 @@ def fixture_package(tmp_path, version='1.20.1', prepared=False):
 
 def fake_remap(java, arguments, work, cancellation, progress=None):
     classpath, client, game, receipt, mappings, namespace, version = arguments
-    assert namespace == 'official' and version == '1.20.1'
-    assert Path(mappings).name == 'intermediary-1.20.1.jar'
+    assert namespace == 'official'
+    assert Path(mappings).name == f'intermediary-{version}.jar'
     assert all('/libraries/' in p.replace('\\', '/') for p in Path(classpath).read_text().splitlines())
-    relative = '.fabric/remappedJars/minecraft-1.20.1-0.20.1/client-intermediary.jar'
+    relative = f'.fabric/remappedJars/minecraft-{version}-0.20.1/client-intermediary.jar'
     assert not (Path(game) / relative).exists(), 'Preparation must not trust an old cache'
     with zipfile.ZipFile(client) as jar:
         contents = {('net/minecraft/class_1.class' if name == 'a.class' else name): jar.read(name) for name in jar.namelist()}

@@ -42,7 +42,9 @@ def spec_payload(spec, payload, blobs):
 
 def installation(root, version, modded, layout, legacy_assets=False, loader_override=None):
     """Keep upstream rules, coordinates, arguments, natives, inheritance and Java."""
-    metadata = json.loads((FIXTURES / f'{version}.json').read_text())
+    native_fixtures = FIXTURES.parent / 'fabric/native-maps'
+    version_path = native_fixtures / f'mojang-{version}.json' if version in ('1.14.4', '1.16') else FIXTURES / f'{version}.json'
+    metadata = json.loads(version_path.read_text())
     if legacy_assets:
         metadata.pop('arguments')
         metadata['minecraftArguments'] = '--username ${auth_player_name} --gameDir ${game_directory} --assetsDir ${game_assets}'
@@ -70,7 +72,8 @@ def installation(root, version, modded, layout, legacy_assets=False, loader_over
     put(root, 'assets/log_configs/' + metadata['logging']['client']['file']['id'], b'<Configuration/>')
     loader = '0.16.10' if version in ('1.18.2', '1.19.2', '1.20.1', '1.21.1') else '0.20.1'
     loader = loader_override or loader
-    profile = json.loads((FIXTURES / f'fabric-{version}-{loader}.json').read_text())
+    profile_path = native_fixtures / f'fabric-{version}.json' if version in ('1.14.4', '1.16') else FIXTURES / f'fabric-{version}-{loader}.json'
+    profile = json.loads(profile_path.read_text())
     for raw in profile['libraries']:
         value = fabric.library(raw)
         path = value['downloads']['artifact']['path']
@@ -192,7 +195,7 @@ def test_snapshot_provenance_and_real_java_requirements():
     old = json.loads((FIXTURES / '1.16.5.json').read_text())
     assert java_major(old) == 8
     capability = assess_metadata(old)
-    assert not capability.can_package and 'argument files require Java 9+' in capability.problem
+    assert capability.can_package and capability.required_java == 8
 
 
 def test_legacy_arguments_and_future_unknown_version_are_metadata_driven():
@@ -312,3 +315,9 @@ def test_fabric_java_override_and_mapping_requirements_follow_profile_metadata()
     profile['requires'] = [{'uid': fabric.INTERMEDIARY}]
     with pytest.raises(ValueError, match='Required component'):
         fabric.derive(metadata, data)
+
+
+@pytest.mark.parametrize('layout', ['official', 'prism', 'multimc'])
+@pytest.mark.parametrize('version,modded', [('1.16', False), ('1.16', True), ('1.14.4', True)])
+def test_java8_target_packaging_matrix(tmp_path, layout, version, modded):
+    test_packaging_matrix(tmp_path, layout, modded, version, 8)

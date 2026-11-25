@@ -22,6 +22,11 @@ def pe_x64(path: Path) -> bool:
         return False
 
 
+def runtime_home(root: Path, major: int) -> Path:
+    # Java 8 JDKs keep the runnable JRE under jre/; later JDKs are flat.
+    return root / 'jre' if major == 8 and (root / 'jre/bin/java.exe').is_file() else root
+
+
 def inspect(root: Path, major: int) -> dict[str, Any]:
     if root.is_symlink() or any(p.is_symlink() for p in root.rglob('*')):
         raise ValueError('Java runtime symlinks are unsupported')
@@ -32,7 +37,8 @@ def inspect(root: Path, major: int) -> dict[str, Any]:
         raise ValueError(f'Java runtime must match metadata requirement Java {major}; found {version or "unknown"}')
     if fields.get('OS_NAME', '').lower() != 'windows' or fields.get('OS_ARCH', '').lower() not in ('x86_64', 'amd64'):
         raise ValueError('Java runtime must target Windows x64, regardless of the host OS')
-    if not all(pe_x64(root / relative) for relative in ('bin/java.exe', 'bin/server/jvm.dll')):
+    home = runtime_home(root, major)
+    if not all(pe_x64(home / relative) for relative in ('bin/java.exe', 'bin/server/jvm.dll')):
         raise ValueError('Java runtime requires Windows AMD64 PE java.exe and server/jvm.dll')
     return {'major': major, 'release': version, 'target': 'windows-x64'}
 
@@ -52,7 +58,10 @@ def install(metadata: dict[str, Any], downloader: Downloader, root: Path) -> dic
             with open(source, 'rb') as incoming, open(destination, 'wb') as outgoing:
                 downloader._copy(incoming, outgoing)
             return destination
-        shutil.copytree(candidate, root, copy_function=copy, dirs_exist_ok=True)
+        home = runtime_home(candidate, major)
+        shutil.copytree(home, root, copy_function=copy, dirs_exist_ok=True)
+        if home != candidate:
+            copy(str(candidate / 'release'), str(root / 'release'))
         inspect(root, major)
         return {**record, 'source': 'local-or-cache'}
     url = (f'https://api.adoptium.net/v3/assets/latest/{major}/hotspot'
@@ -74,6 +83,7 @@ def install(metadata: dict[str, Any], downloader: Downloader, root: Path) -> dic
         if len(prefixes) != 1:
             raise ValueError('Unexpected Java archive layout')
         prefix = prefixes.pop() + '/'
+        nested_jre = major == 8 and prefix + 'jre/bin/java.exe' in zip.namelist()
         for info in zip.infolist():
             downloader.check_cancelled()
             safe_path(root, info.filename)
@@ -81,7 +91,12 @@ def install(metadata: dict[str, Any], downloader: Downloader, root: Path) -> dic
                 continue
             if not info.filename.startswith(prefix) or (info.external_attr >> 16) & 0o170000 == 0o120000:
                 raise ValueError('Unexpected Java archive member')
-            path = safe_path(root, info.filename[len(prefix):])
+            relative = info.filename[len(prefix):]
+            if nested_jre and relative != 'release':
+                if not relative.startswith('jre/'):
+                    continue
+                relative = relative[len('jre/'):]
+            path = safe_path(root, relative)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(zip.read(info))
     record = inspect(root, major)

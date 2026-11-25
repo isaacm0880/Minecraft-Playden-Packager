@@ -90,7 +90,10 @@ def assess_metadata(metadata: dict) -> MetadataCapability:
         logging_spec(effective)
         from .arguments import generate
         from .dependencies import classpath
-        generate(effective, classpath(effective), '../../')
+        launch = generate(effective, classpath(effective), '../../')
+        if major == 8:
+            from .java8 import artifacts
+            artifacts(effective, classpath(effective), launch)
     except (ValueError, TypeError, KeyError) as exc:
         return MetadataCapability(False, major, str(metadata.get('type', 'unknown')), str(exc))
     return MetadataCapability(True, major, str(metadata.get('type', 'unknown')))

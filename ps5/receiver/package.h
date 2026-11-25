@@ -218,6 +218,13 @@ static int inventory_hashes(int fd, Inventory *v) {
         if (!item || !item->listed || !item->size)
             goto done;
     }
+    if (lookup(v, "playden.java8-command", 0)) {
+        const char *adapter[] = {"playden.java8-command", "playden-java8.jar"};
+        for (size_t k = 0; k < 2; k++) {
+            Item *item = lookup(v, adapter[k], 0);
+            if (!item || !item->listed || !item->size) goto done;
+        }
+    }
     ok = 1;
 done:
     free(doc);

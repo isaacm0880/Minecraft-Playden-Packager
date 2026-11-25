@@ -938,3 +938,38 @@ def test_receiver_accepts_only_complete_builtin_controller_defaults(receiver, fa
         with pytest.raises(NetworkTransferError, match='Invalid recipe'):
             verify(session)
     wait_clean(sandbox)
+
+
+@pytest.mark.parametrize('fault', ['valid', 'command-mismatch', 'missing-jar', 'unlisted-jar', 'wrong-main', 'missing-command'])
+def test_receiver_java8_adapter_is_bound_to_inventory_and_recipe(receiver, fault):
+    files = contents()
+    command = '"-Xmx4G" "-cp" "../../playden-java8.jar" "org.minecraftplayden.Java8Launch"'
+    files['playden.java8-command'] = command.encode()
+    files['playden-java8.jar'] = b'owned adapter fixture; receiver checks inventory, Python checks contents'
+    document = json.loads(files['recipe.json'])
+    document['launch_entries'][0]['arguments'] = command
+    if fault == 'command-mismatch':
+        document['launch_entries'][0]['arguments'] = command.replace('-Xmx4G', '-Xmx2G')
+    if fault == 'missing-jar':
+        del files['playden-java8.jar']
+    if fault == 'wrong-main':
+        document['launch_entries'][0]['arguments'] = command.replace('org.minecraftplayden.Java8Launch', 'other.Main')
+        files['playden.java8-command'] = document['launch_entries'][0]['arguments'].encode()
+    if fault == 'missing-command':
+        del files['playden.java8-command']
+    files['recipe.json'] = json.dumps(document).encode()
+    files['package.json'] = inventory(files)
+    if fault == 'unlisted-jar':
+        record = json.loads(files['package.json'])
+        del record['files']['playden-java8.jar']
+        files['package.json'] = json.dumps(record).encode()
+    with receiver() as (sandbox, port, token), paired(port, token) as session:
+        upload(session, files)
+        if fault == 'valid':
+            verify(session)
+            session.send(COMMIT)
+            session.ack()
+            assert (sandbox / 'internal/Package/playden-java8.jar').read_bytes() == files['playden-java8.jar']
+        else:
+            with pytest.raises(NetworkTransferError, match='Invalid recipe'):
+                verify(session)

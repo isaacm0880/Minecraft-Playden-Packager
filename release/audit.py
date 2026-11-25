@@ -29,7 +29,14 @@ def audit_tree(root: Path, executable: Path, expected: dict) -> dict:
         if not path.is_file():
             continue
         parts = {part.casefold() for part in path.relative_to(root).parts}
-        if parts & FORBIDDEN_PARTS or path.name.casefold() in FORBIDDEN_FILES or path.suffix.lower() in {'.jar', '.class', '.mca', '.mcr', '.key', '.pfx', '.p12', '.jks', '.keystore'}:
+        from minecraft_playden.java8 import BOOTSTRAP_SHA256
+        resource = 'minecraft_playden/resources/java8/Java8Launch.class'
+        owned_bootstrap = relative == resource or relative.endswith('/' + resource)
+        if owned_bootstrap and hashlib.sha256(path.read_bytes()).hexdigest() != BOOTSTRAP_SHA256:
+            raise ValueError('Owned Java 8 bootstrap checksum mismatch')
+        if (parts & FORBIDDEN_PARTS or path.name.casefold() in FORBIDDEN_FILES
+                or (path.suffix.lower() in {'.jar', '.class', '.mca', '.mcr', '.key', '.pfx', '.p12', '.jks', '.keystore'}
+                    and not owned_bootstrap)):
             raise ValueError(f'Forbidden game/private artifact: {relative}')
         if path.name.startswith(('ld-linux', 'libc.so', 'libGL.so', 'libEGL.so', 'libstdc++.so', 'libgcc_s.so',
                                  'libfontconfig.so', 'libfreetype.so', 'libexpat.so')):

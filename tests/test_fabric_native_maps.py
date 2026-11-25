@@ -30,8 +30,7 @@ def test_captured_profiles_resolve_windows_natives(version):
     assert all(spec == official[spec['path']] for spec, _ in speech)
     assert not any(tag in spec['path'] for spec, _, _ in resolved for tag in ('natives-linux', 'natives-macos', 'arm64'))
     if version in ('1.14.4', '1.16'):
-        with pytest.raises(ValueError, match='Java 8'):
-            metadata.check_runtime_requirement(effective)
+        assert metadata.check_runtime_requirement(effective) == 8
     else:
         assert metadata.check_runtime_requirement(effective) == 17
 

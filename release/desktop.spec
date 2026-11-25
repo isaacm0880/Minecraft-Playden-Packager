@@ -13,6 +13,7 @@ a = Analysis(
     pathex=[str(root)],
     datas=[(str(stage / 'build-metadata.json'), '.'),
            *[(str(icon_root / name), 'resources/icons') for name in icon_names],
+           (str(root / 'minecraft_playden/resources/java8/Java8Launch.class'), 'minecraft_playden/resources/java8'),
            (str(root / 'LICENSE'), 'licenses'),
            (str(stage / 'licenses'), 'licenses/third-party')],
     hiddenimports=['PySide6.QtSvg', 'certifi'],

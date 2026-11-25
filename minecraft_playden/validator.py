@@ -44,7 +44,8 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
             if any(name.startswith('instances/') for name in inventory['files']):
                 errors.append('Imported user data must be separate from immutable files')
             return errors
-        for name in ('java/bin/java.exe', 'java/bin/server/jvm.dll', 'java/release', 'playden.args', 'recipe.json', 'metadata/version.json'):
+        recipe_path = recipe.PATH
+        for name in ('java/bin/java.exe', 'java/bin/server/jvm.dll', 'java/release', 'playden.args', recipe_path, 'metadata/version.json'):
             if name not in inventory['files']:
                 errors.append(f'Required file absent from inventory: {name}')
         metadata = json.loads((root / 'metadata/version.json').read_text(encoding='utf-8'))
@@ -108,7 +109,17 @@ def validate(root: Path, cancellation: CancellationToken | None = None,
             errors.append('Classpath does not match resolved Windows x64 dependencies')
         if (root / 'playden.args').read_text(encoding='utf-8') != generate(effective if fabric_data is not None else metadata, inventory['classpath'], '../../', inventory['username'], profile, metadata_adapter=adapter == 1):
             errors.append('Invalid portable arguments: playden.args')
-        errors.extend(recipe.validate(root, f'Minecraft {inventory["version"]}'))
+        launch_arguments = recipe.ARGUMENTS
+        if check_runtime_requirement(effective) == 8:
+            from . import java8
+            for name in (java8.JAR, java8.COMMAND):
+                if name not in inventory['files']:
+                    errors.append(f'Required file absent from inventory: {name}')
+            preserved = generate(effective, inventory['classpath'], '../../', inventory['username'], profile,
+                                 metadata_adapter=adapter == 1)
+            errors.extend(java8.validate(root, effective, inventory['classpath'], preserved))
+            _, launch_arguments = java8.artifacts(effective, inventory['classpath'], preserved)
+        errors.extend(recipe.validate(root, f'Minecraft {inventory["version"]}', launch_arguments=launch_arguments))
         for entry in inventory['classpath']:
             if entry not in inventory['files']:
                 errors.append(f'Classpath file not inventoried: {entry}')

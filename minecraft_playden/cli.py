@@ -145,7 +145,15 @@ def main() -> int:
             if inventory.get('kind') == 'instance-import':
                 print('Instance import metadata validated. Launchability is unverified (Phase 2B).')
             else:
-                print('Package files and portable launch arguments validated.\n' + INSTRUCTIONS)
+                from .fabric_remap import package_status
+                state = package_status(args.path, validated=True)
+                instructions = INSTRUCTIONS
+                from .java8 import COMMAND
+                if (args.path / COMMAND).is_file():
+                    instructions = instructions.replace('@../../playden.args', (args.path / COMMAND).read_text(encoding='utf-8'))
+                if state.required or state.prepared:
+                    print(state.message)
+                print('Package files and portable launch arguments validated.\n' + instructions)
         else:
             if args.command == 'build' and args.source == 'local' and args.instance is not None:
                 from .instance_content import inspect, check_separate
@@ -175,7 +183,16 @@ def main() -> int:
                 build(args.output, downloader, source, args.username, launch_profile=args.launch_profile,
                       exclude_saves=args.exclude_saves, instance_name=instance_name,
                       prepare_fabric=args.prepare_fabric, remap_java=args.remap_java, controller_layout=args.controller_layout)
-                print(f'Package validated: {args.output}\n' + INSTRUCTIONS)
+                instructions = INSTRUCTIONS
+                from .java8 import COMMAND
+                if (args.output / COMMAND).is_file():
+                    instructions = instructions.replace('@../../playden.args', (args.output / COMMAND).read_text(encoding='utf-8'))
+                if (args.output / 'package.json').is_file():
+                    from .fabric_remap import package_status
+                    state = package_status(args.output, validated=True)
+                    if state.required or state.prepared:
+                        print(state.message)
+                print(f'Package validated: {args.output}\n' + instructions)
         return 0
     except (KeyboardInterrupt, OperationCancelled):
         print('LAN transfer interrupted; local files retained. If publication started, inspect the PS5 import folder.'

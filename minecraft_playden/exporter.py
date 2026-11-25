@@ -138,10 +138,16 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             cleanup(root / 'metadata/local-instance', cancellation)
         report('arguments', 'Generating portable Playden launch arguments...')
         arguments.write(root, effective if fabric_data is not None else metadata, classpath, username, launch_profile)
-        recipe.write(root, f'Minecraft {version}', controller_layout=controller_layout)
+        launch_arguments = recipe.ARGUMENTS
+        from .metadata import java_major
+        if java_major(effective) == 8:
+            from .java8 import write as write_java8
+            launch_arguments = write_java8(root, effective, classpath)
+        recipe.write(root, f'Minecraft {version}', controller_layout=controller_layout, launch_arguments=launch_arguments)
         if instance_name is not None:
             save('metadata/instance-name.json', {'schema': 1, 'name': instance_name})
-        (root / 'PLAYDEN.txt').write_text(f'Game title: Minecraft {version}\n\n' + INSTRUCTIONS, encoding='utf-8')
+        instructions = INSTRUCTIONS.replace(recipe.ARGUMENTS, launch_arguments)
+        (root / 'PLAYDEN.txt').write_text(f'Game title: Minecraft {version}\n\n' + instructions, encoding='utf-8')
         report('hashing', 'Hashing immutable package files...')
         mapped = {root / name for name, _ in asset_files}
         paths = [p for p in root.rglob('*') if p.is_file() and (not p.is_relative_to(root / 'instances') or p in mapped)]

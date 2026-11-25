@@ -84,24 +84,24 @@ class LoaderTests(unittest.TestCase):
     def test_unsupported_base_version_is_not_reported_as_loader_failure(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            vanilla(root, '1.16.5', java=8)
+            vanilla(root, '1.16.5', java=7)
             row = discover([root], include_defaults=False).installations[0]
             self.assertEqual(row.loader_label, 'Vanilla')
             self.assertEqual(row.packaging_problem, '')
-            self.assertIn('Java 8', row.base_problem)
+            self.assertIn('Java 7', row.base_problem)
             self.assertFalse(row.buildable)
 
     def test_inherited_unsupported_base_and_loader_have_separate_reasons(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            vanilla(root, '1.16.5', java=8)
+            vanilla(root, '1.16.5', java=7)
             profile = root / 'versions/fabric-profile'
             profile.mkdir()
             (profile / 'fabric-profile.json').write_text(json.dumps({'id': 'fabric-profile', 'inheritsFrom': '1.16.5', 'mainClass': LOADERS[0][3]}))
             row = discover([profile], include_defaults=False).installations[0]
-            self.assertIn('Java 8', row.base_problem)
+            self.assertIn('Java 7', row.base_problem)
             self.assertIn('Fabric', row.packaging_problem)
-            self.assertIn('Java 8', row.build_problem)
+            self.assertIn('Java 7', row.build_problem)
             self.assertIn('Fabric', row.build_problem)
 
     def test_unknown_components_cannot_silently_become_vanilla(self):

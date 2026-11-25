@@ -45,13 +45,12 @@ def test_wrong_target_is_rejected_without_running_or_downloading(tmp_path, os_na
             runtime.install({'javaVersion': {'majorVersion': 17}}, downloader, tmp_path / 'selected')
 
 
-def test_java8_reports_argument_file_blocker_before_any_network(tmp_path):
+def test_java8_selects_matching_runtime_without_network(tmp_path):
     fake_runtime(tmp_path / 'java8', 8)
     assert runtime.inspect(tmp_path / 'java8', 8)['major'] == 8
     downloader = Downloader(tmp_path / 'cache', runtime_paths=(tmp_path / 'java8',), allow_runtime_download=True)
-    with patch('urllib.request.urlopen', side_effect=AssertionError('Java8 must fail locally')):
-        with pytest.raises(ValueError, match='argument files require Java 9+'):
-            runtime.install({'javaVersion': {'majorVersion': 8}}, downloader, tmp_path / 'selected')
+    with patch('urllib.request.urlopen', side_effect=AssertionError('Local Java 8 needs no network')):
+        assert runtime.install({'javaVersion': {'majorVersion': 8}}, downloader, tmp_path / 'selected')['major'] == 8
 
 
 def test_runtime_download_requires_permission_and_verified_archive_is_reused_offline(tmp_path):

@@ -134,9 +134,8 @@ class OfficialAdapter:
         if not isinstance(java, dict):
             raise ValueError('Invalid Java runtime metadata for base Minecraft')
         major = java.get('majorVersion')
-        if isinstance(major, int) and major < 9:
-            from ..metadata import JAVA8_BLOCKER
-            base_problem = JAVA8_BLOCKER if major == 8 else f'Base Minecraft {found} requires unsupported Java {major}.'
+        if isinstance(major, int) and major < 8:
+            base_problem = f'Base Minecraft {found} requires unsupported Java {major}.'
         if loader_tuple and not inherited:
             base_problem = 'Base Minecraft version cannot be established from this standalone loader profile; an installed vanilla parent is required.'
             found = 'Unknown'

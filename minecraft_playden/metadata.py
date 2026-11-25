@@ -7,9 +7,6 @@ from .downloads import safe_path
 from pathlib import Path
 
 DEFAULT_JVM = ['-Djava.library.path=${natives_directory}', '-cp', '${classpath}']
-JAVA8_BLOCKER = ('Java 8 cannot launch the preserved Playden java.exe @../../playden.args '
-                 'configuration: Java launcher argument files require Java 9+. '
-                 'A separate verified Java 8 launch adapter is required; a newer runtime is not substituted.')
 
 
 def java_major(metadata: dict[str, Any]) -> int:
@@ -23,10 +20,7 @@ def java_major(metadata: dict[str, Any]) -> int:
 
 
 def check_runtime_requirement(metadata: dict[str, Any]) -> int:
-    major = java_major(metadata)
-    if major == 8:
-        raise ValueError(JAVA8_BLOCKER)
-    return major
+    return java_major(metadata)
 
 
 def normalize(document: dict[str, Any]) -> dict[str, Any]:

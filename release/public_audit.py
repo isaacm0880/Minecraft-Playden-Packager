@@ -13,6 +13,8 @@ PRIVATE_REFERENCES = [re.compile(rb'Minecraft-Playden-Packager' + rb'-DEV'),
                       re.compile(rb'/(?:mnt/[A-Za-z0-9_-]+/Codex|home/isaac|Users/isaac)(?:/|\b)')]
 OBSOLETE = re.compile(rb'(?i)(?:Import[ ]+recipe|Recipe[ ]*>[ ]*Import|web[ ]+recipe[ ]+import)')
 SYNTHETIC_CLIENT = 'tests/fixtures/client.jar'
+OWNED_JAVA8_CLASS = 'minecraft_playden/resources/java8/Java8Launch.class'
+OWNED_JAVA8_SHA256 = '174127a697b1b2b67ce7ed9baf907e817cb47f011103e063a181adadc66610ac'
 # The fixture archive contains a single dummy class payload: "fixture-only".
 SYNTHETIC_CLIENT_SHA256 = 'a75b07dd049ea1e37b36cd00af507c9a45beda0d16984da1c2703632b28c8c98'
 
@@ -27,6 +29,9 @@ def audit_paths(root: Path, names: list[str]) -> dict:
         if name == SYNTHETIC_CLIENT:
             if hashlib.sha256(data).hexdigest() != SYNTHETIC_CLIENT_SHA256:
                 raise ValueError('Synthetic fixture content changed; review required')
+        elif name == OWNED_JAVA8_CLASS:
+            if hashlib.sha256(data).hexdigest() != OWNED_JAVA8_SHA256:
+                raise ValueError('Owned Java 8 bootstrap content changed; review required')
         elif (path.suffix.lower() in GAME_SUFFIXES or set(Path(name).parts) & PRIVATE_PARTS
               or path.name.casefold() in PRIVATE_NAMES):
             raise ValueError(f'Forbidden generated/game/private source input: {name}')

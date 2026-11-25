@@ -10,15 +10,20 @@ from minecraft_playden.validator import validate
 from test_fabric_launch import installed, archive, save
 
 
-def build_package(tmp_path, controller_layout=True):
-    instance, metadata, _ = installed(tmp_path / 'source', '26.3', '0.20.1')
-    payloads = {
-        'https://fixture/netty': archive({'io/netty/channel/unix/Errors.class': b'class'}),
-        'https://fixture/fastutil': archive({'it/unimi/dsi/fastutil/floats/FloatList.class': b'class'}),
-        'https://fixture/native': archive({'lwjgl.dll': b'MZnative'}),
-        'https://fixture/index': b'{"objects":{}}',
-        'https://fixture/base': json.dumps(metadata).encode(),
-    }
+def build_package(tmp_path, controller_layout=True, legacy=False):
+    if legacy:
+        from test_version_matrix import installation
+        instance, metadata, payloads, _ = installation(tmp_path / 'source', '1.16', True, 'prism')
+    else:
+        instance, metadata, _ = installed(tmp_path / 'source', '26.3', '0.20.1')
+    if not legacy:
+        payloads = {
+            'https://fixture/netty': archive({'io/netty/channel/unix/Errors.class': b'class'}),
+            'https://fixture/fastutil': archive({'it/unimi/dsi/fastutil/floats/FloatList.class': b'class'}),
+            'https://fixture/native': archive({'lwjgl.dll': b'MZnative'}),
+            'https://fixture/index': b'{"objects":{}}',
+            'https://fixture/base': json.dumps(metadata).encode(),
+        }
     def request(req, **kwargs):
         url = req.full_url
         if url.endswith('version_manifest_v2.json'):

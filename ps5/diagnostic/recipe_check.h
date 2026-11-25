@@ -73,6 +73,43 @@ static int field(const char *s,size_t n,const char *key,const char *expected){
 static int nested(const char *s,size_t n,const char *parent,const char *key,const char *expected){
  const char *v;size_t z;return keyval(s,n,parent,&v,&z)&&field(v,z,key,expected);
 }
+/* A Java-8 command is data, like the existing @playden.args. It must match
+   the immutable command sidecar, use our fixed classpath adapter, and fit the
+   actual Playden splitter. No shell, alternate executable or cwd is allowed. */
+static int java8_command(const char *folder,char *json,size_t cap){
+ char path[1024],command[4097];struct stat st;
+ int n=snprintf(path,sizeof(path),"%s/playden.java8-command",folder);
+ if(n<0||(size_t)n>=sizeof(path))return 0;
+ int fd=open(path,O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK);
+ if(fd<0)return 0;
+ if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_size<1||st.st_size>4096){close(fd);return 0;}
+ size_t used=0;
+ while(used<sizeof(command)){
+  ssize_t got=read(fd,command+used,sizeof(command)-used);
+  if(got<0){if(errno==EINTR)continue;close(fd);return 0;}if(!got)break;used+=(size_t)got;
+ }
+ close(fd);if(!used||used>4096)return 0;command[used]=0;
+ for(size_t i=0;i<used;i++)if((unsigned char)command[i]<32||command[i]==127)return 0;
+ const char *tail="\"org.minecraftplayden.Java8Launch\"";size_t tail_len=strlen(tail);
+ if(used<tail_len||strcmp(command+used-tail_len,tail))return 0;
+ if(!strstr(command,"\"-cp\" \"../../playden-java8.jar\"")&&
+    !strstr(command,"\"-classpath\" \"../../playden-java8.jar\""))return 0;
+ size_t words=0,p=0;
+ while(p<used){
+  if(command[p++]!='\"'||++words>32)return 0;
+  while(p<used&&command[p]!='\"')p++;
+  if(p==used)return 0;
+  p++;
+  if(p<used&&command[p++]!=' ')return 0;
+ }
+ size_t z=0;if(cap<3)return 0;json[z++]='\"';
+ for(size_t i=0;i<used;i++){
+  if(z+3>=cap)return 0;
+  if(command[i]=='\\'||command[i]=='\"')json[z++]='\\';
+  json[z++]=command[i];
+ }
+ json[z++]='\"';json[z]=0;return 1;
+}
 static int recipe_check(const char *folder,char *reason,size_t cap){
  char path[1024];struct stat st;
  int n=snprintf(path,sizeof(path),"%s/recipe.json",folder);
@@ -107,8 +144,10 @@ static int recipe_check(const char *folder,char *reason,size_t cap){
  if(!keyval(buf,z,"launch_entries",&v,&vn)||vn<2||v[0]!='['){snprintf(reason,cap,"recipe-launch-missing");return 0;}
  J a={v,vn,1,0};skipws(&a);size_t start=a.p;
  if(a.p>=vn||v[a.p]!='{'||!value(&a)){snprintf(reason,cap,"recipe-launch-invalid");return 0;}
- if(!field(v+start,a.p-start,"executable","\"java/bin/java.exe\"")||
-    !field(v+start,a.p-start,"arguments","\"@../../playden.args\"")){
+ char java8_json[8195];
+ int modern=field(v+start,a.p-start,"arguments","\"@../../playden.args\"");
+ int legacy=!modern&&java8_command(folder,java8_json,sizeof(java8_json))&&field(v+start,a.p-start,"arguments",java8_json);
+ if(!field(v+start,a.p-start,"executable","\"java/bin/java.exe\"")||(!modern&&!legacy)){
    snprintf(reason,cap,"recipe-launch-mismatch");return 0;}
  snprintf(reason,cap,"ok");return 1;
 }
