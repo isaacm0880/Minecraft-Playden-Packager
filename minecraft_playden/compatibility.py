@@ -41,6 +41,14 @@ class Compatibility:
 
 # Exact Minecraft + loader identities; never infer evidence from a completed build.
 REGISTRY: dict[tuple[str, tuple[ModLoader, ...]], Compatibility] = {
+    ('1.16', ()): Compatibility(
+        Status.TESTED, 'User-confirmed working on PS5 through the Java 8 launch adapter. '
+        'This does not establish Fabric or other configurations.'),
+    **{(version, (ModLoader('Fabric', '0.20.1'),)): Compatibility(
+        Status.TESTED, 'User-confirmed working on PS5 with automatic native Fabric preparation and the Java 8 launch adapter. '
+        'Gameplay, controller mappings, world saving and reloading confirmed. '
+        'The earlier unprepared package failed during first-launch remapping; other loader/mod combinations are not verified.')
+       for version in ('1.14.4', '1.16')},
     ('1.20.1', ()): Compatibility(
         Status.TESTED, 'Vanilla Minecraft 1.20.1 confirmed reaching the main menu on PS5 through Playden 0.12.0-nightly.20261116.1. '
         'This confirms startup, not world loading, Fabric, mods or other runtime configurations.'),

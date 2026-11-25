@@ -17,7 +17,7 @@ Physical failures awaiting a retest remain Broken; automated packaging never pro
 a configuration to Works. Tooltips retain the detailed evidence. Internal states
 also retain whether building is blocked or a candidate may be built for retesting.
 
-Explicit Tested entries are Vanilla Minecraft 1.20.1, Vanilla Minecraft 26.3 and Minecraft 26.3 with Fabric
+Explicit Tested entries include prepared Fabric 1.14.4 and 1.16 with Loader 0.20.1, Vanilla Minecraft 1.16, Vanilla Minecraft 1.20.1, Vanilla Minecraft 26.3 and Minecraft 26.3 with Fabric
 Loader 0.20.1 in a configuration without Ixeris. The 1.20.1 Fabric confirmation requires native pre-remapping and establishes reaching the main menu, not world loading or every mod. Other loader versions and arbitrary
 modpacks are not certified. Successful packaging or checksums never add Works status.
 
@@ -44,7 +44,7 @@ checksums are replaced in memory to match synthetic payloads. No game or mod run
 
 | Minecraft | Required Windows x64 Java | Vanilla | Fabric profile tested | PS5 evidence |
 | --- | --- | --- | --- | --- |
-| 1.18.2 | 17 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
+| 1.18.2 | 17 | Automated structural pass | 0.16.10: automated structural pass | Fabric physically confirmed; reported loader version not recorded, so this does not certify the synthetic profile |
 | 1.19.2 | 17 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
 | 1.20.1 | 17 | Confirmed reaching the PS5 main menu | 0.16.10: automated structural pass; 0.20.1: confirmed reaching main menu with native preparation | Startup only; world loading and arbitrary mods remain unverified |
 | 1.21.1 | 21 | Automated structural pass | 0.16.10: automated structural pass | Physical testing needed |
@@ -52,7 +52,7 @@ checksums are replaced in memory to match synthetic payloads. No game or mod run
 | 26.1.2 | 25 | Automated structural pass | 0.20.1: automated structural pass | Physical testing needed |
 | 26.2 | 25 | Automated structural pass | 0.20.1: automated structural pass | Physical testing needed |
 | 26.3 | 25 | Automated structural pass | 0.20.1: automated structural pass | Existing exact reports below; new launch defaults still need acceptance |
-| 1.16.5 | 8 | Blocked: Java launcher argument files unavailable | Same base-runtime blocker | No new claim |
+| 1.16.5 | 8 | Java 8 metadata/launch capability passes | Java 8 adapter supported; installed loader/dependencies still required | No new physical claim |
 
 These loader versions are test inputs, not a support allowlist. Other releases
 and snapshots can package when their actual metadata, installed client, selected
@@ -62,7 +62,7 @@ layouts. See [snapshot provenance](https://github.com/isaacm0880/Minecraft-Playd
 [architecture audit](https://github.com/isaacm0880/Minecraft-Playden-Packager/blob/feat/ps5-network-transfer/docs/VERSION_COMPATIBILITY_AUDIT.md), `tests/test_version_matrix.py`
 and `tests/test_runtime_selection.py`.
 
-## Automatic GUI preparation
+## Automatic GUI and CLI preparation
 
 Select a Fabric instance and click Build. **Prepare Fabric for Playden** defaults
 on when installed metadata indicates remapping is required (or still needs to be
@@ -84,8 +84,10 @@ After Validate existing package, **Prepare Fabric…** creates a separate valida
 copy in a chosen parent directory. Matching validated caches need no further
 preparation; stale inputs/caches fail validation. Prepared packages retain their
 hidden `.fabric/remappedJars` files and `metadata/fabric-remap.json` during USB and
-LAN transfer. Optional CLI `prepare-fabric` and `build --prepare-fabric` remain
-available. The PS5 receiver protocol and ELF are unchanged.
+LAN transfer. CLI builds prepare automatically by default; `--no-prepare-fabric`
+explicitly opts out with a warning. `prepare-fabric` and `build --prepare-fabric`
+remain available. CLI validation reports preparation separately from structural
+validity. The PS5 receiver protocol and ELF are unchanged by this preparation change.
 
 ## Runtime selection and remaining blockers
 
@@ -106,12 +108,12 @@ metadata and any public files absent from both the installed launcher and cache
 produce a missing-file error. Refresh the catalog explicitly with `versions` when
 adding a version absent from a cached manifest.
 
-Java 8 itself is identified and its release identity can be inspected, but the
-preserved Playden configuration launches `java.exe @../../playden.args`. Java 8
-cannot read Java launcher argument files; support needs a separately verified
-launch adapter. No automatic Java 17 substitution is made. This blocks 1.16.5 and
-Java 8-era releases, rather than rejecting them because of an absent version-list
-entry. See the [Java 8 launcher reference](https://docs.oracle.com/javase/8/docs/technotes/tools/windows/java.html).
+Java 8 packages now use a dedicated same-JVM bootstrap and manifest classpath,
+while retaining the required Windows x64 Java 8 runtime. Java 9+ continues to use
+`java.exe @../../playden.args`. The Java 8 packaging regressions cover Vanilla
+1.16 and Fabric 1.16/1.14.4; no PS5 compatibility rating is inferred from those
+builds. Minecraft 1.0's separate entry-point issue and Forge remain unsupported.
+See [adapter limits, evidence and targeted physical tests](JAVA8-LAUNCH.md).
 
 Arbitrary patched client JARs, non-Fabric custom profiles, legacy tweaker/JAR-mod
 loaders, unknown argument formats/placeholders and inconsistent component metadata
@@ -140,6 +142,11 @@ This table tracks Minecraft Java Edition versions tested with **Playden on PS5**
 
 | Minecraft Version | Mod Loader | Loader Version | Status | Notes |
 |---|---|---|---|---|
+| 1.16 | Vanilla | N/A | Works | User-confirmed PS5 success with the Java 8 launch adapter |
+| 1.16 | Fabric | 0.20.1 | Works | Confirmed prepared Java 8 package: gameplay, controller mappings, world saving and reloading |
+| 1.14.4 | Fabric | 0.20.1 | Works | Confirmed prepared Java 8 package: gameplay, controller mappings, world saving and reloading |
+| 1.17.1 | Fabric | Not recorded | Works | User-confirmed PS5 success; exact loader/mod identity not recorded |
+| 1.18.2 | Fabric | Not recorded | Works | User-confirmed PS5 success; exact loader/mod identity not recorded |
 | 1.20.1 | Vanilla | N/A | Works | Confirmed startup on Playden 0.12.0-nightly.20261116.1; world loading not established |
 | 1.20.1 | Fabric | 0.20.1 | Works | User-confirmed startup with native pre-remapping; world loading and every Fabric mod are not certified. The original unprepared package failed during first-launch remapping |
 | 26.3 | Vanilla | N/A | Works | Confirmed working |
@@ -154,6 +161,27 @@ For automatic GUI preparation and the original 1.20.1 failure investigation, see
 - Broken — A known launch failure or unresolved issue is recorded.
 
 **Note:** Compatibility is specific to the tested configuration. Other versions, Fabric Loader versions and mod combinations are not guaranteed to work.
+
+## Physical acceptance update — 2026-11-25
+
+The maintainer confirms Fabric 1.17.1, Fabric 1.18.2, Vanilla 1.16,
+Fabric 1.16 and Fabric 1.14.4 working on a physical PS5. The prepared Fabric
+1.14.4/1.16 packages additionally have confirmed gameplay, controller mappings,
+world saving and reloading. Automatic recipe detection, automatic Fabric
+preparation, default artwork and loader-specific artwork work.
+
+The apparent Fabric icon failure was caused by Playden retaining old game data.
+Removing that data resolved it; both generated packages already contained the
+correct Fabric PNG. No packager artwork defect exists. See
+[artwork investigation and retention behavior](ARTWORK-METADATA.md#fabric-icon-investigation-2026-11-25).
+
+Exact Fabric Loader versions for the reported 1.17.1 and 1.18.2 successes were
+not recorded, so those version-level reports do not promote an arbitrary loader
+identity in the exact-match compatibility registry. They do not certify every mod.
+
+[Issue #20](https://github.com/isaacm0880/Minecraft-Playden-Packager/issues/20)
+remains open: legacy Minecraft main-class detection, including Minecraft 1.0,
+is unresolved. Successful Java 8 launches do not resolve that separate issue.
 
 ## Known Mod Compatibility
 

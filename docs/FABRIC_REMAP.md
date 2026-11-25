@@ -7,7 +7,11 @@ reaching the main menu. Fabric 1.20.1 with Loader 0.20.1 originally failed while
 opening `client-intermediary.jar.tmp`. Physical retesting now confirms **1.20.1 +
 Fabric Loader 0.20.1 reaching the main menu on PS5 with native pre-remapping**.
 This establishes startup, not world loading or every Fabric mod. Existing 26.3
-confirmations are unchanged.
+confirmations are unchanged. The 2026-11-25 physical results additionally confirm
+automatically prepared Fabric 1.14.4 and 1.16 (Loader 0.20.1) working through
+gameplay and save/reload, plus reported Fabric 1.17.1 and 1.18.2 success (exact
+loader versions not recorded). Automatic preparation and recipe/controller/artwork
+integration are confirmed; see [physical results](COMPATIBILITY.md).
 
 For obfuscated Minecraft, Fabric normally transforms the official client into the
 intermediary namespace on first launch. The official client, matching intermediary
@@ -31,6 +35,12 @@ cause, and moving to internal storage is not presented as a fix. Other errors
 from the same outer remapping wrapper may have a different leaf cause; retain the
 complete exception chain when reporting them.
 
+The later [Java 8 investigation](FABRIC-JAVA8-INVESTIGATION.md) reproduced this
+exact leaf failure on desktop Wine: a Windows file-store query fails even though
+an ordinary write channel opens successfully. Both absolute and relative paths
+are affected there. Prepared caches reuse successfully in that environment;
+the PS5's underlying native access-check failure still needs console evidence.
+
 Source references:
 
 - [Fabric 0.20.1 game initialization](https://github.com/FabricMC/fabric-loader/blob/0.20.1/minecraft/src/main/java/net/fabricmc/loader/impl/game/minecraft/MinecraftGameProvider.java)
@@ -48,7 +58,9 @@ Only selected local library JARs enter the worker classloader; the client JAR is
 read as remapping input. Java option/classpath injection environment variables
 are removed. The GUI uses this existing remapper automatically when required.
 The Prepare Fabric for Playden checkbox allows an explicit troubleshooting opt-out;
-CLI builds still opt in through `--prepare-fabric`.
+CLI builds now make the same automatic decision by default. `--prepare-fabric`
+remains accepted; `--no-prepare-fabric` is an explicit troubleshooting opt-out
+with a warning. The shared exporter defaults to automatic preparation too.
 
 A bundled Java **source** adapter uses the native JDK source-file launcher, so no
 helper executable, downloaded remapper version or Java build framework is needed.
@@ -116,7 +128,7 @@ Fabric…**, choose an output parent, and transfer the resulting separate copy.
 The status clearly reports when a matching validated cache already needs no work.
 Legacy unprepared packages remain transferable with a warning.
 
-## Optional manual CLI workflow and PS5 testing
+## CLI workflow and PS5 testing
 
 Close Minecraft and use the original installed **1.20.1 + Fabric Loader 0.20.1**
 instance. For a GUI-built or existing validated package, create a prepared copy:
@@ -127,11 +139,11 @@ python -m minecraft_playden prepare-fabric "/path/to/Fabric 1.20.1 Package" \
 python -m minecraft_playden validate "/path/to/Fabric 1.20.1 Prepared"
 ```
 
-Alternatively prepare during a new CLI build:
+New CLI builds prepare automatically when required:
 
 ```bash
 python -m minecraft_playden build --source local --instance "/path/to/instance" \
-  --output "/path/to/Fabric 1.20.1 Prepared" --prepare-fabric \
+  --output "/path/to/Fabric 1.20.1 Prepared" \
   --remap-java /usr/bin/java --java-runtime "/path/to/windows-x64-java-17"
 ```
 
@@ -145,12 +157,17 @@ publishes no partial package.
 Transfer **the prepared output** using the existing GUI's Validate existing
 package / USB / LAN flow. Choose a fresh PS5 import name. Keep the complete
 package, including the hidden `.fabric` directory and `metadata/fabric-remap.json`.
-Use the unchanged Playden configuration:
+For Java 9+, use the unchanged Playden configuration:
 
 ```text
 Program: java/bin/java.exe
 Launch arguments: @../../playden.args
 ```
+
+Java 8 uses its unchanged adapter command from `playden.java8-command` and
+`PLAYDEN.txt`, automatically included in the recipe. A host JDK 17+ performing
+preparation does not replace the metadata-selected Windows Java 8 game runtime.
+See [Java 8 build provenance and investigation](FABRIC-JAVA8-INVESTIGATION.md).
 
 Test on the same external USB destination first; no storage migration is assumed.
 Inspect the selected import for the completed remapped JAR and absence of its

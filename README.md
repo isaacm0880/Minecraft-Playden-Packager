@@ -179,3 +179,10 @@ is not affiliated with Mojang, Microsoft or Sony.
 LAN development: [staging, pairing and manual PS5 testing](docs/PS5_LAN_TRANSFER.md),
 [performance diagnostics and benchmarks](docs/PS5_LAN_PERFORMANCE.md), and
 [authenticated receiver shutdown](docs/PS5_RECEIVER_SHUTDOWN.md).
+
+Physical PS5 acceptance (2026-11-25): Fabric 1.14.4, 1.16, 1.17.1 and 1.18.2,
+and Vanilla 1.16 work in the reported configurations. Automatic recipe detection,
+controller mappings, automatic Fabric preparation and default/loader artwork work.
+The old Fabric icon was retained Playden game data, resolved by removing that
+data; it was not a packager defect. See [the configuration-specific evidence](docs/COMPATIBILITY.md#physical-acceptance-update--2026-11-25).
+Legacy main-class detection remains unresolved; issue #20 stays open.

@@ -136,3 +136,102 @@ remain intact. Packaging/decoder success does not establish physical PS5 artwork
 appearance or new Minecraft gameplay compatibility. Only targeted checks of the
 new metadata/artwork behavior are useful; previously working versions do not
 require physical retesting for this change.
+
+## Fabric icon investigation, 2026-11-25
+
+The maintainer reports successful physical PS5 gameplay, controller mapping,
+world saving and reloading for prepared Fabric 1.14.4 and 1.16, with the default
+Minecraft background and automatic recipe detection working, but the regular
+Minecraft icon displayed. This investigation did not rerun Minecraft.
+
+The actual files under `dist/physical-fabric-java8-20261125/` were inspected
+before considering a packager change. Both packages contain the supplied Fabric
+tag icon, not the regular Minecraft icon. Their `package.json` records Fabric
+Loader 0.20.1 and binds the correct PNG hashes in its immutable inventory.
+
+| File or reference | SHA-256 |
+| --- | --- |
+| Both packages' `playden/icon.png`, supplied `playden/modloaders/fabric.png`, bundled `resources/artwork/modloaders/fabric.png` | `3e9fe8dfe5b9a7e16a3fd4d245078ecb8e874dea35bce0cca5ce02bd3e599b82` |
+| Supplied and bundled regular Minecraft `icon.png` | `fb71a05f5ac08a30db69b510d5457cd1a5eb6ad66e3ee9054092ba9b58f8d903` |
+| Both packages' `playden/background.png`, supplied and bundled Minecraft background | `af06fd71b89ee2635b597391946a52bc7590f665e0d47b3c2a425d273d6dcd48` |
+
+The four bundled loader icons also match their supplied originals exactly.
+Vanilla selects the Minecraft icon; Fabric selection follows the actual Fabric
+launch plan in `exporter.build`, rather than a title/folder-name guess. Forge,
+NeoForge and Quilt icons remain included in wheel/frozen resource declarations
+without enabling those loaders. Every automatic background is Minecraft's.
+Custom icon/background paths independently override the corresponding default.
+GUI selections are remembered and snapshotted in queued requests; **Use default**
+clears the override. The inspected native GUI settings had no saved artwork
+overrides. CLI builds do not read those settings. A remembered explicit Minecraft
+icon could override Fabric on another build, but it did not produce the two
+inspected icons.
+
+Current upstream develop was pinned at
+[`c324021adda124641e7f3fa1f8252a4f46fde569`](https://github.com/leolobato/playden-ps5/commit/c324021adda124641e7f3fa1f8252a4f46fde569).
+Its actual `CheckFolderArt` decoder accepts the supplied art. Linking unmodified
+`MakeFolderArt`, `DecodePlayerArt` and `MakeTitleIcon` code against the pinned UI
+dependency also converted both physical packages successfully. Each produced the
+same 512×512 RGB `icon0.png`, hash
+`7d8ac6c041584727aab0b9a709a068ae331614ace9e3d0119b794d5e63fe9222`.
+Decoded pixels retain the Fabric icon, with transparency composited onto black
+(at most one channel value different from Pillow's rounding). The native title
+PNG is re-encoded, so its hash is not expected to match the input PNG.
+
+### Playden's first-title artwork and retained state
+
+[Upstream importing documentation](https://github.com/leolobato/playden-ps5/blob/c324021adda124641e7f3fa1f8252a4f46fde569/docs/importing-games.md#title-art-in-the-game-folder)
+describes these files as **PS5 title artwork**, read once for a game's first
+title, not automatically reapplied when the folder changes. The Playden app's
+own library posters use a separate store/program-icon artwork path.
+
+The implementation confirms the precedence:
+
+- `runtime_host.cpp` first restores kept custom art and adopts art from an
+  existing native title, then attempts folder-art seeding.
+- [`FilesystemPackageInstaller::SeedCustomTitleArt`](https://github.com/leolobato/playden-ps5/blob/c324021adda124641e7f3fa1f8252a4f46fde569/src/runtime/package_installer.cpp#L1065)
+  returns without reading the package when the native title already exists,
+  `title-metadata/custom/` exists, or `title-metadata/.installed` exists.
+- Fresh folder `icon.png` becomes saved `custom/icon0.png`; the background becomes
+  `custom/sce_sys/pic0.dds` and `pic1.dds`. Saved/player art takes precedence over
+  generated fallback title art. Without usable folder art the ordinary fallback
+  considers store cover, game icon, program icon, then generic title icon.
+- Repairs, kit updates and moves preserve custom art. Removing and re-adding the
+  same import is not a reliable reset: `ImportStore::Add` reuses the removed
+  folder's ID, and kept art may be restored.
+- The PS5 Home screen additionally has installed artwork copies and a rendered
+  cache. Editing a package PNG does not update those copies or invalidate it.
+
+The maintainer subsequently confirmed the physical cause: Playden had retained
+old game data. Removing that data resolved the icon mismatch, and both default
+and loader-specific artwork now work. There is no packager artwork defect.
+The earlier read-only investigation could not access the configured PS5 HTTP
+endpoint; this resolution is the maintainer's subsequent physical confirmation,
+not a console-file inspection performed by the packager tests. No further
+Minecraft gameplay retest or packager artwork fix is required.
+
+### Verify or update an existing PS5 title without rebuilding
+
+First inspect/download `playden/icon.png` from the actual installed game folder
+over existing file access and compare its hash with the Fabric hash above. If
+that copy differs, the console does not have the inspected local PNG. If it
+matches, inspect the existing native title/Home artwork to distinguish retained
+Minecraft art from a Home-screen cache that has not refreshed.
+
+For an artwork-only visual check, use
+[Art Swap's own-picture icon replacement](https://github.com/griches/PS5_ArtSwap#your-own-pictures)
+on one existing Fabric title: supply the inspected package's `playden/icon.png`,
+select it on the **Icons** tab, preview and apply it, then **Apply changes** to
+refresh Home. Its documented icon path updates both title and Home-screen copies
+and retains originals. Change only the icon; no game reinstall, recipe change,
+Java/preparation change or Minecraft gameplay test is needed for this check.
+This verifies the artwork/display path, not that automatic first-import seeding
+ran on the previous import. A separate genuinely fresh title identity would be
+needed to test that seeding physically.
+
+No packager defect was reproduced and no runtime/build/transfer behavior was
+changed. Existing artwork, GUI preferences and GUI preparation tests: 79 passed,
+5 optional upstream tests skipped; rerunning the artwork suite with the actual
+upstream decoder enabled: 40 passed, none skipped. Local hashes and converted
+outputs are recorded in `dist/artwork-investigation-20261125/findings.json` and
+its sibling output directories. The original physical packages were not edited.

@@ -86,3 +86,14 @@ def test_vanilla_evidence_is_separate_from_loader_versions():
     assert assess('26.3', (ModLoader('Fabric', '0.20.2'),)).status == Status.UNTESTED
     assert assess('26.2', (ModLoader('Fabric', '0.20.1'),)).status == Status.UNTESTED
     assert assess('26.3', (ModLoader('Forge', '1'),)).status == Status.BROKEN
+
+
+@pytest.mark.parametrize('version', ['1.14.4', '1.16'])
+def test_confirmed_prepared_java8_fabric_evidence_is_configuration_specific(version):
+    result = assess(version, (ModLoader('Fabric', '0.20.1'),))
+    assert result.status == Status.TESTED and result.label == 'Works'
+    assert 'world saving and reloading confirmed' in result.evidence
+    assert 'automatic native Fabric preparation' in result.evidence
+    assert assess(version, (ModLoader('Fabric', '0.20.2'),)).status == Status.UNTESTED
+    assert assess(version, (ModLoader('Forge', '1'),)).status == Status.BROKEN
+    assert assess(version, (ModLoader('Fabric', '0.20.1'),), 'Missing client').status == Status.CANNOT_PACKAGE

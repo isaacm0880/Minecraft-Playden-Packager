@@ -173,7 +173,10 @@ def test_packaging_matrix(tmp_path, layout, modded, version, major):
         build(tmp_path / 'Offline Package', offline, source)
     assert validate(tmp_path / 'Offline Package') == []
     status = selected.compatibility.status
-    assert status == (Status.TESTED if version == '26.3' or (version == '1.20.1' and not modded) else Status.UNTESTED)
+    expected = Status.TESTED if version == '26.3' or (version in ('1.16', '1.20.1') and not modded) else Status.UNTESTED
+    if modded and version in ('1.14.4', '1.16'):
+        expected = Status.TESTED  # Explicit physical confirmation of the prepared Loader 0.20.1 packages.
+    assert status == expected
     # Rehashing an incorrect runtime cannot bypass independent target validation.
     runtime_file = output / 'java/release'
     runtime_file.write_text(runtime_file.read_text().replace('Windows', 'Linux'))
