@@ -1,4 +1,4 @@
-"""Opt-in native Fabric cache preparation, using the installed loader's own code."""
+"""Native Fabric cache preparation, using the installed loader's own code."""
 import json
 import os
 import re

@@ -250,3 +250,124 @@ def test_custom_namespace_or_client_override_is_not_silently_prepared(tmp_path, 
         with pytest.raises(ValueError, match='Custom Fabric'):
             fabric_remap.prepare_package(root, tmp_path / 'Unsupported', Path(sys.executable))
     assert not (tmp_path / 'Unsupported').exists()
+
+
+@pytest.mark.parametrize('version', ['1.14.4', '1.16', '1.20.1'])
+@pytest.mark.parametrize('mapping_format', ['v1', 'v2'])
+def test_shared_exporter_automatically_prepares_required_mappings(tmp_path, version, mapping_format):
+    original, instance = fixture_package(tmp_path, version, mapping_format=mapping_format)
+    output = tmp_path / 'Automatic Package'
+    with patch.object(fabric_remap, '_run', side_effect=fake_remap) as worker, patch('urllib.request.urlopen', side_effect=AssertionError('Offline')):
+        build(output, Downloader(tmp_path / 'cache', offline=True), ClientSource('local', instance=instance))
+    assert worker.call_count == 1
+    assert validate(output) == []
+    assert fabric_remap.package_status(output, validated=True).prepared
+    # Preparation never changes either launch mechanism or the game runtime.
+    for name in ['playden.args', 'playden/recipe.json', 'metadata/runtime.json'] + (
+            ['playden-java8.jar', 'playden.java8-command'] if version != '1.20.1' else []):
+        assert (output / name).read_bytes() == (original / name).read_bytes()
+
+
+@pytest.mark.parametrize('version', ['1.14.4', '1.16'])
+@pytest.mark.parametrize('option', [None, '--prepare-fabric', '--no-prepare-fabric'])
+def test_cli_preparation_default_opt_in_and_explicit_opt_out(tmp_path, capsys, version, option):
+    from minecraft_playden.cli import main
+    _, instance = fixture_package(tmp_path, version)
+    output = tmp_path / 'CLI Default'
+    argv = ['packager', '--cache', str(tmp_path / 'cache'), '--offline', 'build', '--source', 'local',
+            '--instance', str(instance), '--output', str(output)] + ([option] if option else [])
+    with patch('sys.argv', argv), patch.object(fabric_remap, '_run', side_effect=fake_remap) as worker:
+        assert main() == 0
+    state = fabric_remap.package_status(output, validated=True)
+    assert state.required and state.prepared is (option != '--no-prepare-fabric')
+    assert worker.call_count == (0 if option == '--no-prepare-fabric' else 1)
+    text = capsys.readouterr().out
+    assert ('explicitly disabled' if option == '--no-prepare-fabric' else 'Matching Fabric preparation cache validated') in text
+    with patch('sys.argv', ['packager', 'validate', str(output)]):
+        assert main() == 0
+    assert state.message in capsys.readouterr().out
+
+
+def test_default_preparation_failure_never_publishes_unprepared_fallback(tmp_path):
+    _, instance = fixture_package(tmp_path, '1.16')
+    with patch('minecraft_playden.host_java.find', side_effect=ValueError('No host-native JDK')):
+        with pytest.raises(ValueError, match='No host-native JDK'):
+            build(tmp_path / 'Failed Default', Downloader(tmp_path / 'cache', offline=True), ClientSource('local', instance=instance))
+    assert not (tmp_path / 'Failed Default').exists()
+    assert not list(tmp_path.glob('.playden-*'))
+
+
+@pytest.mark.parametrize('version', ['1.14.4', '1.16'])
+@pytest.mark.parametrize('platform', ['native', 'windows'])
+def test_real_java8_loader_reuses_prepared_relative_cache(tmp_path, version, platform):
+    """Real loader cache lookup only; never starts Knot, Minecraft or mods."""
+    packages = os.environ.get('PLAYDEN_FABRIC_PREPARED')
+    java = os.environ.get('PLAYDEN_JAVA8' if platform == 'native' else 'PLAYDEN_JAVA8_WINDOWS')
+    javac = os.environ.get('PLAYDEN_JAVA8_JAVAC') or shutil.which('javac')
+    if not packages or not java or not javac:
+        pytest.skip('Set PLAYDEN_FABRIC_PREPARED and Java 8 probe runtimes for real prepared-cache reuse')
+    root = Path(packages) / ('Fabric-' + version)
+    assert fabric_remap.package_status(root).prepared
+    _, _, _, classpath = fabric_remap._context(root)
+    mapping, namespace, classes, _ = fabric_remap._mapping(root, classpath, version)
+    record = json.loads((root / fabric_remap.RECORD).read_text())
+    output = next(iter(record['outputs']))
+    target = tmp_path / output
+    target.parent.mkdir(parents=True)
+    shutil.copyfile(root / output, target)
+    target.chmod(0o444)
+    target.parent.chmod(0o555)
+    before = (hashlib.sha256(target.read_bytes()).hexdigest(), target.stat().st_mtime_ns)
+    # Compile our existing host-tool adapter for this test JVM only. Its sole
+    # Java 9 API is platform-loader selection; use the equivalent Java 8 parent.
+    # Production preparation continues to require a native JDK 17+.
+    source = tmp_path / 'FabricRemap.java'
+    source.write_text(fabric_remap.HELPER.read_text().replace(
+        'ClassLoader.getPlatformClassLoader()', 'ClassLoader.getSystemClassLoader().getParent()'))
+    subprocess.run([javac, '--release', '8', '-d', str(tmp_path), str(source)], check=True, capture_output=True)
+    def runtime_path(path):
+        path = path.resolve()
+        return 'Z:' + str(path).replace('/', '\\') if platform == 'windows' and os.name != 'nt' else str(path)
+    listing = tmp_path / 'classpath.txt'
+    listing.write_text('\n'.join(runtime_path(root / name) for name in classpath if name.startswith('libraries/')))
+    cwd = tmp_path / 'java/bin'
+    cwd.mkdir(parents=True)
+    command = [java, '-cp', runtime_path(tmp_path), 'FabricRemap', runtime_path(listing),
+               runtime_path(root / 'versions/client.jar'), '../../instances/default/minecraft',
+               runtime_path(tmp_path / 'receipt.json'), runtime_path(root / mapping), namespace, version]
+    if platform == 'windows' and os.name != 'nt':
+        command.insert(0, 'wine')
+    try:
+        result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=90)
+        assert result.returncode == 0, result.stdout + result.stderr
+        receipt = json.loads((tmp_path / 'receipt.json').read_text())
+        assert receipt['relative_output'] == output.removeprefix('instances/default/minecraft/')
+        assert receipt['loader'] == '0.20.1' and receipt['normalized_version'] == version
+        assert before == (hashlib.sha256(target.read_bytes()).hexdigest(), target.stat().st_mtime_ns)
+        assert not target.with_name(target.name + '.tmp').exists()
+        assert 'preparing JARs' not in result.stdout + result.stderr
+        # Exercise production completeness/CRC validation on the real cache too.
+        fabric_remap._verify_jar(root, output, classes)
+        # Compare fresh remapping with cache reuse. Desktop Wine may reject
+        # ZIP writes through its access checks too; the prepared-cache path
+        # above must succeed even in that environment.
+        (tmp_path / 'fresh-game').mkdir()
+        fresh = command.copy()
+        fresh[fresh.index('../../instances/default/minecraft')] = '../../fresh-game'
+        result = subprocess.run(fresh, cwd=cwd, capture_output=True, text=True, timeout=90)
+        if platform == 'windows' and result.returncode:
+            assert "can't be written" in result.stderr and 'OutputConsumerPath.java:102' in result.stderr, result.stdout + result.stderr
+            incomplete = list((tmp_path / 'fresh-game').rglob('client-intermediary.jar.tmp'))
+            assert len(incomplete) == 1  # Creation worked before the ZIP access check.
+            with zipfile.ZipFile(incomplete[0]) as jar:
+                assert jar.testzip() is None
+        else:
+            assert result.returncode == 0, result.stdout + result.stderr
+            receipt = json.loads((tmp_path / 'receipt.json').read_text())
+            produced = tmp_path / 'fresh-game' / receipt['relative_output']
+            with zipfile.ZipFile(produced) as jar:
+                assert jar.testzip() is None and 'net/minecraft/client/main/Main.class' in jar.namelist()
+            assert not produced.with_name(produced.name + '.tmp').exists()
+    finally:
+        target.parent.chmod(0o755)
+        target.chmod(0o644)

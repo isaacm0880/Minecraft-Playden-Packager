@@ -170,10 +170,11 @@ def test_validated_cache_is_reused_without_jdk_discovery(preferences, tmp_path):
     assert 'no additional preparation' in window.fabric_package_status.text()
 
 
-def test_prepared_cache_survives_verified_usb_copy(preferences, tmp_path):
+@pytest.mark.parametrize('version', ['1.20.1', '1.16', '1.14.4'])
+def test_prepared_cache_survives_verified_usb_copy(preferences, tmp_path, version):
     from minecraft_playden.transfer import TransferRequest
     from minecraft_playden.volumes import DriveTarget, VolumeIdentity
-    source, _ = fixture_package(tmp_path, prepared=True)
+    source, _ = fixture_package(tmp_path, version, prepared=True)
     usb = tmp_path / 'usb'
     usb.mkdir()
     info = usb.stat()
@@ -239,3 +240,25 @@ def test_lan_warning_can_decline_an_external_unprepared_package(preferences, tmp
     assert warning.call_args.args[1] == 'Transfer unprepared Fabric?'
     start.assert_not_called()
     manager.paired = None
+
+
+@pytest.mark.parametrize('version', ['1.14.4', '1.16'])
+def test_java8_gui_prepares_and_default_reset_restores_loader_artwork(preferences, tmp_path, version):
+    from minecraft_playden import artwork
+    window, _, _ = setup_window(preferences, tmp_path, version)
+    custom = tmp_path / 'custom.png'
+    custom.write_bytes(artwork.default('icon.png'))
+    window.icon_artwork.setText(str(custom))
+    queued = window.build_request()[0]
+    assert queued.icon_artwork == custom
+    window.artwork_buttons[1].click()  # Use default restores selection by loader.
+    assert window.build_request()[0].icon_artwork is None
+    assert queued.icon_artwork == custom
+    with patch.object(fabric_remap, '_run', side_effect=fake_remap), patch('urllib.request.urlopen', side_effect=AssertionError('Offline')), patch('minecraft_playden.gui_app.QMessageBox.warning', return_value=QMessageBox.StandardButton.Yes):
+        window.build_button.click()
+        pump(lambda: not window.busy())
+    result = window.completed_package
+    assert window.outcome == 'succeeded' and result.preparation.prepared
+    assert (result.path / 'playden/icon.png').read_bytes() == artwork.default('icon.png', 'Fabric')
+    assert (result.path / 'playden/background.png').read_bytes() == artwork.default('background.png')
+    assert (result.path / 'playden-java8.jar').is_file() and validate(result.path) == []

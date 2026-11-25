@@ -14,6 +14,7 @@ a = Analysis(
     datas=[(str(stage / 'build-metadata.json'), '.'),
            *[(str(icon_root / name), 'resources/icons') for name in icon_names],
            (str(root / 'minecraft_playden/resources/java8/Java8Launch.class'), 'minecraft_playden/resources/java8'),
+           (str(root / 'minecraft_playden/resources/remap/FabricRemap.java'), 'minecraft_playden/resources/remap'),
            *[(str(root / 'minecraft_playden/resources/artwork' / name), 'minecraft_playden/resources/artwork')
              for name in ('icon.png', 'background.png')],
            (str(root / 'LICENSE'), 'licenses'),

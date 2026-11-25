@@ -38,7 +38,11 @@ def main() -> int:
     package.add_argument('--username', default='Player')
     package.add_argument('--launch-profile', choices=PROFILES, default=DEFAULT_PROFILE,
                          help='official (default), or reference-26.3 for a separate reproduction of the supplied working launch configuration')
-    package.add_argument('--prepare-fabric', action='store_true', help='Prepare Fabric remapping headlessly using its exact installed loader')
+    preparation = package.add_mutually_exclusive_group()
+    preparation.add_argument('--prepare-fabric', action='store_const', const=True, default='auto',
+                             help='Explicitly request preparation (default: automatically prepare when mappings require it)')
+    preparation.add_argument('--no-prepare-fabric', dest='prepare_fabric', action='store_const', const=False,
+                             help='Troubleshooting only: skip Fabric preparation; first-launch remapping may fail on Playden')
     package.add_argument('--remap-java', type=Path, help='Host-native JDK java executable for headless remapping; never downloaded')
     prepare = commands.add_parser('prepare-fabric', help='Prepare Fabric remapping in a new copy of a validated package; no game/mod launch')
     prepare.add_argument('path', type=Path)

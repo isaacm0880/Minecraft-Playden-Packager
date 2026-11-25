@@ -31,7 +31,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
           progress: ProgressCallback | None = None, launch_profile: str = profiles.DEFAULT_PROFILE,
           cancellation: CancellationToken | None = None, exclude_saves: bool = False,
           privacy_cleanup: bool = False, instance_name: str | None = None,
-          prepare_fabric: bool | Literal['auto'] = False, remap_java: Path | None = None, controller_layout: bool = True,
+          prepare_fabric: bool | Literal['auto'] = 'auto', remap_java: Path | None = None, controller_layout: bool = True,
           icon_artwork: Path | None = None, background_artwork: Path | None = None) -> None:
     def check_cancelled() -> None:
         if cancellation is not None:
@@ -164,9 +164,15 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             from .fabric_remap import prepare_staged, package_status
             state = package_status(root, validated=False, cancellation=cancellation)
             if prepare_fabric is True or state.required:
-                prepare_staged(root, remap_java, cancellation, progress)
+                prepare_staged(root, remap_java, cancellation, progress or (
+                    lambda event: report(event.stage, event.message, event.completed, event.total)))
             else:
                 report('prepare-check', state.message)
+        elif fabric_data is not None:
+            from .fabric_remap import package_status
+            state = package_status(root, cancellation=cancellation)
+            if state.required:
+                report('prepare-skipped', 'WARNING: Fabric preparation explicitly disabled. ' + state.message)
         report('validation', 'Validating package inventory and launch configuration...')
         errors = validate(root, cancellation=cancellation, progress=progress)
         if errors:
