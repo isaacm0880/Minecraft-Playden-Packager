@@ -10,7 +10,7 @@ from minecraft_playden.validator import validate
 from test_fabric_launch import installed, archive, save
 
 
-def build_package(tmp_path):
+def build_package(tmp_path, controller_layout=True):
     instance, metadata, _ = installed(tmp_path / 'source', '26.3', '0.20.1')
     payloads = {
         'https://fixture/netty': archive({'io/netty/channel/unix/Errors.class': b'class'}),
@@ -29,7 +29,7 @@ def build_package(tmp_path):
     source = discover([instance], include_defaults=False).installations[0]
     output = tmp_path / 'Minecraft Package'
     with patch('urllib.request.urlopen', side_effect=request), patch('minecraft_playden.runtime.install', side_effect=runtime):
-        LocalBuildRequest(replace(source, name=output.name), output, tmp_path / 'cache').run()
+        LocalBuildRequest(replace(source, name=output.name), output, tmp_path / 'cache', controller_layout=controller_layout).run()
     assert validate(output) == []
     return output
 

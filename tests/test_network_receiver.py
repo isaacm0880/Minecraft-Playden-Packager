@@ -908,3 +908,33 @@ def test_legacy_schema_one_client_can_close_without_requesting_profile(receiver)
         wait_clean(sandbox)
         with paired(port, token) as session:
             assert begin(session, 1, 0, name='Next-Transfer') == b'ready;metrics=1'
+
+
+@pytest.mark.parametrize('fault', [
+    'mode', 'layout', 'partial', 'empty', 'extra', 'missing-id', 'duplicate-controller',
+])
+def test_receiver_accepts_only_complete_builtin_controller_defaults(receiver, fault):
+    files = contents()
+    document = json.loads(files['recipe.json'])
+    if fault == 'mode':
+        document['defaults']['controller'] = 'xinput'
+    elif fault == 'layout':
+        document['defaults']['controller_layout'] = 'cross = key:q'
+    elif fault == 'partial':
+        del document['defaults']['controller_layout']
+    elif fault == 'empty':
+        document['defaults'] = {}
+    elif fault == 'extra':
+        document['defaults']['environment'] = 'PATH=unsafe'
+    elif fault == 'missing-id':
+        del document['recipe_id']
+    files['recipe.json'] = json.dumps(document).encode()
+    if fault == 'duplicate-controller':
+        files['recipe.json'] = files['recipe.json'].replace(
+            b'"controller": "keyboard"', b'"controller": "keyboard", "controller": "keyboard"')
+    files['package.json'] = inventory(files)
+    with receiver() as (sandbox, port, token), paired(port, token) as session:
+        upload(session, files)
+        with pytest.raises(NetworkTransferError, match='Invalid recipe'):
+            verify(session)
+    wait_clean(sandbox)

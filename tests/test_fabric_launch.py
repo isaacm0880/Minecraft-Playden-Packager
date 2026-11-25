@@ -138,7 +138,7 @@ def installed(root, game='1.20.1', loader='0.16.10', layout='prism', full_compon
 
 
 class FabricLaunchTests(unittest.TestCase):
-    def build_fixture(self, root, game, loader, layout, exclude_saves=False, desktop=False, fallback=False, full_components=False, mutation=None, official_root=False, cli=False, minimal_manifest=False, installed_lwjgl_version=None, uncached_lwjgl=False, native_maps=False):
+    def build_fixture(self, root, game, loader, layout, exclude_saves=False, desktop=False, fallback=False, full_components=False, mutation=None, official_root=False, cli=False, minimal_manifest=False, installed_lwjgl_version=None, uncached_lwjgl=False, native_maps=False, controller_layout=True):
         launcher = root / 'source'
         instance, base, profile = installed(launcher, game, loader, layout, full_components, minimal_manifest, installed_lwjgl_version)
         if native_maps:
@@ -209,7 +209,7 @@ class FabricLaunchTests(unittest.TestCase):
                 self.assertTrue(row.buildable, row.build_problem)
                 self.assertEqual(row.version, game)
                 self.assertEqual(row.loader_label, f'Fabric {loader}')
-                LocalBuildRequest(row, output, root / 'cache').run()
+                LocalBuildRequest(row, output, root / 'cache', controller_layout=controller_layout).run()
             elif cli:
                 from minecraft_playden.cli import main
                 argv = ['minecraft-playden', '--cache', str(root / 'cache'), 'build', '--source', 'local',
@@ -218,10 +218,12 @@ class FabricLaunchTests(unittest.TestCase):
                     argv += ['--version', selected_version]
                 if exclude_saves:
                     argv += ['--exclude-saves']
+                if not controller_layout:
+                    argv += ['--no-controller-layout']
                 with patch('sys.argv', argv):
                     self.assertEqual(main(), 0)
             else:
-                build(output, Downloader(root / 'cache'), ClientSource('local', instance=selected, version=selected_version), exclude_saves=exclude_saves, progress=progress)
+                build(output, Downloader(root / 'cache'), ClientSource('local', instance=selected, version=selected_version), exclude_saves=exclude_saves, progress=progress, controller_layout=controller_layout)
         self.assertEqual({str(p.relative_to(launcher)): p.read_bytes() for p in launcher.rglob('*') if p.is_file()}, before)
         self.assertEqual(validate(output), [])
         data = json.loads((output / 'metadata/fabric.json').read_text())
@@ -256,6 +258,25 @@ class FabricLaunchTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(any('meta.fabricmc.net/' in url for url in requested), fallback)
         return output, instance, data, base
+
+    def test_controller_option_cli_desktop_parity_preserves_fabric_arguments(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            arguments_before = None
+            for desktop in (False, True):
+                for enabled in (True, False):
+                    with self.subTest(desktop=desktop, enabled=enabled):
+                        output, _, _, _ = self.build_fixture(root / f'{desktop}-{enabled}', '1.20.1', '0.16.10',
+                                                             'prism', desktop=desktop, cli=not desktop,
+                                                             controller_layout=enabled)
+                        document = json.loads((output / 'recipe.json').read_text())
+                        self.assertEqual('defaults' in document, enabled)
+                        if enabled:
+                            self.assertEqual(document['defaults']['controller'], 'keyboard')
+                        words = (output / 'playden.args').read_bytes()
+                        if arguments_before is None:
+                            arguments_before = words
+                        self.assertEqual(words, arguments_before)
 
     def test_classifier_maps_build_through_cli_and_desktop(self):
         for desktop in (False, True):

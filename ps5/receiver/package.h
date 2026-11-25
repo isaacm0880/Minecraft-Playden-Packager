@@ -231,16 +231,35 @@ static int strict_recipe(int fd, const char *folder) {
     size_t n;
     int ok = 0;
     const char *const top[] = {"recipe_id",  "recipe_version", "game",     "launch_entries",
-                               "executable", "architecture",   "graphics", "community"};
+                               "executable", "architecture",   "graphics", "community", "defaults"};
     const char *const game[] = {"store", "key", "name"};
     const char *const community[] = {"format_version", "status"};
     const char *const entry[] = {"id", "label", "executable", "arguments"};
     if (!read_file(fd, "recipe.json", RECIPE_MAX, &doc, &n))
         return 0;
-    if (!json_document(doc, n) || !keys(doc, n, top, 8, 8))
+    if (!json_document(doc, n))
         goto done;
     const char *s;
     size_t length;
+    const int has_defaults = keyval(doc, n, "defaults", &s, &length);
+    /* Optional defaults never make another required top-level field optional. */
+    if (!keys(doc, n, top, 9, has_defaults ? 9 : 8))
+        goto done;
+    if (has_defaults) {
+        const char *const defaults[] = {"controller", "controller_layout"};
+        /* Exactly the packager's built-in layout; arbitrary settings remain refused. */
+        static const char layout[] =
+            "\"cross = key:space;circle = key:q;square = key:e;triangle = key:f;"
+            "l1 = mouse:wheel_up;r1 = mouse:wheel_down;l2 = mouse:right;r2 = mouse:left;"
+            "l3 = key:lctrl;r3 = key:lshift;up = key:l;down = key:f3;"
+            "left = key:t;right = mouse:middle;options = key:escape;create = key:f2;"
+            "touchpad_left = key:tab;touchpad_right = key:f5;left_stick = keys;left_stick_keys = w,s,a,d;"
+            "right_stick = mouse\"";
+        if (!keys(s, length, defaults, 2, 2) ||
+            !field(s, length, "controller", "\"keyboard\"") ||
+            !field(s, length, "controller_layout", layout))
+            goto done;
+    }
     if (!keyval(doc, n, "game", &s, &length) || !keys(s, length, game, 3, 3))
         goto done;
     if (!keyval(doc, n, "community", &s, &length) || !keys(s, length, community, 2, 2))

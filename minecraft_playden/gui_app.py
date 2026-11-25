@@ -242,6 +242,11 @@ class MainWindow(QMainWindow):
         self.build_advanced.form.addRow(self.privacy_cleanup)
         self.privacy_cleanup.setToolTip('Remove known credentials, sessions and personal identifiers from the package copy. '
                                         'Worlds and ordinary mod settings are preserved. Unknown secrets need manual review.')
+        self.controller_layout = QCheckBox('Use Minecraft keyboard/mouse controller layout')
+        self.controller_layout.setChecked(bool(self.settings.value('build/controllerLayout', True, type=bool)))
+        self.controller_layout.setToolTip('Include the built-in Minecraft layout in the Playden recipe. '
+                                          'Turn off for Controlify or other controller mods. Assumes default Minecraft keybinds.')
+        form.addRow(self.controller_layout)
         self.username = QLineEdit(offline_player_name(self.settings.value('player/offlineName', 'Player')))
         self.save_offline_name(self.username.text())
         self.username.setToolTip('Remembered for this user on this device. Offline display name only; this does not sign in or enable authenticated services.')
@@ -385,6 +390,7 @@ class MainWindow(QMainWindow):
         self.allow_runtime_download.toggled.connect(lambda value: self.settings.setValue('build/runtimeDownload', value))
         self.offline.toggled.connect(lambda value: self.settings.setValue('build/offline', value))
         self.privacy_cleanup.toggled.connect(lambda value: self.settings.setValue('build/privacyCleanup', value))
+        self.controller_layout.toggled.connect(lambda value: self.settings.setValue('build/controllerLayout', value))
         self.ps5_pipeline.toggled.connect(lambda checked: self.settings.setValue('transfer/pipelineFiles', checked))
         self.username.textChanged.connect(self.offline_name_changed)
         self.username.editingFinished.connect(self.normalise_offline_name)
@@ -556,6 +562,7 @@ class MainWindow(QMainWindow):
     def build_requests(self) -> tuple[list[LocalBuildRequest], str]:
         return selection_readiness(self.selected_installations(), self.output.text(), self.cache.text(), self.busy(),
                                    username=offline_player_name(self.username.text()), privacy_cleanup=self.privacy_cleanup.isChecked(),
+                                   controller_layout=self.controller_layout.isChecked(),
                                    allow_runtime_download=self.allow_runtime_download.isChecked(), offline=self.offline.isChecked(), prepare_fabric=self._prepare_fabric_requested,
                                    remap_java=Path(self.remap_java.text().strip()).expanduser() if self.remap_java.text().strip() else None)
 
@@ -612,7 +619,7 @@ class MainWindow(QMainWindow):
 
     def operation_controls(self) -> tuple[QWidget, ...]:
         return (self.scan_button, self.folder_button, self.validate_button, self.output_button,
-                self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.allow_runtime_download, self.username,
+                self.cache_button, self.output, self.cache, self.table, self.privacy_cleanup, self.allow_runtime_download, self.username, self.controller_layout,
                 self.prepare_fabric, self.remap_java, self.remap_java_button, self.prepare_existing_button,
                 self.cleanup_after_usb, self.ps5_destination, self.receiver_manager, self.offline, self.ps5_pipeline)
 

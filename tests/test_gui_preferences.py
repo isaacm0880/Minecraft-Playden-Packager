@@ -124,10 +124,23 @@ def test_gui_preferences_never_override_cli_name_or_default(preferences, tmp_pat
         assert read_settings().value('player/offlineName') == 'GUI Player'
 
 
+def test_cli_controller_option_is_independent_of_gui_preference(preferences, tmp_path):
+    create, read_settings = preferences
+    create().controller_layout.setChecked(False)
+    for options, expected in (([], True), (['--no-controller-layout'], False)):
+        argv = ['packager', 'build', '--source', 'local', '--client-jar', str(tmp_path / 'client.jar'),
+                '--version', '26.3', '--output', str(tmp_path / 'output'), *options]
+        with patch('sys.argv', argv), patch('minecraft_playden.cli.build') as build, contextlib.redirect_stdout(io.StringIO()):
+            assert main() == 0
+        assert build.call_args.kwargs['controller_layout'] is expected
+        assert read_settings().value('build/controllerLayout', type=bool) is False
+
+
 def test_player_name_survives_an_actual_gui_process_restart(preferences):
     create, read_settings = preferences
     window = create()
     window.username.setText('Restart Player')
+    window.controller_layout.setChecked(False)
     window.close()
     script = r"""
 import sys
@@ -140,6 +153,7 @@ app = QApplication([])
 with patch('minecraft_playden.gui_app.QSettings', side_effect=lambda *args: QSettings(sys.argv[1], QSettings.Format.IniFormat)), patch('minecraft_playden.gui_app.QTimer.singleShot'):
     window = MainWindow(Path(sys.argv[1]).parent / 'cache', [])
     assert window.username.text() == 'Restart Player'
+    assert not window.controller_layout.isChecked()
     assert window.progress_bar.text() == '0%'
     window.username.setText('Next Process Player')
     window.close()
@@ -158,3 +172,30 @@ def test_invalid_destination_falls_back_to_internal(preferences, invalid):
     read_settings().setValue('transfer/destination', invalid)
     read_settings().sync()
     assert create().ps5_destination.currentData() == 'internal'
+
+
+def test_controller_layout_preference_and_build_queue_capture(preferences, tmp_path):
+    create, read_settings = preferences
+    first = create()
+    assert first.controller_layout.isChecked()
+    assert first.controller_layout in first.operation_controls()
+    first.controller_layout.setChecked(False)
+    assert read_settings().value('build/controllerLayout', type=bool) is False
+    first.close()
+    window = create()
+    assert not window.controller_layout.isChecked()
+    source = tmp_path / 'source'
+    source.mkdir()
+    client = source / 'client.jar'
+    client.write_bytes(b'original client')
+    window.operation = 'scan'
+    window.task_result(DiscoveryResult((Installation('Vanilla', 'Portable', '26.3', source, client),)))
+    window.output.setText(str(tmp_path / 'package'))
+    requests, reason = window.build_requests()
+    assert len(requests) == 1, reason
+    assert requests[0].controller_layout is False
+    window.controller_layout.setChecked(True)
+    assert requests[0].controller_layout is False  # Queue options are immutable snapshots.
+    assert window.build_requests()[0][0].controller_layout is True
+    window.close()
+    assert create().controller_layout.isChecked()

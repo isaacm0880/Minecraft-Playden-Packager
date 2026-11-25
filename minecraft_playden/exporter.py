@@ -31,7 +31,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
           progress: ProgressCallback | None = None, launch_profile: str = profiles.DEFAULT_PROFILE,
           cancellation: CancellationToken | None = None, exclude_saves: bool = False,
           privacy_cleanup: bool = False, instance_name: str | None = None,
-          prepare_fabric: bool | Literal['auto'] = False, remap_java: Path | None = None) -> None:
+          prepare_fabric: bool | Literal['auto'] = False, remap_java: Path | None = None, controller_layout: bool = True) -> None:
     def check_cancelled() -> None:
         if cancellation is not None:
             cancellation.check()
@@ -138,7 +138,7 @@ def build(output: Path, downloader: Downloader, source: ClientSource, username: 
             cleanup(root / 'metadata/local-instance', cancellation)
         report('arguments', 'Generating portable Playden launch arguments...')
         arguments.write(root, effective if fabric_data is not None else metadata, classpath, username, launch_profile)
-        recipe.write(root, f'Minecraft {version}')
+        recipe.write(root, f'Minecraft {version}', controller_layout=controller_layout)
         if instance_name is not None:
             save('metadata/instance-name.json', {'schema': 1, 'name': instance_name})
         (root / 'PLAYDEN.txt').write_text(f'Game title: Minecraft {version}\n\n' + INSTRUCTIONS, encoding='utf-8')

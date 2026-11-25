@@ -44,6 +44,8 @@ def main() -> int:
     prepare.add_argument('path', type=Path)
     prepare.add_argument('--output', type=Path, required=True)
     prepare.add_argument('--remap-java', type=Path, help='Host-native JDK java executable (Linux/Windows/macOS)')
+    package.add_argument('--no-controller-layout', dest='controller_layout', action='store_false',
+                         help='Omit built-in keyboard/mouse controller mappings for Controlify or other controller mods')
     package.add_argument('--exclude-saves', action='store_true', help='Omit world saves; worlds are included by default')
     local_import = commands.add_parser('import-instance', help='Phase 2A: preserve instance files without claiming a verified launch')
     local_import.add_argument('--instance', type=Path, required=True)
@@ -172,7 +174,7 @@ def main() -> int:
                 instance_name = installations[0].name if len(installations) == 1 else args.output.name
                 build(args.output, downloader, source, args.username, launch_profile=args.launch_profile,
                       exclude_saves=args.exclude_saves, instance_name=instance_name,
-                      prepare_fabric=args.prepare_fabric, remap_java=args.remap_java)
+                      prepare_fabric=args.prepare_fabric, remap_java=args.remap_java, controller_layout=args.controller_layout)
                 print(f'Package validated: {args.output}\n' + INSTRUCTIONS)
         return 0
     except (KeyboardInterrupt, OperationCancelled):

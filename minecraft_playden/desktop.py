@@ -46,6 +46,7 @@ class LocalBuildRequest:
     prepare_fabric: bool = True
     remap_java: Path | None = None
     offline: bool = False
+    controller_layout: bool = True
 
     def validate(self) -> None:
         if self.installation.build_problem and not self.file_only:
@@ -120,7 +121,7 @@ class LocalBuildRequest:
               progress=progress, cancellation=cancellation, exclude_saves=self.exclude_saves,
               launch_profile=self.launch_profile, privacy_cleanup=self.privacy_cleanup,
               instance_name=self.installation.name, prepare_fabric='auto' if self.prepare_fabric else False,
-              remap_java=self.remap_java)
+              remap_java=self.remap_java, controller_layout=self.controller_layout)
         protected = tuple(path for path in (self.installation.instance, self.installation.launcher_root,
                                              self.installation.libraries_root,
                                              self.installation.client.parent if self.installation.client else None)
@@ -214,7 +215,8 @@ def unique_output(base: Path, reserved: set[Path] | None = None) -> Path:
 def selection_readiness(installations: list[Installation], output: str, cache: str,
                         busy: bool = False, *, username: str = 'Player',
                         privacy_cleanup: bool = True, allow_runtime_download: bool = True, offline: bool = False,
-                        prepare_fabric: bool = True, remap_java: Path | None = None) -> tuple[list[LocalBuildRequest], str]:
+                        prepare_fabric: bool = True, remap_java: Path | None = None,
+                        controller_layout: bool = True) -> tuple[list[LocalBuildRequest], str]:
     """Capture every selected row; no partial queue if any input is blocked."""
     from dataclasses import replace
     if busy:
@@ -238,7 +240,8 @@ def selection_readiness(installations: list[Installation], output: str, cache: s
                 problems.append(f'{installation.name} ({installation.loader_label}, {installation.version}): {reason}')
             else:
                 requests.append(replace(request, privacy_cleanup=privacy_cleanup, allow_runtime_download=allow_runtime_download,
-                                        prepare_fabric=prepare_fabric, remap_java=remap_java, offline=offline))
+                                        prepare_fabric=prepare_fabric, remap_java=remap_java, offline=offline,
+                                        controller_layout=controller_layout))
         except (OSError, ValueError, RuntimeError) as exc:
             problems.append(f'{installation.name}: {exc}')
     if problems:

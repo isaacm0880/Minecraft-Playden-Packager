@@ -8,9 +8,22 @@ import unicodedata
 from pathlib import Path
 from .downloads import safe_path
 
+PATH = 'recipe.json'
 PROGRAM = 'java/bin/java.exe'
 ARGUMENTS = '@../../playden.args'
 MAX_RECIPE_BYTES = 16 * 1024
+
+# Playden controller_layout / prospero-win input-map grammar, not launch args.
+# Stick key order is up, down, left, right.
+CONTROLLER_LAYOUT = ';'.join([
+    'cross = key:space', 'circle = key:q', 'square = key:e', 'triangle = key:f',
+    'l1 = mouse:wheel_up', 'r1 = mouse:wheel_down',
+    'l2 = mouse:right', 'r2 = mouse:left', 'l3 = key:lctrl', 'r3 = key:lshift',
+    'up = key:l', 'down = key:f3', 'left = key:t', 'right = mouse:middle',
+    'options = key:escape', 'create = key:f2',
+    'touchpad_left = key:tab', 'touchpad_right = key:f5',
+    'left_stick = keys', 'left_stick_keys = w,s,a,d', 'right_stick = mouse',
+])
 
 
 def name_key(name: str) -> str:
@@ -21,12 +34,14 @@ def name_key(name: str) -> str:
     return key[:48].rstrip('-') or 'game'
 
 
-def generate(name: str) -> dict:
+def generate(name: str, controller_layout: bool = True, *, launch_arguments: str = ARGUMENTS) -> dict:
     # IsGameName in Playden's library/game_ref.cpp counts Unicode code points.
     if (not isinstance(name, str) or not 1 <= len(name) <= 120
             or any(unicodedata.category(c).startswith('C') or c in '\u2028\u2029' for c in name)
             or not any(unicodedata.category(c)[0] not in 'ZMC' for c in name)):
         raise ValueError('Game name must be 1-120 printable characters with visible content')
+    if type(controller_layout) is not bool:
+        raise ValueError('Controller layout option must be a boolean')
     key = name_key(name)
     return {
         'recipe_id': f'community-imported-{key}-playden',
@@ -36,7 +51,7 @@ def generate(name: str) -> dict:
             'id': 'program',
             'label': 'java.exe',
             'executable': PROGRAM,
-            'arguments': ARGUMENTS,
+            'arguments': launch_arguments,
         }],
         'executable': PROGRAM,
         # Playden defaults to pe32; the downloaded Java runtime is Windows x64.
@@ -44,29 +59,33 @@ def generate(name: str) -> dict:
         'graphics': 'opengl',
         # Both fields are required by ParseCommunityRecipe, even for local imports.
         'community': {'format_version': 1, 'status': 'untested'},
+        **({'defaults': {'controller': 'keyboard', 'controller_layout': CONTROLLER_LAYOUT}}
+           if controller_layout else {}),
     }
 
 
-def write(root: Path, name: str) -> None:
-    text = json.dumps(generate(name), indent=2, ensure_ascii=False) + '\n'
-    with safe_path(root, 'recipe.json').open('x', encoding='utf-8', newline='\n') as stream:
+def write(root: Path, name: str, controller_layout: bool = True, *, launch_arguments: str = ARGUMENTS) -> None:
+    text = json.dumps(generate(name, controller_layout, launch_arguments=launch_arguments), indent=2, ensure_ascii=False) + '\n'
+    target = safe_path(root, PATH)
+    with target.open('x', encoding='utf-8', newline='\n') as stream:
         stream.write(text)
 
 
-def validate(root: Path, name: str | None = None) -> list[str]:
-    """Check our minimal configuration and paths, without executing Java.
+def validate(root: Path, name: str | None = None, *, launch_arguments: str = ARGUMENTS) -> list[str]:
+    """Check either supported controller configuration and paths, without executing Java.
 
     This intentionally validates packager output, not arbitrary Playden recipes.
     Package validation supplies the expected name from the package version.
     """
     errors = []
     try:
-        with safe_path(root, 'recipe.json').open('rb') as stream:
+        with safe_path(root, PATH).open('rb') as stream:
             data = stream.read(MAX_RECIPE_BYTES + 1)
         if len(data) > MAX_RECIPE_BYTES:
             raise ValueError('recipe exceeds Playden\'s 16 KB import limit')
         document = json.loads(data.decode('utf-8'))
-        expected = generate(name if name is not None else document['game']['name'])
+        expected = generate(name if name is not None else document['game']['name'],
+                            controller_layout='defaults' in document, launch_arguments=launch_arguments)
         # JSON comparison also distinguishes true from 1 and 1.0 from 1.
         if json.dumps(document, sort_keys=True) != json.dumps(expected, sort_keys=True):
             errors.append('Recipe differs from the generated Playden configuration')

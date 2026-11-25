@@ -25,7 +25,7 @@ class RecipeTests(unittest.TestCase):
     def test_minimal_contract_and_working_folder(self):
         document = json.loads((self.root / 'recipe.json').read_text())
         self.assertEqual(set(document), {'recipe_id', 'recipe_version', 'game', 'launch_entries',
-                                         'executable', 'architecture', 'graphics', 'community'})
+                                         'executable', 'architecture', 'graphics', 'community', 'defaults'})
         self.assertEqual(document['community'], {'format_version': 1, 'status': 'untested'})
         self.assertEqual(document['architecture'], 'pe64')
         self.assertNotIn('environment', document)
@@ -37,6 +37,36 @@ class RecipeTests(unittest.TestCase):
                          (self.root / 'playden.args').resolve())
         self.assertEqual(recipe.validate(self.root, 'Minecraft 26.3'), [])
         self.assertFalse((self.root / 'launch.args').exists())
+
+    def test_controller_layout_exact_bindings_and_disabled_legacy_recipe(self):
+        enabled = recipe.generate('Minecraft 26.3')
+        self.assertEqual(enabled['defaults']['controller'], 'keyboard')
+        self.assertEqual(dict(line.split(' = ') for line in enabled['defaults']['controller_layout'].split(';')), {
+            'left_stick': 'keys', 'left_stick_keys': 'w,s,a,d', 'right_stick': 'mouse',
+            'l3': 'key:lctrl', 'r3': 'key:lshift', 'cross': 'key:space', 'circle': 'key:q',
+            'square': 'key:e', 'triangle': 'key:f', 'l1': 'mouse:wheel_up', 'r1': 'mouse:wheel_down',
+            'l2': 'mouse:right', 'r2': 'mouse:left', 'up': 'key:l', 'down': 'key:f3',
+            'left': 'key:t', 'right': 'mouse:middle', 'touchpad_left': 'key:tab',
+            'touchpad_right': 'key:f5', 'options': 'key:escape', 'create': 'key:f2',
+        })
+        disabled = recipe.generate('Minecraft 26.3', controller_layout=False)
+        self.assertNotIn('defaults', disabled)
+        self.assertEqual({key: value for key, value in enabled.items() if key != 'defaults'}, disabled)
+        for document in (enabled, disabled):
+            self.save(document)
+            self.assertEqual(recipe.validate(self.root), [])
+
+    def test_partial_or_modified_controller_defaults_are_rejected(self):
+        for defaults in ({}, {'controller': 'keyboard'}, {'controller_layout': recipe.CONTROLLER_LAYOUT},
+                         {'controller': 'xinput', 'controller_layout': recipe.CONTROLLER_LAYOUT},
+                         {'controller': 'keyboard', 'controller_layout': 'cross = key:q'},
+                         {'controller': 'keyboard', 'controller_layout': recipe.CONTROLLER_LAYOUT, 'environment': 'bad'},
+                         None, True, []):
+            with self.subTest(defaults=defaults):
+                document = recipe.generate('Minecraft 26.3')
+                document['defaults'] = defaults
+                self.save(document)
+                self.assertTrue(recipe.validate(self.root))
 
     def test_name_keys(self):
         for name, key in [
@@ -143,6 +173,14 @@ class RecipeTests(unittest.TestCase):
                 result = subprocess.run([checker, str(self.root / 'recipe.json')], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn('cwd java/bin, opengl', result.stdout)
+        for enabled in (True, False):
+            for capability in (True, False):
+                self.save(recipe.generate('Minecraft 26.3', controller_layout=enabled))
+                command = [checker, str(self.root / 'recipe.json')]
+                if not capability:
+                    command.append('--no-input-map')
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
         for field in ['community', 'executable', 'launch_entries', 'recipe_id', 'recipe_version', 'game']:
             with self.subTest(missing=field):
                 document = recipe.generate('Minecraft 26.3')

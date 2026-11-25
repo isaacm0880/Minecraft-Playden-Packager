@@ -89,6 +89,9 @@ class PackagerTests(unittest.TestCase):
     def test_full_build_validate_tamper_and_preserve(self):
         self._full_build_validate_tamper_and_preserve('local')
 
+    def test_disabled_controller_vanilla_package_and_usb_copy(self):
+        self._full_build_validate_tamper_and_preserve('desktop-usb', controller_layout=False)
+
     def test_build_preserves_instance_data_and_saves_by_default(self):
         self._full_build_validate_tamper_and_preserve('local-instance')
 
@@ -119,7 +122,7 @@ class PackagerTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 self._full_build_validate_tamper_and_preserve(mode, missing_floatlist=True)
 
-    def _full_build_validate_tamper_and_preserve(self, mode, missing_floatlist=False, cancel_stage=None, exclude_saves=False):
+    def _full_build_validate_tamper_and_preserve(self, mode, missing_floatlist=False, cancel_stage=None, exclude_saves=False, controller_layout=True):
         native = archive({'windows/x64/lwjgl.dll': b'MZnative', 'META-INF/test': b'ignore'})
         java = archive({'jdk/bin/java.exe': pe(), 'jdk/bin/server/jvm.dll': pe(),
                         'jdk/release': b'JAVA_VERSION="25"\nOS_NAME="Windows"\nOS_ARCH="x86_64"'})
@@ -188,9 +191,9 @@ class PackagerTests(unittest.TestCase):
                         jar.parent.mkdir(parents=True)
                         jar.write_bytes((fixture / 'client.jar').read_bytes())
                     installation = discover([launcher_root], include_defaults=False).installations[0]
-                action = lambda: LocalBuildRequest(installation, output, root / 'cache', allow_runtime_download=True).run(report, token)
+                action = lambda: LocalBuildRequest(installation, output, root / 'cache', allow_runtime_download=True, controller_layout=controller_layout).run(report, token)
             else:
-                action = lambda: build(output, Downloader(root / 'cache', token, allow_runtime_download=True), source, progress=report, cancellation=token, exclude_saves=exclude_saves)
+                action = lambda: build(output, Downloader(root / 'cache', token, allow_runtime_download=True), source, progress=report, cancellation=token, exclude_saves=exclude_saves, controller_layout=controller_layout)
             if cancel_stage and cancel_stage != 'complete':
                 with self.assertRaises(OperationCancelled):
                     action()
@@ -207,6 +210,8 @@ class PackagerTests(unittest.TestCase):
             action()
             self.assertEqual(validate(output), [])
             self.assertTrue((output / 'recipe.json').is_file())
+            document = json.loads((output / 'recipe.json').read_text())
+            self.assertEqual('defaults' in document, controller_layout)
             self.assertFalse((output / 'launch.args').exists())
             self.assertIn('Minecraft fixture', (output / 'PLAYDEN.txt').read_text())
             inventory = json.loads((output / 'package.json').read_text())
