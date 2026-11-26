@@ -109,13 +109,24 @@ def _checksum(path: Path, cancellation: CancellationToken, guard: DriveTarget | 
 
 def _check_private_root(path: Path, drive: DriveTarget) -> None:
     drive.check()
-    try:
-        parts = path.absolute().relative_to(drive.root).parts
-    except ValueError:
-        raise TransferError('Transfer path escaped the selected volume') from None
-    current = drive.root
-    for part in parts:
-        current /= part
+    if '..' in path.parts:
+        raise TransferError('Transfer path escaped the selected volume')
+    # Windows can spell the same directory with long or 8.3 short components
+    # (notably the runner's temporary directory). Compare ancestor identity,
+    # then inspect every actual component without following reparse points.
+    current = path.absolute()
+    descendants = []
+    while True:
+        try:
+            if os.path.samefile(current, drive.root):
+                break
+        except OSError:
+            pass
+        if current == current.parent:
+            raise TransferError('Transfer path escaped the selected volume')
+        descendants.append(current)
+        current = current.parent
+    for current in (current, *reversed(descendants)):
         if _linked(current) or not current.is_dir():
             raise TransferError(f'Unsafe transfer directory: {current}')
 

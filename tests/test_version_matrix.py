@@ -278,7 +278,7 @@ def test_pre_adapter_packages_keep_their_original_arguments_and_logging_policy(t
     inventory = json.loads((output / 'package.json').read_text())
     old = arguments.generate(metadata, inventory['classpath'], '../../', metadata_adapter=False)
     (output / 'playden.args').write_text(old)
-    inventory['files']['playden.args'] = hashlib.sha256(old.encode()).hexdigest()
+    inventory['files']['playden.args'] = hashlib.sha256((output / 'playden.args').read_bytes()).hexdigest()
     # Earlier versions did not include Vanilla logging or runtime target evidence.
     logging = 'assets/log_configs/' + metadata['logging']['client']['file']['id']
     (output / logging).unlink()
@@ -287,6 +287,8 @@ def test_pre_adapter_packages_keep_their_original_arguments_and_logging_policy(t
     inventory['files']['metadata/runtime.json'] = hashlib.sha256((output / 'metadata/runtime.json').read_bytes()).hexdigest()
     (output / 'package.json').write_text(json.dumps(inventory))
     assert validate(output) == []
+    (output / 'playden.args').write_bytes(b'tampered arguments')
+    assert 'Hash mismatch: playden.args' in validate(output)
 
 
 def test_unknown_placeholders_and_malformed_runtime_fail_capability_preflight():

@@ -151,12 +151,14 @@ def test_unexpected_termination_is_detected_by_monitor_and_disables_stop(ui, man
         assert 'may have stopped' in manager.error.text()
 
 
-def test_missing_sdk_and_unsupported_versions_have_actionable_errors(ui):
+def test_missing_receiver_and_unsupported_versions_have_actionable_errors(ui):
     window, manager, *_ = ui
     manager.sdk.setText('/missing-sdk')
-    manager.start_button.click()
-    pump_until(lambda: not manager.busy())
-    assert manager.state == 'Error' and 'SDK deployer was not found' in manager.error.text()
+    manager.elf.setText('/missing-receiver.elf')
+    with patch('minecraft_playden.receiver_manager._connect', side_effect=ConnectionRefusedError):
+        manager.start_button.click()
+        pump_until(lambda: not manager.busy())
+    assert manager.state == 'Error' and 'Receiver ELF was not found' in manager.error.text()
     assert not manager.stop_button.isEnabled()
     with patch('minecraft_playden.gui_receiver.identify', side_effect=UnsupportedReceiver('Unsupported receiver version; start the updated ELF.')):
         manager.refresh_button.click()

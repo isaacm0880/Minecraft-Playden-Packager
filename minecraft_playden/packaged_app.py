@@ -125,11 +125,14 @@ def main() -> int:
                 assert artwork.validate_png(artwork.default('icon.png')) == (512, 512)
                 assert artwork.validate_png(artwork.default('background.png'))[0] > 0
                 assert artwork.validate_png(artwork.default('icon.png', 'Fabric')) == (512, 512)
-                from .receiver_manager import ReceiverConfiguration, ensure_receiver_elf
-                from .operations import CancellationToken
-                receiver = ReceiverConfiguration.load()
-                assert receiver.elf.is_file(), 'Bundled receiver ELF missing'
-                ensure_receiver_elf(receiver.sdk, receiver.elf, CancellationToken())
+                if getattr(sys, '_MEIPASS', None) is not None:
+                    # Source-mode startup tests have no bundled resources. The
+                    # actual frozen executable must retain this integrity gate.
+                    from .receiver_manager import ReceiverConfiguration, ensure_receiver_elf
+                    from .operations import CancellationToken
+                    receiver = ReceiverConfiguration.load()
+                    assert receiver.elf.is_file(), 'Bundled receiver ELF missing'
+                    ensure_receiver_elf(receiver.sdk, receiver.elf, CancellationToken())
                 window.table.sortItems(2, Qt.SortOrder.AscendingOrder)
                 assert window.table.item(0, 2).text() == '1.9'  # type: ignore[union-attr]
                 window.table.selectRow(0)

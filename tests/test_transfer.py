@@ -52,8 +52,9 @@ class TransferTests(unittest.TestCase):
         self.request = TransferRequest(self.source, self.drive)
 
     @staticmethod
-    def snapshot(root):
-        return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    def snapshot(root, *, exclude=frozenset()):
+        return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob('*')
+                if p.is_file() and p.name not in exclude}
 
     def assert_source_untouched(self):
         self.assertEqual(self.snapshot(self.source), self.original)
@@ -405,7 +406,11 @@ class CompletedSessionCleanupTests(unittest.TestCase):
         sessions = self.usb / 'playden/.packager-transfers'
         checkpoint = next(sessions.glob('*/state.json'))
         original_session = checkpoint.parent
-        before = self.snapshot(original_session)
+        # Windows denies reads of the byte-range-locked file while another
+        # process owns it. Compare resumable data and its lock identity apart.
+        lock_file = original_session / '.session-lock'
+        lock_identity = (lock_file.stat().st_dev, lock_file.stat().st_ino)
+        before = self.snapshot(original_session, exclude={'.session-lock'})
         script = r'''
 import sys
 from pathlib import Path
@@ -429,7 +434,8 @@ lease.close()
             events = []
             result = self.request.run(events.append)
             self.assertEqual(self.snapshot(result.destination), self.original)
-            self.assertEqual(self.snapshot(original_session), before)
+            self.assertEqual(self.snapshot(original_session, exclude={'.session-lock'}), before)
+            self.assertEqual((lock_file.stat().st_dev, lock_file.stat().st_ino), lock_identity)
             self.assertEqual(list(sessions.iterdir()), [original_session])
             self.assertTrue(any('other transfer sessions retained' in event.message for event in events))
         finally:
@@ -495,6 +501,16 @@ lease.close()
             result = _directory(self.usb, 'playden/import', self.drive)
         self.assertEqual(result, self.usb / 'playden/import')
         self.assertTrue(result.is_dir())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows short-path aliases only')
+    def test_windows_short_path_alias_keeps_selected_volume_identity(self):
+        from minecraft_playden.transfer import _directory
+        if self.usb == self.drive.root:
+            self.skipTest('This Windows volume has no short-path alias for the temporary root')
+        self.assertTrue(os.path.samefile(self.usb, self.drive.root))
+        result = _directory(self.usb, 'playden/import', self.drive)
+        self.assertTrue(result.is_dir())
+        self.assertTrue(os.path.samefile(result, self.drive.root / 'playden/import'))
 
     def test_directory_creation_race_rejects_non_directory_eexist(self):
         from minecraft_playden.transfer import _directory
