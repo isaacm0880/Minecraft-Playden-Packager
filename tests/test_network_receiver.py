@@ -212,7 +212,7 @@ def test_receiver_rejects_invalid_entry_state(receiver, fault):
     wait_clean(sandbox)
 
 
-@pytest.mark.parametrize('fault', ['recipe', 'traversal-recipe', 'extra-launch', 'duplicate-key', 'inventory'])
+@pytest.mark.parametrize('fault', ['recipe', 'traversal-recipe', 'extra-launch', 'duplicate-key', 'inventory', 'unknown-inventory-key'])
 def test_receiver_rejects_invalid_recipe_and_inventory(receiver, fault):
     files = contents()
     document = json.loads(files['recipe.json'])
@@ -229,9 +229,14 @@ def test_receiver_rejects_invalid_recipe_and_inventory(receiver, fault):
     files['package.json'] = inventory(files)
     if fault == 'inventory':
         files['package.json'] = files['package.json'].replace(hashlib.sha256(files['playden.args']).hexdigest().encode(), b'0' * 64)
+    elif fault == 'unknown-inventory-key':
+        record = json.loads(files['package.json'])
+        record['unapproved'] = 1
+        files['package.json'] = json.dumps(record).encode()
     with receiver() as (sandbox, port, token), paired(port, token) as session:
         upload(session, files)
-        with pytest.raises(NetworkTransferError, match='Invalid recipe'):
+        with pytest.raises(NetworkTransferError, match='top-level keys' if fault == 'unknown-inventory-key' else
+                           'Immutable package inventory' if fault == 'inventory' else 'Playden recipe'):
             verify(session)
     wait_clean(sandbox)
 
@@ -266,7 +271,7 @@ def test_symlinks_and_changed_staging_are_rejected_without_touching_targets(rece
                     target.symlink_to(sentinel)
                 else:
                     target.write_bytes(b'x' * target.stat().st_size)
-                with pytest.raises(NetworkTransferError, match='Invalid recipe'):
+                with pytest.raises(NetworkTransferError, match='Staged package'):
                     verify(session)
     assert sentinel.read_bytes() == b'keep'
     assert sorted(p.name for p in outside.iterdir()) == ['sentinel']
@@ -941,7 +946,7 @@ def test_receiver_accepts_only_complete_builtin_controller_defaults(receiver, fa
     files['package.json'] = inventory(files)
     with receiver() as (sandbox, port, token), paired(port, token) as session:
         upload(session, files)
-        with pytest.raises(NetworkTransferError, match='Invalid recipe'):
+        with pytest.raises(NetworkTransferError, match='Playden recipe'):
             verify(session)
     wait_clean(sandbox)
 
@@ -977,8 +982,58 @@ def test_receiver_java8_adapter_is_bound_to_inventory_and_recipe(receiver, fault
             session.ack()
             assert (sandbox / 'internal/Package/playden-java8.jar').read_bytes() == files['playden-java8.jar']
         else:
-            with pytest.raises(NetworkTransferError, match='Invalid recipe'):
+            with pytest.raises(NetworkTransferError, match='Immutable package inventory' if fault in ('missing-jar', 'unlisted-jar') else 'Playden recipe'):
                 verify(session)
+
+
+@pytest.mark.parametrize('fault', ['valid', 'wrong-marker', 'wrong-argfile', 'wrong-command', 'wrong-metadata'])
+def test_legacy_java2d_inventory_marker_is_bound_to_version_and_jvm_arguments(receiver, fault):
+    files = contents()
+    metadata = {'id': '1.0', 'mainClass': 'net.minecraft.launchwrapper.Launch',
+                'assetIndex': {'id': 'pre-1.6'}, 'javaVersion': {'majorVersion': 8}}
+    if fault == 'wrong-metadata':
+        metadata['id'] = '1.1'
+    files['metadata/version.json'] = json.dumps(metadata).encode()
+    files['playden.args'] = (b'"-Dsun.java2d.d3d=false"\n"-Dsun.java2d.opengl=false"\n"-Xmx4G"\n'
+                             if fault != 'wrong-argfile' else b'"-Xmx4G"\n')
+    command = '"-Dsun.java2d.d3d=false" "-Dsun.java2d.opengl=false" "-Xmx4G" "-cp" "../../playden-java8.jar" "org.minecraftplayden.Java8Launch"'
+    if fault == 'wrong-command':
+        command = command.replace('"-Dsun.java2d.opengl=false" ', '')
+    files['playden.java8-command'] = command.encode()
+    files['playden-java8.jar'] = b'fixture adapter'
+    document = json.loads(files['recipe.json'])
+    document['launch_entries'][0]['arguments'] = command
+    files['recipe.json'] = json.dumps(document).encode()
+    record = json.loads(inventory(files))
+    record['version'] = '1.0'
+    record['legacy_java2d'] = 2 if fault == 'wrong-marker' else 1
+    files['package.json'] = json.dumps(record).encode()
+    with receiver() as (sandbox, port, token), paired(port, token) as session:
+        upload(session, files)
+        if fault == 'valid':
+            verify(session)
+            session.send(COMMIT)
+            assert session.ack() == b'/data/playden-import/Package'
+        else:
+            with pytest.raises(NetworkTransferError, match='Legacy Java2D marker'):
+                verify(session)
+    wait_clean(sandbox)
+    assert (sandbox / 'internal/Package').exists() is (fault == 'valid')
+
+
+def test_actual_vanilla_1_0_package_reaches_receiver_commit_and_cleans_stage(receiver):
+    source = os.environ.get('PLAYDEN_FAILED_PACKAGE')
+    if not source:
+        pytest.skip('Set PLAYDEN_FAILED_PACKAGE to the retained physical test package')
+    from minecraft_playden.network_transfer import NetworkRequest
+    package = Path(source)
+    with receiver() as (sandbox, port, token):
+        result = NetworkRequest(package, '127.0.0.1', token, port=port,
+                                package_name='Actual-Vanilla-1.0').run()
+        assert result.files > 1000
+        assert (sandbox / 'internal/Actual-Vanilla-1.0/playden/recipe.json').is_file()
+        wait_clean(sandbox)
+        assert not (sandbox / 'playden-packager-temp').exists()
 
 
 @pytest.mark.parametrize('fault', ['valid', 'missing-icon', 'unlisted-art', 'bad-crc', 'bad-dimensions', 'both-recipes', 'legacy-unlisted-art'])
@@ -1017,7 +1072,7 @@ def test_receiver_current_metadata_layout_and_artwork_are_strict(receiver, fault
             assert (output / 'recipe.json').read_bytes() == files['playden/recipe.json']
             assert (output / 'icon.png').read_bytes() == files['playden/icon.png']
         else:
-            with pytest.raises(NetworkTransferError, match='Invalid recipe'):
+            with pytest.raises(NetworkTransferError, match='Playden|Immutable package inventory'):
                 verify(session)
 
 
@@ -1044,7 +1099,7 @@ def test_owned_stage_and_empty_parent_are_removed_on_all_transfer_outcomes(
                 upload(session, files, destination=destination)
                 assert (sandbox / temp_path).is_dir()
                 if outcome == 'verify-failure':
-                    with pytest.raises(NetworkTransferError, match='Invalid recipe'):
+                    with pytest.raises(NetworkTransferError, match='Playden recipe'):
                         verify(session)
                 elif outcome != 'disconnect':
                     verify(session)

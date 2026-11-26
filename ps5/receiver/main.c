@@ -801,21 +801,25 @@ static void connection(int client) {
             double started = metric_clock();
             int valid = same_inode(package, stage, "package") &&
                         verify_staging(package, &inventory, &wire, total);
+            if (!valid)
+                error = "Staged package identity, readback SHA-256 or namespace verification failed.";
             if (valid) {
                 double recipe_started = metric_clock();
-                valid = strict_recipe(package, package_path);
+                valid = strict_recipe(package, package_path, diagnostic_error,
+                                      sizeof(diagnostic_error));
                 metric_add(&metrics.recipe_s, recipe_started);
+                if (!valid) error = diagnostic_error;
             }
             if (valid) {
+                const char *inventory_error = NULL;
                 double inventory_started = metric_clock();
-                valid = inventory_hashes(package, &inventory);
+                valid = inventory_hashes(package, &inventory, &inventory_error);
                 metric_add(&metrics.inventory_s, inventory_started);
+                if (!valid) error = inventory_error;
             }
             metric_add(&metrics.verify_s, started);
-            if (!valid) {
-                error = "Invalid recipe, required package structure or immutable inventory.";
+            if (!valid)
                 goto fail;
-            }
             double permissions_started = metric_clock();
             int permissions_ok = package_permissions(package, &inventory, &wire, total);
             metric_add(&metrics.permissions_s, permissions_started);

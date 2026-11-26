@@ -161,16 +161,58 @@ static int json_path(const char *s, size_t n, char out[PATH_MAX_WIRE + 1]) {
     out[p] = 0;
     return safe_path(out, p, 0);
 }
-static int inventory_hashes(int fd, Inventory *v) {
+/* Only Vanilla 1.0's verified legacy LaunchWrapper layout may carry the
+   Java2D workaround marker. Bind it to the actual metadata and both launch
+   argument files; the ordinary inventory hashes still bind every file byte. */
+static int legacy_java2d_contract(int fd, const char *inventory, size_t inventory_size) {
+    if (!field(inventory, inventory_size, "legacy_java2d", "1") ||
+        !field(inventory, inventory_size, "version", "\"1.0\""))
+        return 0;
+    char *metadata = NULL, *args = NULL, *command = NULL;
+    size_t metadata_size = 0, args_size = 0, command_size = 0;
+    static const char args_prefix[] =
+        "\"-Dsun.java2d.d3d=false\"\n\"-Dsun.java2d.opengl=false\"\n";
+    static const char command_prefix[] =
+        "\"-Dsun.java2d.d3d=false\" \"-Dsun.java2d.opengl=false\" ";
+    int ok = read_file(fd, "metadata/version.json", 1024 * 1024, &metadata, &metadata_size) &&
+             read_file(fd, "playden.args", 1024 * 1024, &args, &args_size) &&
+             read_file(fd, "playden.java8-command", 4096, &command, &command_size);
+    if (ok)
+        ok = json_document(metadata, metadata_size) &&
+             field(metadata, metadata_size, "id", "\"1.0\"") &&
+             field(metadata, metadata_size, "mainClass", "\"net.minecraft.launchwrapper.Launch\"") &&
+             nested(metadata, metadata_size, "assetIndex", "id", "\"pre-1.6\"") &&
+             nested(metadata, metadata_size, "javaVersion", "majorVersion", "8") &&
+             args_size >= sizeof(args_prefix) - 1 &&
+             !memcmp(args, args_prefix, sizeof(args_prefix) - 1) &&
+             command_size >= sizeof(command_prefix) - 1 &&
+             !memcmp(command, command_prefix, sizeof(command_prefix) - 1);
+    free(metadata);
+    free(args);
+    free(command);
+    return ok;
+}
+
+static int inventory_hashes(int fd, Inventory *v, const char **reason) {
     char *doc = NULL;
     size_t n;
     int ok = 0;
     const char *const allowed[] = {"schema",   "launch_profile", "source", "version",
-                                   "username", "classpath",      "files",  "loader"};
+                                   "username", "classpath",      "files",  "loader",
+                                   "legacy_java2d"};
+    *reason = "Immutable package inventory could not be read safely.";
     if (!read_file(fd, "package.json", 16 * 1024 * 1024, &doc, &n))
         return 0;
-    if (!json_document(doc, n) || !keys(doc, n, allowed, 8, 7) || !field(doc, n, "schema", "2"))
+    *reason = "Immutable package inventory has invalid JSON, schema or top-level keys.";
+    if (!json_document(doc, n) || !keys(doc, n, allowed, 9, 7) || !field(doc, n, "schema", "2"))
         goto done;
+    const char *marker;
+    size_t marker_size;
+    if (keyval(doc, n, "legacy_java2d", &marker, &marker_size)) {
+        *reason = "Legacy Java2D marker does not match Vanilla 1.0 metadata and JVM arguments.";
+        if (!legacy_java2d_contract(fd, doc, n)) goto done;
+    }
+    *reason = "Immutable package inventory has no valid file map.";
     const char *files;
     size_t length;
     if (!keyval(doc, n, "files", &files, &length) || length < 2 || files[0] != '{')
@@ -182,13 +224,16 @@ static int inventory_hashes(int fd, Inventory *v) {
     for (;;) {
         size_t a, b;
         char path[PATH_MAX_WIRE + 1];
+        *reason = "Immutable package inventory contains an invalid file path.";
         if (!stringval(&j, &a, &b) || !json_path(files + a, b - a, path))
             goto done;
         Item *item = lookup(v, path, 0);
+        *reason = "Immutable package inventory lists an absent, duplicate or non-file entry.";
         if (!item || !item->kind || item->listed || !strcmp(path, "package.json"))
             goto done;
         item->listed = 1;
         skipws(&j);
+        *reason = "Immutable package inventory has a malformed SHA-256 entry.";
         if (j.p >= length || files[j.p++] != ':' || !stringval(&j, &a, &b) || b - a != 64)
             goto done;
         uint8_t expected[32];
@@ -199,9 +244,11 @@ static int inventory_hashes(int fd, Inventory *v) {
                 goto done;
             expected[k] = (uint8_t)byte;
         }
+        *reason = "Immutable package inventory SHA-256 differs from the transferred file.";
         if (!same(expected, item->hash, 32))
             goto done;
         skipws(&j);
+        *reason = "Immutable package inventory file map has invalid separators.";
         if (j.p >= length)
             goto done;
         char c = files[j.p++];
@@ -210,6 +257,7 @@ static int inventory_hashes(int fd, Inventory *v) {
         if (c != ',')
             goto done;
     }
+    *reason = "Immutable package inventory is missing a required launch file or recipe.";
     const char *required[] = {"playden.args",
                               "java/bin/java.exe", "java/bin/server/jvm.dll",
                               "java/release",      "metadata/version.json"};
@@ -238,6 +286,7 @@ static int inventory_hashes(int fd, Inventory *v) {
         }
     }
     ok = 1;
+    *reason = NULL;
 done:
     free(doc);
     return ok;
@@ -285,10 +334,12 @@ static int strict_artwork(int fd, int required) {
     }
     return 1;
 }
-static int strict_recipe(int fd, const char *folder) {
-    char reason[128];
-    if (!recipe_check(folder, reason, sizeof(reason)))
+static int strict_recipe(int fd, const char *folder, char *reason, size_t reason_cap) {
+    char detail[128];
+    if (!recipe_check(folder, detail, sizeof(detail))) {
+        snprintf(reason, reason_cap, "Playden recipe check failed: %s.", detail);
         return 0;
+    }
     char *doc = NULL;
     size_t n;
     int ok = 0;
@@ -298,9 +349,19 @@ static int strict_recipe(int fd, const char *folder) {
     const char *const community[] = {"format_version", "status"};
     const char *const entry[] = {"id", "label", "executable", "arguments"};
     const char *name = recipe_name(folder);
-    if (!name || !strict_artwork(fd, !strcmp(name, "playden/recipe.json"))) return 0;
-    if (!read_file(fd, name, RECIPE_MAX, &doc, &n))
+    if (!name) {
+        snprintf(reason, reason_cap, "Playden recipe path is missing or ambiguous.");
         return 0;
+    }
+    if (!strict_artwork(fd, !strcmp(name, "playden/recipe.json"))) {
+        snprintf(reason, reason_cap, "Playden artwork is missing or has invalid PNG structure/CRC.");
+        return 0;
+    }
+    if (!read_file(fd, name, RECIPE_MAX, &doc, &n)) {
+        snprintf(reason, reason_cap, "Playden recipe could not be read safely.");
+        return 0;
+    }
+    snprintf(reason, reason_cap, "Playden recipe has invalid JSON, keys or controller defaults.");
     if (!json_document(doc, n))
         goto done;
     const char *s;
@@ -342,6 +403,7 @@ static int strict_recipe(int fd, const char *folder) {
     if (j.p != length)
         goto done;
     ok = 1;
+    reason[0] = 0;
 done:
     free(doc);
     return ok;

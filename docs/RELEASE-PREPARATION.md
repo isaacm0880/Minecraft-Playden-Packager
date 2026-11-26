@@ -44,6 +44,18 @@ archive and payload licensing/notice obligations need final distribution review.
 Do not substitute a same-version but different ELF; the management handshake
 alone does not establish exact receiver source identity.
 
+Physical acceptance on `101742b` reached receiver VERIFY with the generated
+Vanilla 1.0 package but was rejected. The C recipe and required structure passed;
+the receiver's immutable-inventory top-level key allowlist lacked the new
+`legacy_java2d` marker. The receiver now accepts that marker only when it is
+bound to Vanilla 1.0 LaunchWrapper metadata and both Java2D argument files.
+The exact failed package passed the corrected host receiver's transfer, VERIFY,
+COMMIT and stage cleanup. A rebuilt ELF still needs the same focused PS5
+acceptance: stop an old authenticated receiver, deploy the new manifest-bound
+ELF through the running loader, transfer the retained package under a fresh
+import name, confirm publication and absence of `.pdlan-*` temporary stages,
+then stop the authenticated receiver. No Minecraft gameplay replay is needed.
+
 ## Host JDK for automatic Fabric preparation
 
 The existing preparation worker needs a host-native full JDK 17+ with

@@ -52,6 +52,12 @@ command except DATA, or ERROR (129) containing a bounded UTF-8 error, then close
    Recipes may omit controller defaults or carry exactly the packager's Minecraft
    keyboard/mouse layout. Unknown, partial or changed defaults are refused; every
    existing required recipe field remains mandatory.
+   The optional `legacy_java2d: 1` inventory marker is accepted only with
+   Vanilla 1.0 LaunchWrapper metadata, Java 8, the pre-1.6 asset layout and
+   matching Java2D flags in both launch argument files. The receiver still
+   checks every immutable file digest. Validation ERROR replies identify the
+   failing phase and contract, such as staged readback, recipe/artwork or an
+   inventory marker/hash, without publishing the failed stage.
    VERIFY_PROGRESS (130) replies contain verified_bytes:u64, total_bytes:u64.
    ACK `verified` means staging passed; it does not publish. Cancellation remains
    available throughout this phase. After VERIFY only COMMIT is accepted.
