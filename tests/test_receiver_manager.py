@@ -26,6 +26,16 @@ from minecraft_playden.receiver_manager import (
 from test_network_receiver import receiver_binary, begin, entry, wait_clean
 
 
+def wait_receiver_idle(paired, timeout=5):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        info = receiver_status(paired)
+        if not info.busy:
+            return info
+        time.sleep(.01)
+    pytest.fail('Receiver stayed busy after the transfer ended')
+
+
 @dataclass
 class Managed:
     process: subprocess.Popen
@@ -211,6 +221,7 @@ def test_pairing_credential_can_transfer_and_preserve_import_verification(manage
         paired = pair_receiver('127.0.0.1', running.code, running.control_port)
         result = NetworkRequest(package, '127.0.0.1', paired.key.hex(), port=running.port).run()
         assert (running.sandbox / 'internal' / result.destination.split('/')[-1] / 'playden/recipe.json').is_file()
+        wait_receiver_idle(paired)
         stop_receiver(paired)
         assert package.is_dir()
 

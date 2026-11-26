@@ -15,7 +15,7 @@ from minecraft_playden.desktop import ValidatedPackage
 from minecraft_playden.network_transfer import NetworkRequest, NetworkResult
 from minecraft_playden.receiver_manager import Deployment, PairedReceiver, ReceiverInfo, VERSION, ReceiverError, UnsupportedReceiver
 from test_gui_preferences import preferences
-from test_receiver_manager import managed, receiver_binary
+from test_receiver_manager import managed, receiver_binary, wait_receiver_idle
 
 
 def pump_until(predicate, timeout=10):
@@ -74,6 +74,7 @@ def test_external_receiver_requires_pairing_before_send_or_stop_then_sends_exist
         assert (running.sandbox / 'internal' / window.network_results[0].destination.split('/')[-1] / 'playden/recipe.json').exists()
         assert key.hex() not in window.log.toPlainText()
         assert not any(str(settings().value(k)) in (running.code, key.hex()) for k in settings().allKeys())
+        wait_receiver_idle(manager.paired)
         manager.stop_button.click()
         assert manager.state == 'Stopping'
         pump_until(lambda: not manager.busy())
@@ -271,6 +272,7 @@ def test_external_busy_stop_refusal_preserves_running_state_and_transfer(ui, man
             assert manager.state == 'Running' and 'busy' in manager.error.text()
             assert not manager.stop_button.isEnabled()
             entry(transfer, 'extras')
+        wait_receiver_idle(manager.paired)
         manager.refresh()
         pump_until(lambda: not manager.busy())
         assert manager.state == 'Running' and manager.stop_button.isEnabled()
