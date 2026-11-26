@@ -21,9 +21,11 @@ class FrozenStartupTests(unittest.TestCase):
 from unittest.mock import patch
 from types import SimpleNamespace
 from minecraft_playden import packaged_app
+from minecraft_playden import receiver_manager
 # The release environment supplies certifi; this smoke makes no TLS requests.
 with patch.dict('sys.modules', {'certifi': SimpleNamespace(where=lambda: 'unused-smoke-ca.pem')}), \
-     patch.object(packaged_app, 'metadata', return_value={'version': '0.1.0'}):
+     patch.object(packaged_app, 'metadata', return_value={'version': '0.1.0'}), \
+     patch.object(receiver_manager, 'ensure_receiver_elf', side_effect=AssertionError('source-mode smoke must not inspect a receiver ELF')):
     raise SystemExit(packaged_app.main())
 """
         for style in ('Fusion', 'Windows'):

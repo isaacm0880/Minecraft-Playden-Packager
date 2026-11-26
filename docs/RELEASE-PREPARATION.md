@@ -172,3 +172,27 @@ source; it will not build an unreviewed or dirty source. Download the Receiver,
 Windows-x64, Linux-x86_64 and Verified-source-pair artifacts from that run and
 check `SHA256SUMS`, `build-metadata.json`, `content-audit.json`, `artifact.json`
 and `release-pair.json`. Do not publish until the remaining gates above pass.
+
+## GitHub Actions CI repair checkpoint (2026-11-26)
+
+Run `45742364325` used `b3fa06324e4519c6e4a36adbeff929b311f24a2d`.
+Its source and receiver jobs passed; Windows and Linux failed during the
+desktop builder's test gate, so no distribution artifacts were produced. The
+failures were source-mode smoke expecting a source-tree ELF despite the verified
+receiver artifact being downloaded separately, a stale GUI expectation for
+SDK fallback deployment, Windows short/long temporary-path spellings, a test
+attempt to read another process's locked Windows session file, and a fixture
+hash calculated before Windows text newline conversion. The production fixes
+limit the receiver check to actual frozen smoke and compare transfer-directory
+ancestors by filesystem identity while still rejecting traversal and reparse
+points. The receiver ELF and C source are unchanged. The GUI and inventory
+changes are test corrections; immutable package verification remains active.
+
+The application edits were reviewed at `697bd437fb48f496733ab49cde9cbb0f9e8fe74e`
+and approved through `release/source-policy.json` with application SHA-256
+`0355a8d0b0463ead0e075d2cd08643d8635dfc0d12f66d61c49d2e48458c37ca`.
+The focused local regression set passed **37 tests, 1 Windows-only skip, 11
+subtests**; Linux-target mypy passed on 67 source files. A new full release
+gate and native Windows/Actions builds remain to run on the final approved
+commit. The workflow input must be that new commit SHA, never the failed run's
+SHA. No candidate has been pushed or published from this repair session.
