@@ -32,6 +32,8 @@ from .process_environment import desktop_environment
 STARTUP_TIMEOUT = 20.0
 CONTROL_PORT = 9026
 LOADER_PORT = 9021
+RECEIVER_PREFLIGHT_TIMEOUT = 5.0
+STOP_CONFIRM_TIMEOUT = 12.0
 MANAGER_MAGIC = b'PDMGR2\r\n'
 VERSION = 'v0.4-manager-2'
 BOOT_MARKER = b'PDLAN-BOOTSTRAP-RSA-3072-V2:'
@@ -180,6 +182,19 @@ def ensure_receiver_elf(sdk: Path, elf: Path, token: CancellationToken,
             _stop_local_process(process)
 
 
+def verified_bundled_receiver_elf() -> Path | None:
+    """Return the frozen receiver only after its ELF and build provenance pass verification."""
+    frozen = getattr(sys, '_MEIPASS', None)
+    if frozen is None:
+        return None
+    elf = Path(frozen) / 'receiver/minecraft_playden_receiver.elf'
+    try:
+        ensure_receiver_elf(Path(), elf, CancellationToken())
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    return elf
+
+
 def export_receiver_elf(sdk: Path, elf: Path, destination: Path, token: CancellationToken) -> Path:
     """Export a verified receiver without a per-launch credential or overwrite."""
     ensure_receiver_elf(sdk, elf, token)
@@ -210,11 +225,11 @@ def export_receiver_elf(sdk: Path, elf: Path, destination: Path, token: Cancella
     return destination
 
 
-def _connect(host: str, port: int, token: CancellationToken) -> socket.socket:
+def _connect(host: str, port: int, token: CancellationToken, *, timeout: float = 2) -> socket.socket:
     token.check()
     if not 1 <= port <= 65535:
         raise ValueError('Choose a TCP port between 1 and 65535.')
-    return socket.create_connection((lan_address(host), port), timeout=2)
+    return socket.create_connection((lan_address(host), port), timeout=timeout)
 
 
 def _hello(stream: socket.socket, token: CancellationToken) -> tuple[Session, bytes]:
@@ -245,10 +260,10 @@ def _info(body: bytes, identity: bytes, control_port: int) -> ReceiverInfo:
 
 
 def identify(host: str, control_port: int = CONTROL_PORT,
-             cancellation: CancellationToken | None = None) -> ReceiverInfo:
+             cancellation: CancellationToken | None = None, *, connect_timeout: float = 2) -> ReceiverInfo:
     """Public discovery is a hint only; it never authorizes Send or Stop."""
     token = cancellation or CancellationToken()
-    with _connect(host, control_port, token) as stream:
+    with _connect(host, control_port, token, timeout=connect_timeout) as stream:
         session, identity = _hello(stream, token)
         session.write(b'I')
         length = int.from_bytes(session.read(2), 'big')
@@ -341,14 +356,16 @@ def stop_receiver(paired: PairedReceiver, cancellation: CancellationToken | None
         if session.ack() != b'stopping':
             raise ReceiverError('Receiver did not acknowledge stopping; its state is unknown.')
     # Receipt confirms the request; listener closure confirms the stopped service.
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + STOP_CONFIRM_TIMEOUT
     while time.monotonic() < deadline:
         token.check()
         try:
-            identify(paired.host, paired.info.control_port, token)
+            identify(paired.host, paired.info.control_port, token,
+                     connect_timeout=RECEIVER_PREFLIGHT_TIMEOUT)
         except ConnectionRefusedError:
             try:
-                with _connect(paired.host, info.port, token):
+                with _connect(paired.host, info.port, token,
+                              timeout=RECEIVER_PREFLIGHT_TIMEOUT):
                     pass
             except ConnectionRefusedError:
                 return
@@ -359,7 +376,9 @@ def stop_receiver(paired: PairedReceiver, cancellation: CancellationToken | None
         except OSError:
             pass
         token.wait(.1)
-    raise ReceiverError('Stop was requested but listener closure was not confirmed. Receiver status is Unknown; no force-stop was attempted.')
+    raise ReceiverError(f'Stop was acknowledged, but listener closure on TCP {paired.info.control_port} and '
+                        f'{info.port} was not confirmed within {STOP_CONFIRM_TIMEOUT:g} seconds. '
+                        'Receiver status is Unknown; no force-stop was attempted.')
 
 
 def decode_bootstrap(private_key: Any, encrypted: bytes, host: str,
@@ -416,7 +435,7 @@ class Deployment:
         def report(stage: str, message: str) -> None:
             if progress:
                 progress(Progress(stage, message))
-        report("receiver-check", "Checking receiver ports before deployment…")
+        report('receiver-check', f'Checking receiver ports TCP {control_port} and {port} before deployment…')
         if not 1 <= loader_port <= 65535 or loader_port in (port, control_port):
             raise ValueError('The ELF loader needs a distinct valid TCP port (normally 9021).')
         if not all(1 <= value <= 65535 for value in (port, control_port)) or port == control_port:
@@ -425,12 +444,17 @@ class Deployment:
         # control clients serially. Failure to authenticate never permits deploy.
         for target in (control_port, port):
             try:
-                with _connect(host, target, token):
+                with _connect(host, target, token, timeout=RECEIVER_PREFLIGHT_TIMEOUT):
                     pass
             except ConnectionRefusedError:
                 continue
+            except TimeoutError as exc:
+                raise ReceiverError(f'Receiver preflight at {host}:{target} timed out after '
+                                    f'{RECEIVER_PREFLIGHT_TIMEOUT:g} seconds ({exc}). Cannot establish whether a '
+                                    'receiver is running; deployment was not attempted and no payload was sent.') from exc
             except OSError as exc:
-                raise ReceiverError('Cannot establish whether a receiver is already running. Check the PS5 IP and LAN; deployment was not attempted.') from exc
+                raise ReceiverError(f'Receiver preflight at {host}:{target} failed: {exc}. Cannot establish whether a '
+                                    'receiver is running; deployment was not attempted and no payload was sent.') from exc
             if target == control_port and existing_key is not None:
                 report('receiver-authenticate', 'Authenticating the existing receiver…')
                 try:
@@ -445,7 +469,8 @@ class Deployment:
                     raise ReceiverError('The authenticated receiver is busy; finish its active transfer before retrying.')
                 report('receiver-ready', 'Existing receiver authenticated; no ELF deployed.')
                 return PairedReceiver(host, info, existing_key)
-            raise ReceiverError('A service is already listening on the receiver ports. Use --pair for an externally launched receiver, or Stop Receiver from its authenticated GUI owner before retrying --start-receiver. Stop legacy or incompatible services using their own controls. No service was replaced.')
+            raise ReceiverError(f'A service is listening at {host}:{target}. Use Pair for an externally launched '
+                                'receiver, or authenticated Stop Receiver before retrying. No service was replaced.')
         ensure_receiver_elf(sdk, elf, token, progress)
         direct = (elf.parent / 'receiver-manifest.json').is_file()
         deployer = sdk / ('win/prospero-deploy.cmd' if os.name == 'nt' else 'bin/prospero-deploy')
@@ -467,27 +492,42 @@ class Deployment:
             payload = prepare_elf(elf, private.public_key().public_numbers().n.to_bytes(384, 'big'), port, control_port)
         except OSError as exc:
             raise ReceiverError('Cannot read the selected receiver ELF. Check its file permissions and rebuild it if necessary.') from exc
-        self.temporary = tempfile.TemporaryDirectory(prefix='playden-receiver-', ignore_cleanup_errors=True)
-        path = Path(self.temporary.name) / 'receiver.elf'
-        path.write_bytes(payload)  # Public key only; no session credential is stored.
+        try:
+            self.temporary = tempfile.TemporaryDirectory(prefix='playden-receiver-', ignore_cleanup_errors=True)
+            path = Path(self.temporary.name) / 'receiver.elf'
+            path.write_bytes(payload)  # Public key only; no session credential is stored.
+        except OSError as exc:
+            self.close()
+            raise ReceiverError(f'Preparing the receiver payload in the temporary folder failed: {exc}. '
+                                'No payload was sent.') from exc
         if not direct and os.name == 'nt' and (re.search(r'[\s%&|<>^!()"]', str(path)) or re.search(r'[\s%&|<>^!()"]', str(deployer))):
             self.close()
             raise ReceiverError('The SDK Windows batch deployer does not safely support these SDK/temp paths. Use paths without spaces or shell characters, or start externally and pair.')
         ready: queue.Queue[bytes] = queue.Queue(maxsize=1)
         try:
-            report('receiver-deploy', 'Deploying receiver to the already-running ELF loader; waiting for encrypted startup output…')
-            self.attempted = True
+            report('receiver-connect', f'Connecting to the PS5 ELF loader at {host}:{loader_port}…')
             if direct:
                 # The SDK deployer sends raw ELF bytes to the loader socket and
                 # forwards its output. Reproduce that transport without bundling
                 # socat/plink or copying SDK scripts into the application.
-                self.stream = socket.create_connection((host, loader_port), timeout=2)
+                try:
+                    self.stream = socket.create_connection((host, loader_port), timeout=2)
+                except OSError as exc:
+                    raise ReceiverError(f'Connecting to the PS5 ELF loader at {host}:{loader_port} failed: {exc}. '
+                                        'No payload was uploaded.') from exc
+                self.attempted = True
                 self.stream.settimeout(2)
             else:
-                self.process = subprocess.Popen([str(deployer), '-h', host, '-p', str(loader_port), str(path)],
-                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    start_new_session=os.name != 'nt', env=desktop_environment())
+                try:
+                    self.process = subprocess.Popen([str(deployer), '-h', host, '-p', str(loader_port), str(path)],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        start_new_session=os.name != 'nt', env=desktop_environment())
+                except OSError as exc:
+                    raise ReceiverError(f'Launching the SDK deployer for {host}:{loader_port} failed: {exc}. '
+                                        'No payload was uploaded.') from exc
+                self.attempted = True
             process, stream = self.process, self.stream
+            reader_error: OSError | None = None
             def read() -> None:
                 if stream is None:
                     assert process is not None and process.stdout is not None
@@ -495,6 +535,7 @@ class Deployment:
                     lines = iter(lambda: stdout.readline(4097), b'')
                 else:
                     def socket_lines():
+                        nonlocal reader_error
                         pending = bytearray()
                         overflow = False
                         while True:
@@ -502,7 +543,8 @@ class Deployment:
                                 block = stream.recv(4096)
                             except socket.timeout:
                                 continue
-                            except OSError:
+                            except OSError as exc:
+                                reader_error = exc
                                 return
                             if not block:
                                 return
@@ -526,12 +568,18 @@ class Deployment:
                             pass
             self.reader = threading.Thread(target=read, daemon=True)
             self.reader.start()
+            report('receiver-upload', f'Uploading receiver payload to {host}:{loader_port}…')
             if stream is not None:
-                with path.open('rb') as source:
-                    while block := source.read(65536):
-                        token.check()
-                        stream.sendall(block)
-                stream.shutdown(socket.SHUT_WR)
+                try:
+                    with path.open('rb') as source:
+                        while block := source.read(65536):
+                            token.check()
+                            stream.sendall(block)
+                    stream.shutdown(socket.SHUT_WR)
+                except OSError as exc:
+                    raise ReceiverError(f'Uploading receiver payload to {host}:{loader_port} failed: {exc}. '
+                                        'Remote startup is unconfirmed; check receiver status before retrying.') from exc
+            report('receiver-startup', f'Waiting for receiver startup and encrypted credentials on {host}:{loader_port}…')
             deadline = time.monotonic() + STARTUP_TIMEOUT
             while time.monotonic() < deadline:
                 token.check()
@@ -539,14 +587,28 @@ class Deployment:
                     encrypted = ready.get(timeout=.05)
                 except queue.Empty:
                     if (process is not None and process.poll() is not None) or (stream is not None and self.reader is not None and not self.reader.is_alive()):
-                        raise ReceiverError('Loader stream ended without encrypted receiver credentials. Check the PS5 ELF loader and selected port; some loaders do not forward payload output. Pair manually if the receiver notification appeared.')
+                        if reader_error is not None:
+                            raise ReceiverError(f'Waiting for receiver startup output from {host}:{loader_port} '
+                                                f'failed: {reader_error}. The ELF may be running; Pair if its '
+                                                'notification appeared.') from reader_error
+                        exit_status = (f' SDK deployer exited with status {process.returncode}.'
+                                       if process is not None else '')
+                        raise ReceiverError(f'ELF loader stream at {host}:{loader_port} ended without encrypted '
+                                            f'receiver credentials.{exit_status} Some loaders do not forward '
+                                            'payload output; Pair if the receiver notification appeared.')
                     continue
                 paired = decode_bootstrap(private, encrypted, host, port, control_port)
                 report('receiver-authenticate', 'Encrypted startup credentials received; authenticating the receiver…')
-                info = receiver_status(paired, token)
+                try:
+                    info = receiver_status(paired, token)
+                except OSError as exc:
+                    raise ReceiverError(f'Authenticating the receiver at {host}:{control_port} failed: {exc}. '
+                                        'The ELF may be running; inspect its notification before retrying.') from exc
                 report('receiver-ready', 'Receiver authenticated and ready for transfer.')
                 return PairedReceiver(host, info, paired.key, paired.pairing_code)
-            raise ReceiverError('Receiver startup was not confirmed within 20 seconds. Check the loader and the PS5 notification. If the loader does not forward stdout, use the six-digit code to pair; the ELF may still be running.')
+            raise ReceiverError(f'Receiver startup was not confirmed from {host}:{loader_port} within '
+                                '20 seconds. Check the PS5 notification; Pair with its six-digit code if '
+                                'the loader does not forward payload output. The ELF may still be running.')
         except BaseException:
             self.close()  # This closes only the local SDK stream, never claims remote exit.
             raise

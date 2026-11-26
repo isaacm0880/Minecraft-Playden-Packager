@@ -337,6 +337,71 @@ class GuiTests(unittest.TestCase):
         self.window.task_result(self.result)
         self.window.output.setText(str(self.root / 'new-package'))
 
+    def test_receiver_start_progress_reaches_status_and_log_before_error(self):
+        from minecraft_playden.receiver_manager import ReceiverError
+        manager = self.window.receiver_manager
+        manager.host.setText('127.0.0.1')
+        stages = ('Checking receiver ports', 'Connecting to the PS5 ELF loader',
+                  'Uploading receiver payload', 'Waiting for receiver startup',
+                  'Authenticating receiver', 'Receiver ready')
+        def fail_after_progress(*args, **kwargs):
+            for stage in stages:
+                kwargs['progress'](Progress('receiver-test', stage))
+            raise ReceiverError('Receiver startup failed at 127.0.0.1:9026: test failure')
+        with patch('minecraft_playden.gui_receiver.Deployment.start', side_effect=fail_after_progress):
+            manager.start_receiver()
+            self.assertIn('Checking receiver ports', manager.error.text())
+            deadline = time.monotonic() + 5
+            while manager.busy() and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(.001)
+            self.app.processEvents()
+        self.assertFalse(manager.busy())
+        self.assertEqual(manager.state, 'Error')
+        log = self.window.log.toPlainText()
+        for stage in stages:
+            self.assertIn(stage, log)
+        self.assertIn('127.0.0.1:9026: test failure', log)
+
+    def test_verified_bundled_receiver_hides_sdk_setting(self):
+        from minecraft_playden.gui_receiver import ReceiverManager
+        from minecraft_playden.receiver_manager import ReceiverConfiguration
+        bundled = self.root / 'bundle/receiver.elf'
+        with patch('minecraft_playden.gui_receiver.verified_bundled_receiver_elf', return_value=bundled), \
+             patch('minecraft_playden.gui_receiver.ReceiverConfiguration.load',
+                   return_value=ReceiverConfiguration(self.root / 'missing-sdk', bundled)):
+            manager = ReceiverManager(self.settings)
+        try:
+            form = manager.configuration.layout()
+            self.assertFalse(form.isRowVisible(0))
+            manager.elf.setText(str(self.root / 'custom.elf'))
+            self.assertTrue(form.isRowVisible(0))
+        finally:
+            manager.deleteLater()
+
+    def test_source_mode_retains_sdk_setting(self):
+        from minecraft_playden.gui_receiver import ReceiverManager
+        with patch('minecraft_playden.gui_receiver.verified_bundled_receiver_elf', return_value=None):
+            manager = ReceiverManager(self.settings)
+        try:
+            self.assertTrue(manager.configuration.layout().isRowVisible(0))
+        finally:
+            manager.deleteLater()
+
+    def test_stop_without_session_credential_explains_safe_recovery(self):
+        from minecraft_playden.receiver_manager import ReceiverInfo, VERSION
+        manager = self.window.receiver_manager
+        manager.host.setText('127.0.0.1')
+        manager.info = ReceiverInfo(VERSION, bytes(32), 9025, 9026)
+        manager.update_controls()
+        self.assertTrue(manager.stop_button.isEnabled())
+        with patch('minecraft_playden.gui_receiver.stop_receiver') as stop:
+            manager.stop_receiver()
+        stop.assert_not_called()
+        self.assertEqual(manager.state, 'Unknown')
+        self.assertIn('Pair first', manager.error.text())
+        self.assertIn('No process was terminated', self.window.log.toPlainText())
+
     def test_supported_fabric_rows_enable_build_and_show_both_versions(self):
         from test_fabric_launch import installed
         for layout in ('prism', 'multimc', 'official'):

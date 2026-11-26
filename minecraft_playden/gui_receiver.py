@@ -9,7 +9,8 @@ from PySide6.QtWidgets import QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, 
 from .gui_components import Task, AdvancedSection
 from .network_protocol import lan_address, NetworkTransferError
 from .operations import CancellationToken
-from .receiver_manager import Deployment, ReceiverConfiguration, PairedReceiver, ReceiverInfo, ReceiverError, export_receiver_elf, identify, pair_receiver, receiver_status, stop_receiver
+from .progress import Progress
+from .receiver_manager import Deployment, ReceiverConfiguration, PairedReceiver, ReceiverInfo, ReceiverError, export_receiver_elf, identify, pair_receiver, receiver_status, stop_receiver, verified_bundled_receiver_elf
 
 
 class ReceiverManager(QGroupBox):
@@ -81,6 +82,12 @@ class ReceiverManager(QGroupBox):
             row = QHBoxLayout(); row.addWidget(field)
             button = QPushButton('Choose…'); button.clicked.connect(picker); row.addWidget(button)
             configuration.addRow(label, row)
+        bundled_elf = verified_bundled_receiver_elf()
+        def update_sdk_visibility() -> None:
+            configuration.setRowVisible(0, bundled_elf is None or
+                Path(self.elf.text()).resolve() != bundled_elf.resolve())
+        self.elf.textChanged.connect(update_sdk_visibility)
+        update_sdk_visibility()
         self.loader_port = QSpinBox(); self.data_port = QSpinBox(); self.control_port = QSpinBox()
         for label, box, key, default in (('ELF loader port', self.loader_port, 'loaderPort', config.loader_port),
                                          ('Receiver listening port', self.data_port, 'dataPort', config.port),
@@ -153,8 +160,10 @@ class ReceiverManager(QGroupBox):
             pass
         idle = not self.busy() and not self.transfer_active
         self.start_button.setEnabled(idle and valid_host and self.state != 'Running')
-        self.stop_button.setEnabled(idle and self.ready and self.info is not None and not self.info.busy)
-        self.stop_button.setToolTip('Finish or cancel active transfers first. Stop never interrupts a transfer or kills unrelated payloads.')
+        self.stop_button.setEnabled(idle and valid_host and
+            ((self.paired is None and self.info is not None) or
+             (self.ready and self.info is not None and not self.info.busy)))
+        self.stop_button.setToolTip('Authenticated receivers stop when idle. Without a session credential, Stop explains safe recovery options; it never kills a process.')
         self.refresh_button.setEnabled(idle and valid_host)
         self.pair_button.setEnabled(idle and valid_host and not (self.state == 'Running' and self.paired is not None) and re.fullmatch(r'[0-9]{6}', self.code.text()) is not None)
         self.code.setReadOnly(self.state == 'Running' and self.paired is not None)
@@ -187,6 +196,8 @@ class ReceiverManager(QGroupBox):
         self.operation = operation
         self.cancellation = CancellationToken()
         self.worker = QThread(self)
+        endpoint = (self.host.text().strip(),
+                    self.loader_port.value() if operation == 'start' else self.control_port.value())
         def run(progress):
             try:
                 return callback(progress)
@@ -195,14 +206,17 @@ class ReceiverManager(QGroupBox):
             except OSError as exc:
                 if operation == 'export':
                     raise ReceiverError(f'Could not export receiver ELF: {exc}') from exc
-                raise ReceiverError('Receiver connection failed or was lost. Check the PS5 IP, ports and LAN. '
-                                    'The receiver may have stopped; Refresh or pair with its new code after a restart.') from exc
+                stage = {'start': 'Starting', 'pair': 'Pairing with', 'stop': 'Stopping',
+                         'status': 'Checking', 'identify': 'Identifying'}.get(operation, operation)
+                raise ReceiverError(f'{stage} receiver at {endpoint[0]}:{endpoint[1]} failed: '
+                                    f'{type(exc).__name__}: {exc}') from exc
             except ValueError as exc:
                 raise ReceiverError(str(exc)) from exc
         self.task = Task(run, self.cancellation)
         self.task.moveToThread(self.worker)
         self.worker.started.connect(self.task.run)
         self.task.result.connect(self._result)
+        self.task.progress.connect(self._progress)
         self.task.error.connect(self._error)
         self.task.cancelled.connect(self._cancelled)
         self.task.finished.connect(self.worker.quit)
@@ -226,8 +240,13 @@ class ReceiverManager(QGroupBox):
             self.deployment.close()  # Reap an ended local stream; never use this as a remote stop.
         self.deployment = Deployment()
         deployment = self.deployment
-        self.set_state('Starting', 'Deploying to the ELF loader. Waiting for encrypted startup credentials and an authenticated receiver response…')
+        self.set_state('Starting', 'Checking receiver ports before deployment…')
         self._work('start', lambda progress: deployment.start(host, sdk, elf, *ports, self.cancellation, progress=progress))
+
+    @Slot(object)
+    def _progress(self, event: Progress) -> None:
+        if self.operation == 'start':
+            self.set_state('Starting', event.message)
 
     @Slot()
     def pair(self) -> None:
@@ -239,7 +258,15 @@ class ReceiverManager(QGroupBox):
 
     @Slot()
     def stop_receiver(self) -> None:
-        if self.busy() or self.transfer_active or not self.ready or self.paired is None:
+        if self.busy() or self.transfer_active:
+            return
+        if self.paired is None:
+            self.set_state('Unknown', 'Safe shutdown requires this receiver session’s credential. '
+                           'If its six-digit code is still valid, Pair first and then use Stop Receiver. '
+                           'Otherwise use the PS5 loader’s own documented stop or unload procedure. '
+                           'No process was terminated.')
+            return
+        if not self.ready:
             return
         paired = self.paired
         self.set_state('Stopping', 'Requesting authenticated shutdown of this idle receiver…')

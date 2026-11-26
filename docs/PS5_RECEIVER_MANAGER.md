@@ -13,6 +13,8 @@ manifest. **Start Receiver** deploys that verified ELF directly to an already
 running PS5 ELF loader over TCP. No PS5 Payload SDK, `socat`, `plink.exe`, or
 separate receiver download is needed for this path. **Export PS5 Receiver (.elf)**
 is available under **Transfer advanced options** for manual deployment.
+The SDK setting is hidden while the packaged GUI selects its verified bundled
+ELF. Selecting a custom ELF exposes the developer SDK setting again.
 
 Source checkouts can build their own receiver:
 
@@ -29,8 +31,9 @@ may select the SDK root and `ps5/receiver/minecraft_playden_receiver.elf` under
 **Transfer advanced options**. A manually selected ELF without the verified
 manifest retains the SDK deployer fallback, which needs `socat` on POSIX or
 `plink.exe` on Windows. Windows batch-script paths containing spaces or shell
-characters remain rejected for that fallback. Native Windows loader acceptance
-has not been established here.
+characters remain rejected for that fallback. A native Windows preview uploaded
+the bundled ELF, authenticated the receiver and confirmed normal shutdown on a
+physical PS5 on 2026-11-26; this is not a full release validation.
 
 | Service | Default TCP port |
 | --- | --- |
@@ -42,6 +45,11 @@ Ports are editable and must be distinct. GUI startup patches only its ephemeral
 RSA **public** key and receiver ports into a temporary ELF copy. The source ELF
 is retained unchanged. No private key, pairing code or transfer credential is
 written into either ELF. Keep all services on a trusted private LAN.
+Before upload, Start Receiver probes both receiver ports with a five-second TCP
+connect timeout. Only an explicit connection refusal establishes that a port is
+unoccupied. A listening service, timeout or ambiguous network error blocks
+deployment. The GUI reports the preflight, loader connection, upload, startup,
+authentication and ready stages in its status and progress log.
 
 ## Build, start, send and import
 
@@ -55,6 +63,11 @@ written into either ELF. Keep all services on a trusted private LAN.
    in memory and verifies the receiver's session identity, version and HMAC
    response before showing **Running**. Its six-digit session code appears in the
    code field. **Start** never treats a loader stream ending as receiver success.
+   A physical Windows preview confirmed this authenticated startup, but the PS5
+   notification was not observed during the test. The receiver currently ignores
+   the notification API's return value, so authenticated startup does not prove
+   that the pairing code appeared on screen. Keep the GUI open to retain its
+   in-memory credential if no code is visible.
 4. If started externally, enter the six digits from the PS5 receiver notification
    and click **Pair**. **Refresh status** alone supplies only unverified discovery
    information and cannot enable Send or Stop. Codes expire after five minutes,
@@ -73,6 +86,13 @@ written into either ELF. Keep all services on a trusted private LAN.
    the PS5 or kills another payload. Stop is disabled during local LAN transfers;
    an externally active transfer is refused by the receiver. Finish or explicitly
    cancel the transfer first, then stop. There is no force-stop override.
+   Closure confirmation allows for delayed TCP refusals on both receiver ports.
+   If either refusal cannot be confirmed, the status remains **Unknown** even
+   when the authenticated stop request was acknowledged.
+   When no session credential is available, the same Stop button explains the
+   safe recovery options and sends no shutdown request. If the six-digit code
+   is still valid, Pair first, then Stop. An expired or consumed code cannot
+   recreate a lost high-entropy credential.
 
 IP, SDK/ELF paths, ports and destination are non-sensitive remembered settings.
 Codes, RSA private keys, session credentials and stop leases are never stored in
@@ -80,6 +100,8 @@ QSettings or logs. Closing the GUI disconnects its local loader stream; it does 
 send shutdown. Keep the GUI open until stopping if you need to retain control:
 after closing, an expired/used code cannot recover a forgotten credential.
 Use the loader's own documented manual stop/unload procedure in that situation.
+No separate shutdown ELF is bundled: a process name or listening port cannot
+prove receiver identity or atomically establish that package publication is idle.
 
 ## Status meanings
 
