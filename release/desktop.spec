@@ -2,6 +2,8 @@
 import os
 import sys
 from pathlib import Path
+from minecraft_playden import __version__
+from release.macos_bundle import bundle_version
 
 root = Path(SPECPATH).parent
 stage = Path(os.environ['PLAYDEN_RELEASE_STAGE'])
@@ -47,8 +49,8 @@ if sys.platform == 'darwin':
     app = BUNDLE(coll, name='Minecraft Playden Packager.app',
                  icon=str(icon_root / 'playdencreeper.icns'),
                  bundle_identifier='io.github.isaacm0880.minecraft-playden-packager',
-                 version='0.4.0',
-                 info_plist={'CFBundleVersion': '0.4.0b2',
+                 version=bundle_version(__version__),
+                 info_plist={'CFBundleVersion': bundle_version(__version__),
                              'CFBundleName': 'Minecraft Playden Packager',
                              'CFBundleDisplayName': 'Minecraft Playden Packager',
                              'NSHighResolutionCapable': True,

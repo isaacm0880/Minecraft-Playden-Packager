@@ -8,6 +8,14 @@ restart the PS5, deploy unrelated payloads or manage Playden's own game folders.
 
 ## Prepare locally
 
+Native desktop candidates include a source-bound receiver ELF and its integrity
+manifest. **Start Receiver** deploys that verified ELF directly to an already
+running PS5 ELF loader over TCP. No PS5 Payload SDK, `socat`, `plink.exe`, or
+separate receiver download is needed for this path. **Export PS5 Receiver (.elf)**
+is available under **Transfer advanced options** for manual deployment.
+
+Source checkouts can build their own receiver:
+
 Install the GUI dependencies and build the receiver with your installed SDK:
 
 ```bash
@@ -16,13 +24,13 @@ make -B -C ps5/receiver PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk
 python -m minecraft_playden gui
 ```
 
-Building contacts no console. The GUI does not download an ELF. Select the SDK
-root and this branch's `ps5/receiver/minecraft_playden_receiver.elf` under
-**Transfer advanced options**. The POSIX SDK deployer requires `socat` on PATH;
-the Windows SDK script requires `plink.exe`. Windows batch-script paths containing
-spaces or shell characters are rejected because the upstream script does not
-quote its payload path safely. Use safe SDK/temp paths or start externally and
-pair. Native Windows SDK/loader acceptance has not been established here.
+Building contacts no console. The GUI does not download an ELF. Source checkouts
+may select the SDK root and `ps5/receiver/minecraft_playden_receiver.elf` under
+**Transfer advanced options**. A manually selected ELF without the verified
+manifest retains the SDK deployer fallback, which needs `socat` on POSIX or
+`plink.exe` on Windows. Windows batch-script paths containing spaces or shell
+characters remain rejected for that fallback. Native Windows loader acceptance
+has not been established here.
 
 | Service | Default TCP port |
 | --- | --- |
@@ -46,7 +54,7 @@ written into either ELF. Keep all services on a trusted private LAN.
 3. When the loader forwards payload stdout, the GUI decrypts the startup envelope
    in memory and verifies the receiver's session identity, version and HMAC
    response before showing **Running**. Its six-digit session code appears in the
-   code field. **Start** never treats an SDK exit code as a receiver success.
+   code field. **Start** never treats a loader stream ending as receiver success.
 4. If started externally, enter the six digits from the PS5 receiver notification
    and click **Pair**. **Refresh status** alone supplies only unverified discovery
    information and cannot enable Send or Stop. Codes expire after five minutes,
@@ -68,7 +76,7 @@ written into either ELF. Keep all services on a trusted private LAN.
 
 IP, SDK/ELF paths, ports and destination are non-sensitive remembered settings.
 Codes, RSA private keys, session credentials and stop leases are never stored in
-QSettings or logs. Closing the GUI disconnects its local SDK stream; it does not
+QSettings or logs. Closing the GUI disconnects its local loader stream; it does not
 send shutdown. Keep the GUI open until stopping if you need to retain control:
 after closing, an expired/used code cannot recover a forgotten credential.
 Use the loader's own documented manual stop/unload procedure in that situation.
@@ -78,7 +86,7 @@ Use the loader's own documented manual stop/unload procedure in that situation.
 | Status | Meaning |
 | --- | --- |
 | Unknown | Not paired, unverified discovery, lost contact, changed session or uncertain start/stop |
-| Starting | SDK deployment and authenticated startup confirmation are pending |
+| Starting | ELF deployment and authenticated startup confirmation are pending |
 | Running | This version and session authenticated successfully; it may be busy |
 | Stopping | Authenticated stop and listener-closure confirmation are pending |
 | Stopped | The receiver acknowledged stop and both of its listeners refused new connections |
@@ -86,17 +94,18 @@ Use the loader's own documented manual stop/unload procedure in that situation.
 
 Paired sessions are probed every five seconds while the manager is idle. A failed
 probe disables Stop and Send. A changed receiver session clears stale credentials
-and requires pairing again. A live SDK process is not evidence the ELF is alive,
-and an exited SDK process is not evidence it stopped. The manager never tears
-down an earlier connected SDK stream merely to retry Start, nor closes one
+and requires pairing again. A live loader stream is not evidence the ELF is alive,
+and a closed stream is not evidence it stopped. The manager never tears
+down an earlier connected loader stream merely to retry Start, nor closes one
 receiver's stream as a side effect of stopping another receiver. Returning to an
 endpoint owned by this window can reuse its in-memory credential only after an
 authenticated Refresh; closing the window forgets it.
 
 ## Loader limitations and trust
 
-The installed SDK `prospero-deploy` sends an ELF over raw TCP and forwards loader
-output. It does not offer a receiver-specific unload API or prove remote payload
+The SDK `prospero-deploy` sends an ELF over raw TCP and forwards loader output.
+The built-in verified-bundle path reproduces that transport directly. Neither
+path offers a receiver-specific unload API or proves remote payload
 lifetime. Some loaders detach stdout: startup then remains **Unknown**, even if
 the ELF is running. Use the PS5 notification and **Pair**, rather than repeatedly
 redeploying. Start refuses occupied receiver ports before invoking the loader.
@@ -162,7 +171,7 @@ manual six-digit pairing otherwise; send, verify the import path, stop, then
 start again. Cancel a transfer before requesting Stop. Disconnect the LAN to
 check Unknown and disabled Stop/Send. These are optional owner acceptance steps;
 there is no benchmark requirement. The existing release source-approval gate
-still blocks producing a new AppImage under the old v0.1 approval.
+is distinct from the source approval and native distribution gates.
 
 The full management wire format and cryptographic construction are documented in
 [the receiver protocol](../ps5/receiver/PROTOCOL.md). This is regression coverage,
@@ -186,7 +195,8 @@ payload stdout is required; the packager does not start the console's loader.
 SDK/ELF paths and ports come from the GUI's existing per-user receiver settings.
 When no SDK path is set, `PS5_PAYLOAD_SDK`, a `prospero-deploy` installation on
 PATH, and standard `/opt/ps5-payload-sdk` layouts are considered. The default ELF
-is `ps5/receiver/minecraft_playden_receiver.elf` in the source checkout. CLI
+is the bundled verified ELF in a frozen app, or
+`ps5/receiver/minecraft_playden_receiver.elf` in a source checkout. CLI
 `--sdk PATH`, `--receiver-elf PATH`, `--loader-port PORT`, `--port PORT` and
 `--control-port PORT` override startup configuration without changing preferences.
 
@@ -195,9 +205,10 @@ with the installed SDK and local `make`. The build uses temporary output and
 replaces the local ELF only after format/startup-slot checks succeed. Failed or
 cancelled builds retain a previous ELF. A custom prebuilt ELF without sources
 can be used directly; a missing custom ELF needs a valid source location or an
-explicit local build. No dependencies, SDK or ELF are downloaded. POSIX SDK
-startup needs `socat`; the Windows deployer needs `plink.exe` and retains the
-existing safe-path restrictions. Encrypted startup needs the installed
+explicit local build. No dependencies, SDK or ELF are downloaded at runtime.
+Verified ELF bundles deploy directly; only the unmanifested SDK fallback needs
+`socat` on POSIX or `plink.exe` on Windows and retains the existing safe-path
+restrictions. Encrypted startup needs the installed
 `cryptography` dependency (included in `.[gui]`).
 
 Listening receiver ports prevent another deployment. If the process has an
@@ -212,7 +223,7 @@ from a guessed or scraped six-digit code.
 
 Startup stages and transfer/verification progress share the existing renderer.
 Keys, codes, private keys and captured loader output are not printed or saved.
-Completion and Ctrl-C close/reap the local SDK process and temporary files; they
+Completion and Ctrl-C close/reap the local loader stream and temporary files; they
 do not send a remote STOP. The receiver can remain running, including after a
 startup failure if deployment occurred. Inspect its state before retrying; never
 assume a closed loader stream proves remote shutdown. A lost publication receipt

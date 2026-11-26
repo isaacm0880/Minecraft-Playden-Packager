@@ -147,8 +147,8 @@ python -m minecraft_playden build --source local --instance "/path/to/instance" 
   --remap-java /usr/bin/java --java-runtime "/path/to/windows-x64-java-17"
 ```
 
-On Windows, omit `--remap-java` to use the packaged JDK or supply the path to a
-native JDK's `java.exe`. A first build still needs the same public metadata/assets
+On Windows, omit `--remap-java` to discover an installed host JDK 17+ or supply
+the path to its `java.exe`. A first build still needs the same public metadata/assets
 as before; once installed/cached, `build --offline` with these preparation flags
 makes a prepared rebuild without HTTP. `prepare-fabric` itself has no downloader.
 Neither command overwrites an existing output. A failed/cancelled preparation

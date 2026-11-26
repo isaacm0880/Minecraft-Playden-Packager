@@ -2,6 +2,7 @@
 import hashlib
 from pathlib import Path
 import plistlib
+import re
 import subprocess
 
 APP_NAME = 'Minecraft Playden Packager.app'
@@ -10,10 +11,19 @@ MACHO_MAGICS = {b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', b'\xce\xfa\xed\xfe', b
                 b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca', b'\xca\xfe\xba\xbf', b'\xbf\xba\xfe\xca'}
 
 
+def bundle_version(package_version: str) -> str:
+    """Apple's bundle version fields require three numeric components."""
+    match = re.fullmatch(r'(\d+\.\d+\.\d+)(?:[a-z]+\d+)?', package_version)
+    if not match:
+        raise ValueError('Unsupported package version for macOS bundle')
+    return match.group(1)
+
+
 def verify_bundle(app: Path, expected: dict) -> dict:
     info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
     if (info.get('CFBundleIdentifier') != BUNDLE_ID or info.get('CFBundleDisplayName') != 'Minecraft Playden Packager'
-            or info.get('CFBundleShortVersionString') != expected['version']
+            or info.get('CFBundleShortVersionString') != bundle_version(expected['version'])
+            or info.get('CFBundleVersion') != bundle_version(expected['version'])
             or info.get('CFBundleExecutable') != 'MinecraftPlaydenPackager'):
         raise ValueError('macOS bundle identity/version mismatch')
     for key in ('NSRemovableVolumesUsageDescription', 'NSDocumentsFolderUsageDescription', 'NSDownloadsFolderUsageDescription'):

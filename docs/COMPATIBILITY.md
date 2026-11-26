@@ -74,8 +74,8 @@ can be disabled explicitly for troubleshooting; the resulting unprepared package
 receives a warning before GUI USB/LAN transfer.
 
 Preparation uses a separate host-native JDK 17+ with `jdk.compiler`, discovered
-from JAVA_HOME/PATH and common JDK locations on Linux, Windows and macOS. Windows
-can also use the packaged JDK. **Host preparation JDK → Choose Java…** allows manual
+from JAVA_HOME/PATH, common JDK locations and standard PrismLauncher managed Java
+folders on Linux, Windows and macOS. **Host preparation JDK → Choose Java…** allows manual
 selection. The worker validates the selected executable's major version, compiler
 module and native OS. No native Java is downloaded; no Wine or PS5 SDK is needed.
 If no suitable JDK is found, the requested build fails without publishing an

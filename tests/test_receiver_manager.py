@@ -1,6 +1,8 @@
 """Lifecycle and PAKE security against the actual C receiver. Loopback only."""
 import contextlib
 from dataclasses import dataclass, field, replace
+import hashlib
+import json
 import os
 from pathlib import Path
 import queue
@@ -19,6 +21,7 @@ from minecraft_playden.receiver_manager import (
     MANAGER_MAGIC, VERSION, STATUS, STOP, PairedReceiver, ReceiverInfo, ReceiverError,
     UnsupportedReceiver, identify, pair_receiver, receiver_status, stop_receiver,
     _client_secret, _info, _control_key, N, prepare_elf, decode_bootstrap, Deployment,
+    export_receiver_elf,
 )
 from test_network_receiver import receiver_binary, begin, entry, wait_clean
 
@@ -233,6 +236,83 @@ def test_rsa_startup_envelope_is_only_decryptable_by_the_launching_gui(managed, 
             decode_bootstrap(another, encrypted, '127.0.0.1', running.port, running.control_port)
         with pytest.raises(ReceiverError):
             decode_bootstrap(private, encrypted[:-1] + bytes([encrypted[-1] ^ 1]), '127.0.0.1', running.port, running.control_port)
+
+
+def test_verified_receiver_deploys_over_raw_loader_tcp_without_sdk_utilities(receiver_binary, tmp_path):
+    bundle = tmp_path / 'bundle'
+    bundle.mkdir()
+    elf = bundle / 'minecraft_playden_receiver.elf'
+    elf.write_bytes(receiver_binary.read_bytes())
+    (bundle / 'receiver-manifest.json').write_text(json.dumps({
+        'elf_sha256': hashlib.sha256(elf.read_bytes()).hexdigest()}))
+    sandbox = tmp_path / 'console'
+    sandbox.mkdir()
+    listener = socket.socket()
+    listener.bind(('127.0.0.1', 0))
+    listener.listen(1)
+    loader_port = listener.getsockname()[1]
+    ports = []
+    for _ in range(2):
+        candidate = socket.socket()
+        candidate.bind(('127.0.0.1', 0))
+        ports.append(candidate.getsockname()[1])
+        candidate.close()
+    failures = queue.Queue()
+    deployed = []
+    def loader():
+        process = None
+        try:
+            with listener, listener.accept()[0] as stream:
+                data = bytearray()
+                while block := stream.recv(65536):
+                    data.extend(block)
+                deployed.append(bytes(data))
+                payload = tmp_path / 'deployed.elf'
+                payload.write_bytes(data)
+                payload.chmod(0o700)
+                process = subprocess.Popen([str(payload), '--bind', '127.0.0.1',
+                    '--test-root', str(sandbox), '--port', str(ports[0]),
+                    '--control-port', str(ports[1])], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                assert process.stdout is not None
+                for line in process.stdout:
+                    stream.sendall(line)
+        except BaseException as exc:
+            failures.put(exc)
+        finally:
+            if process is not None and process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
+    thread = threading.Thread(target=loader, daemon=True)
+    thread.start()
+    deployment = Deployment()
+    try:
+        with patch('minecraft_playden.receiver_manager.shutil.which', side_effect=AssertionError('SDK utility requested')):
+            paired = deployment.start('127.0.0.1', tmp_path / 'no-sdk', elf,
+                loader_port, ports[0], ports[1], CancellationToken())
+        assert paired.info.port == ports[0]
+        assert receiver_status(paired).session_id == paired.info.session_id
+        stop_receiver(paired)
+        thread.join(5)
+        assert not thread.is_alive() and failures.empty()
+        assert deployed and deployed[0].startswith(b'\x7fELF') and deployed[0] != elf.read_bytes()
+        assert paired.key not in deployed[0]
+    finally:
+        deployment.close()
+        listener.close()
+
+
+def test_export_receiver_elf_preserves_source_and_refuses_existing_file(receiver_binary, tmp_path):
+    bundle = tmp_path / 'bundle'
+    bundle.mkdir()
+    elf = bundle / 'receiver.elf'
+    elf.write_bytes(receiver_binary.read_bytes())
+    (bundle / 'receiver-manifest.json').write_text(json.dumps({
+        'elf_sha256': hashlib.sha256(elf.read_bytes()).hexdigest()}))
+    destination = tmp_path / 'export.elf'
+    assert export_receiver_elf(tmp_path / 'no-sdk', elf, destination, CancellationToken()) == destination
+    assert destination.read_bytes() == elf.read_bytes()
+    with pytest.raises(FileExistsError):
+        export_receiver_elf(tmp_path / 'no-sdk', elf, destination, CancellationToken())
 
 
 def test_srp_client_and_c_server_match_independent_pysrp_vectors(receiver_binary, tmp_path):

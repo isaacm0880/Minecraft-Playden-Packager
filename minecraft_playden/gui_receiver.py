@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, 
 from .gui_components import Task, AdvancedSection
 from .network_protocol import lan_address, NetworkTransferError
 from .operations import CancellationToken
-from .receiver_manager import Deployment, ReceiverConfiguration, PairedReceiver, ReceiverInfo, ReceiverError, identify, pair_receiver, receiver_status, stop_receiver
+from .receiver_manager import Deployment, ReceiverConfiguration, PairedReceiver, ReceiverInfo, ReceiverError, export_receiver_elf, identify, pair_receiver, receiver_status, stop_receiver
 
 
 class ReceiverManager(QGroupBox):
@@ -93,6 +93,9 @@ class ReceiverManager(QGroupBox):
             box.valueChanged.connect(lambda value, key=key: settings.setValue('receiver/' + key, value))
             configuration.addRow(label, box)
         self.advanced.form.addRow(self.configuration)
+        self.export_button = QPushButton('Export PS5 Receiver (.elf)…')
+        self.export_button.clicked.connect(self.export_elf)
+        self.advanced.form.addRow(self.export_button)
         layout.addWidget(self.advanced)
         self.start_button.clicked.connect(self.start_receiver)
         self.stop_button.clicked.connect(self.stop_receiver)
@@ -156,6 +159,7 @@ class ReceiverManager(QGroupBox):
         self.pair_button.setEnabled(idle and valid_host and not (self.state == 'Running' and self.paired is not None) and re.fullmatch(r'[0-9]{6}', self.code.text()) is not None)
         self.code.setReadOnly(self.state == 'Running' and self.paired is not None)
         self.cancel_button.setEnabled(self.busy() and self.operation != 'stop' and not self.cancellation.cancelled)
+        self.export_button.setEnabled(idle)
         for field in (self.host, self.code, self.configuration):
             field.setEnabled(idle)
 
@@ -189,6 +193,8 @@ class ReceiverManager(QGroupBox):
             except NetworkTransferError:
                 raise
             except OSError as exc:
+                if operation == 'export':
+                    raise ReceiverError(f'Could not export receiver ELF: {exc}') from exc
                 raise ReceiverError('Receiver connection failed or was lost. Check the PS5 IP, ports and LAN. '
                                     'The receiver may have stopped; Refresh or pair with its new code after a restart.') from exc
             except ValueError as exc:
@@ -214,13 +220,13 @@ class ReceiverManager(QGroupBox):
         host, sdk, elf = self.host.text().strip(), Path(self.sdk.text()).expanduser(), Path(self.elf.text()).expanduser()
         ports = self.loader_port.value(), self.data_port.value(), self.control_port.value()
         if self.deployment is not None:
-            if self.deployment.process is not None and self.deployment.process.poll() is None:
-                self.set_state('Unknown', 'The earlier SDK stream is still connected. Refresh and authenticate that receiver before starting another; closing the stream is not a safe receiver stop.')
+            if self.deployment.stream is not None or (self.deployment.process is not None and self.deployment.process.poll() is None):
+                self.set_state('Unknown', 'The earlier loader stream is still connected. Refresh and authenticate that receiver before starting another; closing the stream is not a safe receiver stop.')
                 return
             self.deployment.close()  # Reap an ended local stream; never use this as a remote stop.
         self.deployment = Deployment()
         deployment = self.deployment
-        self.set_state('Starting', 'Deploying through the SDK. Waiting for encrypted startup credentials and an authenticated receiver response…')
+        self.set_state('Starting', 'Deploying to the ELF loader. Waiting for encrypted startup credentials and an authenticated receiver response…')
         self._work('start', lambda progress: deployment.start(host, sdk, elf, *ports, self.cancellation, progress=progress))
 
     @Slot()
@@ -263,7 +269,9 @@ class ReceiverManager(QGroupBox):
 
     @Slot(object)
     def _result(self, result: object) -> None:
-        if isinstance(result, PairedReceiver):
+        if self.operation == 'export' and isinstance(result, Path):
+            self.set_state(self.state, f'Receiver ELF exported to {result}')
+        elif isinstance(result, PairedReceiver):
             if self.operation == 'start':
                 self._owned_receiver = result
             self.install(result)
@@ -294,6 +302,9 @@ class ReceiverManager(QGroupBox):
 
     @Slot(str)
     def _error(self, message: str) -> None:
+        if self.operation == 'export':
+            self.set_state(self.state, message)
+            return
         self.monitor.stop()
         if 'Receiver session changed' in message:
             self.paired = None
@@ -313,6 +324,9 @@ class ReceiverManager(QGroupBox):
 
     @Slot(str)
     def _cancelled(self, message: str) -> None:
+        if self.operation == 'export':
+            self.set_state(self.state, 'Receiver ELF export cancelled.')
+            return
         self.monitor.stop()
         self.set_state('Unknown', 'Local operation cancelled. The ELF may still be running. Refresh or pair before starting again.')
 
@@ -344,3 +358,13 @@ class ReceiverManager(QGroupBox):
         path, _ = QFileDialog.getOpenFileName(self, 'Choose receiver ELF built from this branch', self.elf.text(), 'ELF payload (*.elf)')
         if path:
             self.elf.setText(path)
+
+    @Slot()
+    def export_elf(self) -> None:
+        if self.busy() or self.transfer_active:
+            return
+        destination, _ = QFileDialog.getSaveFileName(self, 'Export PS5 Receiver ELF',
+            'minecraft_playden_receiver.elf', 'ELF payload (*.elf)')
+        if destination:
+            sdk, elf = Path(self.sdk.text()).expanduser(), Path(self.elf.text()).expanduser()
+            self._work('export', lambda progress: export_receiver_elf(sdk, elf, Path(destination), self.cancellation))

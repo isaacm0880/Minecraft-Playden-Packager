@@ -5,7 +5,7 @@ import plistlib
 import tempfile
 import unittest
 from unittest.mock import patch
-from release.macos_bundle import BUNDLE_ID, verify_bundle
+from release.macos_bundle import BUNDLE_ID, bundle_version, verify_bundle
 
 
 class MacBundleTests(unittest.TestCase):
@@ -21,7 +21,8 @@ class MacBundleTests(unittest.TestCase):
             metadata = {'architecture': 'arm64', 'version': '0.1.0',
                         'branding': {'files': {'playdencreeper.icns': hashlib.sha256(b'fixture icon').hexdigest()}}}
             info = {'CFBundleIdentifier': BUNDLE_ID, 'CFBundleDisplayName': 'Minecraft Playden Packager',
-                    'CFBundleShortVersionString': '0.1.0', 'CFBundleExecutable': executable.name,
+                    'CFBundleShortVersionString': '0.1.0', 'CFBundleVersion': '0.1.0',
+                    'CFBundleExecutable': executable.name,
                     'CFBundleIconFile': 'playdencreeper.icns', 'NSRemovableVolumesUsageDescription': 'fixture',
                     'NSDocumentsFolderUsageDescription': 'fixture', 'NSDownloadsFolderUsageDescription': 'fixture'}
             path = app / 'Contents/Info.plist'
@@ -39,3 +40,8 @@ class MacBundleTests(unittest.TestCase):
             (resources / 'playdencreeper.icns').write_bytes(b'wrong icon')
             with self.assertRaisesRegex(ValueError, 'official ICNS'):
                 verify_bundle(app, metadata)
+
+    def test_beta_package_version_uses_numeric_apple_bundle_fields(self):
+        self.assertEqual(bundle_version('0.4.0b2'), '0.4.0')
+        with self.assertRaises(ValueError):
+            bundle_version('0.4.0-beta.2')

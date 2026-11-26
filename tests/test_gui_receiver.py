@@ -165,6 +165,26 @@ def test_missing_sdk_and_unsupported_versions_have_actionable_errors(ui):
     assert not manager.stop_button.isEnabled()
 
 
+def test_receiver_export_is_in_advanced_options_and_preserves_unpatched_elf(ui, receiver_binary, tmp_path):
+    import hashlib
+    import json
+    window, manager, *_ = ui
+    bundle = tmp_path / 'bundle'
+    bundle.mkdir()
+    elf = bundle / 'receiver.elf'
+    elf.write_bytes(receiver_binary.read_bytes())
+    (bundle / 'receiver-manifest.json').write_text(json.dumps({
+        'elf_sha256': hashlib.sha256(elf.read_bytes()).hexdigest()}))
+    target = tmp_path / 'exported.elf'
+    manager.elf.setText(str(elf))
+    assert manager.export_button.parent() is manager.advanced.content
+    with patch('minecraft_playden.gui_receiver.QFileDialog.getSaveFileName', return_value=(str(target), 'ELF payload (*.elf)')):
+        manager.export_button.click()
+    pump_until(lambda: not manager.busy())
+    assert target.read_bytes() == elf.read_bytes()
+    assert manager.state == 'Unknown' and str(target) in manager.error.text()
+
+
 def test_stop_is_disabled_during_local_transfer_and_cannot_be_invoked_directly(ui):
     window, manager, *_ = ui
     manager.install(PairedReceiver('127.0.0.1', ReceiverInfo(VERSION, bytes(32), 9025, 9026), bytes(32)), monitor=False)

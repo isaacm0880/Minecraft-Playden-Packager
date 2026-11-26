@@ -1,8 +1,8 @@
 # Next desktop candidate: decisions and physical checks
 
 This is preparation for a new candidate from `feat/ps5-network-transfer`, not
-approval to publish. The historical v0.1.0 source policy and artifacts are
-unchanged. No working Minecraft version needs another gameplay test.
+approval to publish. The historical v0.1.0 artifacts are unchanged. No working
+Minecraft version needs another gameplay test.
 
 ## Source approval gate
 
@@ -29,15 +29,16 @@ The build command refuses dirty receiver source unless explicitly making a
 local `--allow-dirty-preview` artifact.
 
 The desktop workflow builds this receiver once after the source gate and passes
-the same artifact to Windows, Linux and both optional Mac jobs. Each desktop
+the same artifact to Windows, Linux and both Mac jobs. Each desktop
 builder verifies the manifest against its exact checkout before embedding the
 ELF and manifest. The content audit checks their hashes, and the frozen smoke
 checks the default ELF path and runtime checksum guard. A configured external
 ELF remains an explicit override. The desktop package includes the receiver
-ELF, but automatic deployment still needs a PS5 Payload SDK deployer plus
-`socat` on Unix or `plink.exe` on Windows. External receiver pairing can use
-the bundled ELF through a separately operated deployer. The already-running
-PS5 ELF loader is always an external prerequisite.
+ELF and deploys it over the loader's raw TCP protocol without a PS5 Payload SDK,
+`socat`, or `plink.exe` on the host. The SDK-script fallback remains for a
+manually selected unmanifested ELF. The already-running PS5 ELF loader is
+always an external prerequisite. The GUI can export the unpatched ELF from
+its Advanced section for manual deployment.
 
 The ELF is source and toolchain bound, not yet console accepted. The pinned SDK
 archive and payload licensing/notice obligations need final distribution review.
@@ -57,12 +58,9 @@ candidate and gives a specific selection error. It does not download Java.
 | Automatically provision a pinned JDK on first Fabric preparation | Small initial app and guided setup; needs network, cache, architecture selection, signed/hash-verified downloads, cancellation and offline error handling. | Java download shifts to first use; maintain per-platform pins, licences and updates. |
 | Require an installed JDK, discover and probe it | Current implemented path; smallest app and no extra network or bundled runtime. Users may need one manual installation. | User/OS manages updates and JDK licensing; clear installation guidance is necessary. |
 
-**Recommendation for this candidate:** keep the installed-JDK requirement and
-make it explicit in downloads and GUI/CLI instructions. This preserves the
-verified fail-closed worker and avoids adding four unaccepted JDK payloads to
-the first binary release. Consider opt-in automatic provisioning in a later
-release after pinning native archives and an update/security policy. Do not
-assume the game's Windows Java 8 runtime can compile Fabric mappings.
+**Decision for this candidate:** an installed host-native JDK 17+ is required.
+Standard PrismLauncher managed JDK locations are also searched. Users can
+select a portable launcher JDK manually. No JDK is bundled or downloaded.
 
 Temurin's [licensing FAQ](https://adoptium.net/docs/faq/?variant=openjdk16),
 [download/API guidance](https://adoptium.net/installation/ci-scripts), and
@@ -77,12 +75,10 @@ references for the later provisioning decision.
   clean compatible host. Host glibc, graphics and FUSE/extraction behavior remain
   external.
 - **Windows x64:** Use pinned Python 3.11.9, build/re-audit the portable ZIP,
-  run frozen smoke and native GUI/USB/path-alias acceptance. Decide whether
-  automatic receiver deployment is supported with an installed SDK/`plink.exe`
-  or documented as external receiver pairing only.
-- **macOS ARM64 and x86_64:** Jobs are opt-in and non-blocking. Choose the next
-  version and align the Python version with valid `CFBundleShortVersionString`
-  and `CFBundleVersion` before native builds. Run Cocoa/Finder, external-volume,
+  run frozen smoke and native GUI/USB/path-alias acceptance. Test direct loader
+  deployment from the bundled receiver on Windows.
+- **macOS ARM64 and x86_64:** Jobs are required in the candidate workflow and
+  use numeric Apple bundle version fields. Run Cocoa/Finder, external-volume,
   cancellation and Gatekeeper acceptance on both architectures. Decide whether
   ad-hoc signing without Developer ID notarization is an acceptable experimental
   distribution policy; do not advertise stable Mac binaries yet.

@@ -1,5 +1,22 @@
 # Installation
 
+## Upcoming native release candidate
+
+The next candidate is being prepared as a Windows x64 portable ZIP, a Linux
+x86_64 AppImage and macOS ARM64/x86_64 `.app` bundles delivered in ZIP files.
+Each will contain the verified PS5 receiver ELF and manifest. With an already
+running PS5 ELF loader, **Start Receiver** can deploy it without a local SDK,
+`socat`, or `plink.exe`. These candidate artifacts have not yet been built and
+accepted on every native host; use the published v0.1.0 binaries or the source
+checkout until they are available.
+
+Automatic Fabric preparation requires a separate installed host-native full
+JDK 17+ with `jdk.compiler`. Set `JAVA_HOME`, put its `java` or `java.exe` on
+PATH, or select it in **Advanced → Host preparation JDK**. Standard
+PrismLauncher managed-Java folders are checked; a portable launcher JDK can be
+selected manually. The Windows game runtime packaged for PS5 is not used for
+host preparation. The packager does not bundle or download a host JDK.
+
 ## v0.4.0-beta.2: source-only beta
 
 The beta contains only GitHub's automatically generated source archives; no

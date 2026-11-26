@@ -77,17 +77,30 @@ def test_path_java_home_and_common_locations_are_bounded_and_deduplicated(tmp_pa
     java.parent.mkdir(parents=True)
     java.write_bytes(b'fixture')
     env = {'JAVA_HOME': str(tmp_path / 'jdk'), 'PATH': '/unused'}
-    packaged = tmp_path / 'packaged/java.exe'
-    packaged.parent.mkdir()
-    packaged.write_bytes(b'fixture')
     with patch('minecraft_playden.host_java.shutil.which', return_value=str(java)), patch.object(Path, 'glob', return_value=iter(())):
-        found = host_java.candidates(packaged, platform=platform, environ=env, home=tmp_path)
+        found = host_java.candidates(platform=platform, environ=env, home=tmp_path)
     assert found.count(java) == 1
-    assert (packaged in found) == (platform == 'win32')
     # Common installation locations are consulted even if PATH/JAVA_HOME are absent.
     with patch('minecraft_playden.host_java.shutil.which', return_value=None), patch.object(Path, 'glob', side_effect=lambda pattern: iter([java])) as locations:
         assert java in host_java.candidates(platform=platform, environ={'ProgramFiles': str(tmp_path / 'install')} if platform == 'win32' else {}, home=tmp_path)
         assert locations.called
+
+
+@pytest.mark.parametrize('platform,root', [
+    ('linux', '.local/share/PrismLauncher/java'),
+    ('linux', '.var/app/org.prismlauncher.PrismLauncher/data/PrismLauncher/java'),
+    ('darwin', 'Library/Application Support/PrismLauncher/java'),
+    ('win32', 'AppData/Roaming/PrismLauncher/java'),
+])
+def test_standard_prism_managed_jdk_candidates_are_probed(tmp_path, platform, root):
+    binary = 'java.exe' if platform == 'win32' else 'java'
+    suffix = 'Contents/Home/bin' if platform == 'darwin' else 'bin'
+    java = tmp_path / root / 'jdk-21' / suffix / binary
+    java.parent.mkdir(parents=True)
+    java.write_bytes(b'fixture')
+    env = {'PATH': '', 'APPDATA': str(tmp_path / 'AppData/Roaming')}
+    with patch('minecraft_playden.host_java.shutil.which', return_value=None):
+        assert java in host_java.candidates(platform=platform, environ=env, home=tmp_path)
 
 
 def test_probe_cancellation_and_timeout_reap_the_child(tmp_path):

@@ -208,7 +208,7 @@ def _run(java: Path | None, arguments: list[str], work: Path, cancellation: Canc
     from .host_java import find
     if progress is not None:
         progress(Progress('prepare-java', 'Finding and validating a host-native JDK 17+ with its compiler module...'))
-    selected = find(java, Path(arguments[1]).parent.parent / 'java/bin/java.exe', cancellation)
+    selected = find(java, cancellation)
     java = selected.executable
     if progress is not None:
         progress(Progress('remapping', f'Preparing Fabric using native Java {selected.major}: {java}'))

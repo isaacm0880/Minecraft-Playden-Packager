@@ -6,11 +6,6 @@ on:
         description: 'Exact 40-character public commit SHA on the workflow ref selected for this run'
         required: true
         type: string
-      build_macos:
-        description: 'Optional experimental macOS builds; not required for v0.1.0'
-        required: false
-        default: false
-        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -145,8 +140,6 @@ jobs:
             dist/linux/build-metadata.json
             dist/linux/content-audit.json
   macos:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_macos
-    continue-on-error: true
     needs: [source, receiver]
     strategy:
       fail-fast: false
@@ -194,7 +187,7 @@ jobs:
             dist/macos/build-metadata.json
             dist/macos/content-audit.json
   verify-pair:
-    needs: [source, windows, linux]
+    needs: [source, windows, linux, macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

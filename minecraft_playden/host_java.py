@@ -19,7 +19,7 @@ class HostJdk:
     major: int
 
 
-def candidates(packaged: Path | None = None, *, platform: str | None = None,
+def candidates(*, platform: str | None = None,
                environ: Mapping[str, str] | None = None, home: Path | None = None) -> list[Path]:
     platform = platform or sys.platform
     env = os.environ if environ is None else environ
@@ -31,22 +31,33 @@ def candidates(packaged: Path | None = None, *, platform: str | None = None,
     on_path = shutil.which(binary, path=env.get('PATH', ''))
     if on_path and not (platform == 'darwin' and on_path == '/usr/bin/java'):
         paths.append(Path(on_path))
+    launcher_roots: list[Path] = []
     if platform == 'win32':
-        if packaged is not None:
-            paths.append(packaged)
         for name in ('ProgramFiles', 'ProgramW6432', 'LOCALAPPDATA'):
             if env.get(name):
                 root = Path(env[name])
                 for pattern in ('Java/*/bin/java.exe', 'Eclipse Adoptium/*/bin/java.exe', 'Microsoft/*/bin/java.exe', 'Zulu/*/bin/java.exe'):
                     paths.extend(sorted(root.glob(pattern), reverse=True)[:16])
+        for name in ('APPDATA', 'LOCALAPPDATA'):
+            if env.get(name):
+                launcher_roots.append(Path(env[name]) / 'PrismLauncher/java')
     elif platform == 'darwin':
         for root in (Path('/Library/Java/JavaVirtualMachines'), home / 'Library/Java/JavaVirtualMachines'):
             paths.extend(sorted(root.glob('*/Contents/Home/bin/java'), reverse=True)[:16])
         for root in (Path('/opt/homebrew/opt'), Path('/usr/local/opt')):
             paths.extend(sorted(root.glob('openjdk*/bin/java'), reverse=True)[:16])
+        launcher_roots.append(home / 'Library/Application Support/PrismLauncher/java')
     else:
         for root, pattern in ((Path('/usr/lib/jvm'), '*/bin/java'), (Path('/usr/lib64/jvm'), '*/bin/java'),
                               (Path('/usr/java'), '*/bin/java'), (Path('/opt'), 'jdk*/bin/java')):
+            paths.extend(sorted(root.glob(pattern), reverse=True)[:16])
+        launcher_roots.extend((home / '.local/share/PrismLauncher/java',
+                               home / '.var/app/org.prismlauncher.PrismLauncher/data/PrismLauncher/java'))
+    # Prism-managed Java lives under the launcher data root. Portable Prism
+    # locations remain selectable explicitly; avoid a home-wide recursive scan.
+    for root in launcher_roots:
+        for pattern in (f'*/bin/{binary}', f'*/*/bin/{binary}',
+                        f'*/Contents/Home/bin/{binary}'):
             paths.extend(sorted(root.glob(pattern), reverse=True)[:16])
     result = []
     seen: set[Path] = set()
@@ -106,9 +117,8 @@ def probe(executable: Path, cancellation: CancellationToken | None = None, *, ti
     return HostJdk(executable, int(major[1]))
 
 
-def find(executable: Path | None = None, packaged: Path | None = None,
-         cancellation: CancellationToken | None = None) -> HostJdk:
-    paths = [executable] if executable is not None else candidates(packaged)
+def find(executable: Path | None = None, cancellation: CancellationToken | None = None) -> HostJdk:
+    paths = [executable] if executable is not None else candidates()
     errors = []
     for path in paths:
         try:
@@ -116,7 +126,9 @@ def find(executable: Path | None = None, packaged: Path | None = None,
         except (OSError, ValueError) as exc:
             errors.append(f'{path}: {exc}')
     detail = '\n'.join(errors[-5:])
-    raise ValueError('No suitable host-native JDK found for Fabric preparation. Select a Java executable in '
-                     'the Host preparation JDK field (JDK 17+, including jdk.compiler), or use --remap-java PATH. '
+    raise ValueError('No suitable host-native JDK found for Fabric preparation. Install a full host JDK 17+ '
+                     '(for example Eclipse Temurin JDK, not JRE), set JAVA_HOME, or select its bin/java executable '
+                     'in the Host preparation JDK field / --remap-java PATH. Prism-managed JDKs in standard '
+                     'launcher data folders are checked automatically; select a portable launcher JDK manually. '
                      'The Windows runtime packaged for PS5 is separate. No Java will be downloaded and no Wine will be used.'
                      + ('\n' + detail if detail else ''))

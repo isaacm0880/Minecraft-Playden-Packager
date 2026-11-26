@@ -15,6 +15,7 @@ import secrets
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -177,6 +178,36 @@ def ensure_receiver_elf(sdk: Path, elf: Path, token: CancellationToken,
             output.replace(elf)
         finally:
             _stop_local_process(process)
+
+
+def export_receiver_elf(sdk: Path, elf: Path, destination: Path, token: CancellationToken) -> Path:
+    """Export a verified receiver without a per-launch credential or overwrite."""
+    ensure_receiver_elf(sdk, elf, token)
+    token.check()
+    # Check the public-key slot and configured ports before presenting an ELF
+    # as deployable; prepare_elf does not change the source file.
+    prepare_elf(elf, b'\x80' + bytes(382) + b'\x01', PORT, CONTROL_PORT)
+    if destination.is_symlink():
+        raise ReceiverError('Refusing to replace a linked receiver export path.')
+    identity = None
+    try:
+        with elf.open('rb') as source, destination.open('xb') as output:
+            info = os.fstat(output.fileno())
+            identity = info.st_dev, info.st_ino
+            while block := source.read(65536):
+                token.check()
+                output.write(block)
+    except BaseException:
+        # Only remove an output created by this call; never touch an existing file.
+        if identity is not None:
+            try:
+                current = destination.lstat()
+                if stat.S_ISREG(current.st_mode) and (current.st_dev, current.st_ino) == identity:
+                    destination.unlink()
+            except FileNotFoundError:
+                pass
+        raise
+    return destination
 
 
 def _connect(host: str, port: int, token: CancellationToken) -> socket.socket:
@@ -367,10 +398,11 @@ def prepare_elf(elf: Path, public_modulus: bytes, port: int, control_port: int) 
 
 
 class Deployment:
-    """Own the local SDK stream independently of the remote receiver lifecycle."""
+    """Own the local loader stream independently of the remote receiver lifecycle."""
     def __init__(self) -> None:
         self.attempted = False
         self.process: subprocess.Popen[bytes] | None = None
+        self.stream: socket.socket | None = None
         self.temporary: tempfile.TemporaryDirectory[str] | None = None
         self.reader: threading.Thread | None = None
 
@@ -414,15 +446,17 @@ class Deployment:
                 report('receiver-ready', 'Existing receiver authenticated; no ELF deployed.')
                 return PairedReceiver(host, info, existing_key)
             raise ReceiverError('A service is already listening on the receiver ports. Use --pair for an externally launched receiver, or Stop Receiver from its authenticated GUI owner before retrying --start-receiver. Stop legacy or incompatible services using their own controls. No service was replaced.')
-        deployer = sdk / ('win/prospero-deploy.cmd' if os.name == 'nt' else 'bin/prospero-deploy')
-        if not deployer.is_file():
-            raise ReceiverError('PS5 Payload SDK deployer was not found. Select the SDK root containing bin/prospero-deploy (or win/prospero-deploy.cmd).')
-        if os.name != 'nt' and not os.access(deployer, os.X_OK):
-            raise ReceiverError('The SDK deployer is not executable. Restore its executable permission, or start the receiver externally and Pair.')
-        utility = 'plink.exe' if os.name == 'nt' else 'socat'
-        if shutil.which(utility) is None:
-            raise ReceiverError(f'The SDK deployer requires {utility} on PATH. Install it, or start the ELF externally and pair with its six-digit code.')
         ensure_receiver_elf(sdk, elf, token, progress)
+        direct = (elf.parent / 'receiver-manifest.json').is_file()
+        deployer = sdk / ('win/prospero-deploy.cmd' if os.name == 'nt' else 'bin/prospero-deploy')
+        if not direct:
+            if not deployer.is_file():
+                raise ReceiverError('PS5 Payload SDK deployer was not found. Select the SDK root containing bin/prospero-deploy (or win/prospero-deploy.cmd).')
+            if os.name != 'nt' and not os.access(deployer, os.X_OK):
+                raise ReceiverError('The SDK deployer is not executable. Restore its executable permission, or start the receiver externally and Pair.')
+            utility = 'plink.exe' if os.name == 'nt' else 'socat'
+            if shutil.which(utility) is None:
+                raise ReceiverError(f'The SDK deployer requires {utility} on PATH. Install it, or start the ELF externally and pair with its six-digit code.')
         try:
             from cryptography.hazmat.primitives.asymmetric import rsa
         except ImportError as exc:
@@ -436,23 +470,54 @@ class Deployment:
         self.temporary = tempfile.TemporaryDirectory(prefix='playden-receiver-', ignore_cleanup_errors=True)
         path = Path(self.temporary.name) / 'receiver.elf'
         path.write_bytes(payload)  # Public key only; no session credential is stored.
-        if os.name == 'nt' and (re.search(r'[\s%&|<>^!()"]', str(path)) or re.search(r'[\s%&|<>^!()"]', str(deployer))):
+        if not direct and os.name == 'nt' and (re.search(r'[\s%&|<>^!()"]', str(path)) or re.search(r'[\s%&|<>^!()"]', str(deployer))):
             self.close()
             raise ReceiverError('The SDK Windows batch deployer does not safely support these SDK/temp paths. Use paths without spaces or shell characters, or start externally and pair.')
         ready: queue.Queue[bytes] = queue.Queue(maxsize=1)
         try:
             report('receiver-deploy', 'Deploying receiver to the already-running ELF loader; waiting for encrypted startup output…')
             self.attempted = True
-            self.process = subprocess.Popen([str(deployer), '-h', host, '-p', str(loader_port), str(path)],
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                start_new_session=os.name != 'nt', env=desktop_environment())
-            process = self.process
+            if direct:
+                # The SDK deployer sends raw ELF bytes to the loader socket and
+                # forwards its output. Reproduce that transport without bundling
+                # socat/plink or copying SDK scripts into the application.
+                self.stream = socket.create_connection((host, loader_port), timeout=2)
+                self.stream.settimeout(2)
+            else:
+                self.process = subprocess.Popen([str(deployer), '-h', host, '-p', str(loader_port), str(path)],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    start_new_session=os.name != 'nt', env=desktop_environment())
+            process, stream = self.process, self.stream
             def read() -> None:
-                assert process.stdout is not None
-                while True:
-                    line = process.stdout.readline(4097)
-                    if not line:
-                        return
+                if stream is None:
+                    assert process is not None and process.stdout is not None
+                    stdout = process.stdout
+                    lines = iter(lambda: stdout.readline(4097), b'')
+                else:
+                    def socket_lines():
+                        pending = bytearray()
+                        overflow = False
+                        while True:
+                            try:
+                                block = stream.recv(4096)
+                            except socket.timeout:
+                                continue
+                            except OSError:
+                                return
+                            if not block:
+                                return
+                            for char in block:
+                                if char == 10:
+                                    if not overflow:
+                                        yield bytes(pending) + b'\n'
+                                    pending.clear()
+                                    overflow = False
+                                elif len(pending) < 4096 and not overflow:
+                                    pending.append(char)
+                                else:
+                                    overflow = True
+                    lines = socket_lines()
+                for line in lines:
                     # Never retain or display untrusted loader output, including legacy tokens.
                     if re.fullmatch(rb'PDLAN2_BOOTSTRAP [0-9a-f]{768}\r?\n', line):
                         try:
@@ -461,14 +526,20 @@ class Deployment:
                             pass
             self.reader = threading.Thread(target=read, daemon=True)
             self.reader.start()
+            if stream is not None:
+                with path.open('rb') as source:
+                    while block := source.read(65536):
+                        token.check()
+                        stream.sendall(block)
+                stream.shutdown(socket.SHUT_WR)
             deadline = time.monotonic() + STARTUP_TIMEOUT
             while time.monotonic() < deadline:
                 token.check()
                 try:
                     encrypted = ready.get(timeout=.05)
                 except queue.Empty:
-                    if process.poll() is not None:
-                        raise ReceiverError('SDK deployment ended without encrypted receiver credentials. Check that an ELF loader is running on the selected port; some loaders do not forward payload output. Pair manually if the receiver notification appeared.')
+                    if (process is not None and process.poll() is not None) or (stream is not None and self.reader is not None and not self.reader.is_alive()):
+                        raise ReceiverError('Loader stream ended without encrypted receiver credentials. Check the PS5 ELF loader and selected port; some loaders do not forward payload output. Pair manually if the receiver notification appeared.')
                     continue
                 paired = decode_bootstrap(private, encrypted, host, port, control_port)
                 report('receiver-authenticate', 'Encrypted startup credentials received; authenticating the receiver…')
@@ -481,6 +552,13 @@ class Deployment:
             raise
 
     def close(self) -> None:
+        stream, self.stream = self.stream, None
+        if stream is not None:
+            try:
+                stream.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            stream.close()
         process, self.process = self.process, None
         if process is not None:
             _stop_local_process(process)
