@@ -192,7 +192,19 @@ The application edits were reviewed at `697bd437fb48f496733ab49cde9cbb0f9e8fe74e
 and approved through `release/source-policy.json` with application SHA-256
 `0355a8d0b0463ead0e075d2cd08643d8635dfc0d12f66d61c49d2e48458c37ca`.
 The focused local regression set passed **37 tests, 1 Windows-only skip, 11
-subtests**; Linux-target mypy passed on 67 source files. A new full release
-gate and native Windows/Actions builds remain to run on the final approved
-commit. The workflow input must be that new commit SHA, never the failed run's
-SHA. No candidate has been pushed or published from this repair session.
+subtests**. The pinned Debian 12/Python 3.11.14 build at clean commit
+`74645e42efe5f3ecb3a69a215aeabbe6743bfa31` then passed the full gate:
+**1,069 passed, 20 skipped, 396 subtests passed**; alternate Qt style
+**67 passed, 16 subtests passed**; mypy passed on Linux, Windows and macOS
+targets. Content audit, frozen receiver/artwork smoke, extracted AppImage
+audit and clean-container X11 startup passed. The local AppImage is
+`dist/linux-candidate-74645e4/Minecraft-Playden-Packager-v0.4.0b2-Linux-x86_64.AppImage`,
+SHA-256 `6dfb7a006dfe06200da39b00c47724000552b7aa20ecb1628d6c9a0dc44ab6b9`.
+It is a local test artifact. The receiver manifest for this commit was
+verified and the ELF hash remained
+`bfbc62bdb04ed338ca20a19a0317317f29e1fc88f07d22478479d83a253d6b13`.
+
+Native Windows/Actions builds and the pair report still require a new workflow
+run on the final branch tip. The workflow input must be that new commit SHA,
+never the failed run's SHA. No candidate has been pushed or published from
+this repair session.
