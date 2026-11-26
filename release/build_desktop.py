@@ -135,6 +135,8 @@ def main() -> int:
         parser.error('Use the pinned Python version from release/toolchain.json')
     if sys.platform == 'linux' and platform.libc_ver() != ('glibc', '2.36'):
         parser.error('Use the pinned Debian 12 build container (glibc 2.36), not a newer host distribution')
+    if sys.platform == 'linux' and shutil.which('cc') is None:
+        parser.error('Install the native C compiler from release/linux-system-deps.sh so receiver integration tests cannot silently skip')
     env = os.environ.copy()
     env['QT_QPA_PLATFORM'] = 'offscreen'
     # Every artifact is gated on full tests, all platform type targets and whitespace.
