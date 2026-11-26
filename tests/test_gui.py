@@ -388,6 +388,22 @@ class GuiTests(unittest.TestCase):
         finally:
             manager.deleteLater()
 
+    def test_frozen_gui_shows_sdk_when_bundle_manifest_is_missing(self):
+        from minecraft_playden.gui_receiver import ReceiverManager
+        from minecraft_playden.receiver_manager import BOOT_MARKER, ReceiverConfiguration
+        bundle = self.root / 'frozen'
+        elf = bundle / 'receiver/minecraft_playden_receiver.elf'
+        elf.parent.mkdir(parents=True)
+        elf.write_bytes(b'\x7fELF\x02' + BOOT_MARKER + bytes(388))
+        with patch('sys._MEIPASS', str(bundle), create=True), \
+             patch('minecraft_playden.gui_receiver.ReceiverConfiguration.load',
+                   return_value=ReceiverConfiguration(self.root / 'missing-sdk', elf)):
+            manager = ReceiverManager(self.settings)
+        try:
+            self.assertTrue(manager.configuration.layout().isRowVisible(0))
+        finally:
+            manager.deleteLater()
+
     def test_stop_without_session_credential_explains_safe_recovery(self):
         from minecraft_playden.receiver_manager import ReceiverInfo, VERSION
         manager = self.window.receiver_manager

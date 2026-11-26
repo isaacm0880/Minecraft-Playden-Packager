@@ -11,7 +11,7 @@ import pytest
 from minecraft_playden.operations import CancellationToken
 from minecraft_playden.receiver_manager import (
     BOOT_MARKER, Deployment, PairedReceiver, ReceiverError, ReceiverInfo,
-    RECEIVER_PREFLIGHT_TIMEOUT, VERSION, stop_receiver, verified_bundled_receiver_elf,
+    RECEIVER_PREFLIGHT_TIMEOUT, VERSION, ensure_receiver_elf, stop_receiver, verified_bundled_receiver_elf,
 )
 
 
@@ -89,19 +89,65 @@ def test_payload_temp_file_error_names_stage_and_cause(tmp_path):
             Deployment().start('127.0.0.1', tmp_path / 'missing-sdk', elf)
 
 
-def test_bundled_discovery_requires_verified_elf(tmp_path, monkeypatch):
+def frozen_bundle(tmp_path, monkeypatch):
     root = tmp_path / 'frozen'
     receiver = root / 'receiver'
     receiver.mkdir(parents=True)
     elf = receiver / 'minecraft_playden_receiver.elf'
     elf.write_bytes(b'\x7fELF\x02' + BOOT_MARKER + bytes(388))
-    (receiver / 'receiver-manifest.json').write_text(json.dumps({'elf_sha256': hashlib.sha256(elf.read_bytes()).hexdigest(),
-                                                                 'source_commit': 'test-commit'}))
-    (root / 'build-metadata.json').write_text(json.dumps({'source_commit': 'test-commit'}))
+    commit = 'a' * 40
+    manifest = receiver / 'receiver-manifest.json'
+    manifest.write_text(json.dumps({'schema': 1, 'elf_sha256': hashlib.sha256(elf.read_bytes()).hexdigest(),
+                                    'elf_size': elf.stat().st_size, 'source_commit': commit, 'source_dirty': False}))
+    (root / 'build-metadata.json').write_text(json.dumps({'source_commit': commit}))
     monkeypatch.setattr('sys._MEIPASS', str(root), raising=False)
+    return root, elf, manifest
+
+
+def test_bundled_discovery_requires_verified_elf(tmp_path, monkeypatch):
+    root, elf, manifest = frozen_bundle(tmp_path, monkeypatch)
     assert verified_bundled_receiver_elf() == elf
     elf.write_bytes(elf.read_bytes() + b'changed')
     assert verified_bundled_receiver_elf() is None
+    with pytest.raises(ReceiverError, match='checksum|size'):
+        ensure_receiver_elf(Path('missing-sdk'), elf, CancellationToken())
+
+
+@pytest.mark.parametrize('defect, message', [
+    ('missing-manifest', 'missing'),
+    ('malformed-manifest', 'valid manifest'),
+    ('invalid-elf', 'invalid receiver ELF'),
+    ('checksum-mismatch', 'checksum'),
+    ('wrong-source', 'source provenance'),
+])
+def test_frozen_bundle_defects_fail_closed(tmp_path, monkeypatch, defect, message):
+    root, elf, manifest_path = frozen_bundle(tmp_path, monkeypatch)
+    if defect == 'missing-manifest':
+        manifest_path.unlink()
+    elif defect == 'malformed-manifest':
+        manifest_path.write_text('{broken')
+    else:
+        manifest = json.loads(manifest_path.read_text())
+        if defect == 'invalid-elf':
+            elf.write_bytes(b'not an ELF')
+            manifest['elf_sha256'] = hashlib.sha256(elf.read_bytes()).hexdigest()
+            manifest['elf_size'] = elf.stat().st_size
+        elif defect == 'checksum-mismatch':
+            elf.write_bytes(elf.read_bytes()[:-1] + b'x')
+        elif defect == 'wrong-source':
+            manifest['source_commit'] = 'b' * 40
+        manifest_path.write_text(json.dumps(manifest))
+    assert verified_bundled_receiver_elf() is None
+    with pytest.raises(ReceiverError, match=message + r'.*no payload was sent'):
+        ensure_receiver_elf(Path('missing-sdk'), elf, CancellationToken())
+
+
+def test_source_mode_developer_elf_without_manifest_is_still_available(tmp_path, monkeypatch):
+    monkeypatch.delattr('sys._MEIPASS', raising=False)
+    elf = tmp_path / 'developer.elf'
+    elf.write_bytes(b'\x7fELF\x02' + BOOT_MARKER + bytes(388))
+    assert verified_bundled_receiver_elf() is None
+    ensure_receiver_elf(tmp_path / 'missing-sdk', elf, CancellationToken())
 
 
 def test_verified_bundle_uploads_without_sdk_utilities_and_reports_stages(tmp_path):

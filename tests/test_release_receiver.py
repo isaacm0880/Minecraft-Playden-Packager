@@ -7,7 +7,7 @@ import pytest
 
 from release import receiver
 from minecraft_playden.operations import CancellationToken
-from minecraft_playden.receiver_manager import ReceiverConfiguration, ReceiverError, ensure_receiver_elf
+from minecraft_playden.receiver_manager import BOOT_MARKER, ReceiverConfiguration, ReceiverError, ensure_receiver_elf
 
 
 def test_receiver_manifest_rejects_other_source_and_changed_elf(tmp_path):
@@ -47,9 +47,11 @@ def test_bundled_receiver_default_and_runtime_checksum_guard(tmp_path, monkeypat
     bundled = base / 'receiver'
     bundled.mkdir(parents=True)
     elf = bundled / receiver.ELF
-    elf.write_bytes(b'fixture ELF')
-    (bundled / receiver.MANIFEST).write_text(json.dumps({'elf_sha256': receiver.digest(elf),
-                                                           'source_commit': 'b' * 40}))
+    elf.write_bytes(b'\x7fELF\x02' + BOOT_MARKER + bytes(388))
+    (bundled / receiver.MANIFEST).write_text(json.dumps({'schema': 1, 'elf_sha256': receiver.digest(elf),
+                                                           'elf_size': elf.stat().st_size,
+                                                           'source_commit': 'b' * 40,
+                                                           'source_dirty': False}))
     (base / 'build-metadata.json').write_text(json.dumps({'source_commit': 'b' * 40}))
     monkeypatch.setattr('sys._MEIPASS', str(base), raising=False)
     class EmptySettings:
@@ -58,6 +60,6 @@ def test_bundled_receiver_default_and_runtime_checksum_guard(tmp_path, monkeypat
     config = ReceiverConfiguration.load(settings=EmptySettings())
     assert config.elf == elf
     ensure_receiver_elf(tmp_path / 'no-sdk', elf, CancellationToken())
-    elf.write_bytes(b'tampered')
+    elf.write_bytes(elf.read_bytes()[:-1] + b'x')
     with pytest.raises(ReceiverError, match='checksum'):
         ensure_receiver_elf(tmp_path / 'no-sdk', elf, CancellationToken())

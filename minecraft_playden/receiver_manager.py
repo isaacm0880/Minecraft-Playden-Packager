@@ -135,6 +135,10 @@ def _stop_local_process(process: subprocess.Popen[bytes]) -> None:
 def ensure_receiver_elf(sdk: Path, elf: Path, token: CancellationToken,
                         progress: ProgressCallback | None = None) -> None:
     """Build missing/stale source-tree receivers locally; never install tools."""
+    frozen = getattr(sys, '_MEIPASS', None)
+    if frozen and elf.absolute() == (Path(frozen) / 'receiver/minecraft_playden_receiver.elf').absolute():
+        _verify_frozen_receiver(Path(frozen), elf)
+        return
     manifest_path = elf.parent / 'receiver-manifest.json'
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
@@ -189,10 +193,52 @@ def verified_bundled_receiver_elf() -> Path | None:
         return None
     elf = Path(frozen) / 'receiver/minecraft_playden_receiver.elf'
     try:
-        ensure_receiver_elf(Path(), elf, CancellationToken())
-    except (OSError, ValueError, json.JSONDecodeError):
+        _verify_frozen_receiver(Path(frozen), elf)
+    except ReceiverError:
         return None
     return elf
+
+
+def _verify_frozen_receiver(root: Path, elf: Path) -> None:
+    """Fail closed on missing or replaced resources in a frozen desktop build."""
+    manifest_path = elf.parent / 'receiver-manifest.json'
+    metadata_path = root / 'build-metadata.json'
+    if not manifest_path.is_file():
+        raise ReceiverError(f'Bundled receiver verification failed: {manifest_path} is missing. '
+                            'Reinstall the complete desktop package; no payload was sent.')
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc:
+        raise ReceiverError(f'Bundled receiver verification failed: cannot read a valid manifest or '
+                            f'build metadata ({exc}). Reinstall the complete desktop package; no payload was sent.') from exc
+    commit = metadata.get('source_commit') if isinstance(metadata, dict) else None
+    if (not isinstance(manifest, dict) or manifest.get('schema') != 1
+            or not isinstance(commit, str) or re.fullmatch(r'[0-9a-f]{40}', commit) is None
+            or manifest.get('source_commit') != commit
+            or manifest.get('source_dirty') is not False
+            or not isinstance(manifest.get('elf_sha256'), str)
+            or re.fullmatch(r'[0-9a-f]{64}', manifest['elf_sha256']) is None
+            or not isinstance(manifest.get('elf_size'), int) or manifest['elf_size'] <= 0):
+        raise ReceiverError('Bundled receiver verification failed: invalid manifest or application source '
+                            'provenance. Reinstall the complete desktop package; no payload was sent.')
+    try:
+        if elf.is_symlink() or not elf.is_file() or elf.stat().st_size != manifest['elf_size']:
+            raise ReceiverError('Bundled receiver verification failed: receiver ELF is missing or its size '
+                                'differs from the manifest. Reinstall the complete desktop package; no payload was sent.')
+        if hashlib.sha256(elf.read_bytes()).hexdigest() != manifest['elf_sha256']:
+            raise ReceiverError('Bundled receiver verification failed: receiver ELF checksum differs from '
+                                'the manifest. Reinstall the complete desktop package; no payload was sent.')
+    except (OSError, ValueError) as exc:
+        if isinstance(exc, ReceiverError):
+            raise
+        raise ReceiverError(f'Bundled receiver verification failed: invalid receiver ELF ({exc}). '
+                            'Reinstall the complete desktop package; no payload was sent.') from exc
+    try:
+        prepare_elf(elf, b'\x80' + bytes(382) + b'\x01', PORT, CONTROL_PORT)
+    except (OSError, ValueError) as exc:
+        raise ReceiverError(f'Bundled receiver verification failed: invalid receiver ELF ({exc}). '
+                            'Reinstall the complete desktop package; no payload was sent.') from exc
 
 
 def export_receiver_elf(sdk: Path, elf: Path, destination: Path, token: CancellationToken) -> Path:

@@ -14,7 +14,11 @@ running PS5 ELF loader over TCP. No PS5 Payload SDK, `socat`, `plink.exe`, or
 separate receiver download is needed for this path. **Export PS5 Receiver (.elf)**
 is available under **Transfer advanced options** for manual deployment.
 The SDK setting is hidden while the packaged GUI selects its verified bundled
-ELF. Selecting a custom ELF exposes the developer SDK setting again.
+ELF. A missing or invalid bundle manifest, ELF checksum, ELF format or source
+commit prevents bundled deployment and produces a reinstall error; the GUI
+shows the SDK setting because no verified bundle was found. Selecting a custom
+ELF exposes the developer SDK setting again. Custom source-mode receivers remain
+developer-provided and are not presented as verified desktop bundles.
 
 Source checkouts can build their own receiver:
 
