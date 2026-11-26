@@ -113,3 +113,62 @@ folder cleanup, and authenticated shutdown on a physical PS5. USB0 and
 cancellation have not been physically retested. Their host regressions remain
 part of the full release suite; the physical gaps are recorded without marking
 them passed and do not block candidate preparation.
+
+## Candidate preparation checkpoint (2026-11-26)
+
+The branch includes the Windows x64 portable ZIP and Linux x86_64 AppImage
+candidate workflow. The mandatory pair check requires those two jobs and the
+source gate; macOS remains a source-build option with retained tooling and no
+official binary job. `release/requirements.txt` pins Pillow, and the frozen
+artwork smoke checks the bundled decoder and resources. The desktop bundle
+contains the verified receiver ELF, its exact-source integrity manifest,
+third-party notices and the SDK GPL-3 text. Automatic loader deployment uses
+raw TCP and needs no host PS5 SDK, `socat` or `plink.exe`.
+
+On clean commit `3d24353cb948700563770cf0c89888b09282d8b4`, the source
+approval gate accepted reviewed application snapshot
+`44b4c9d5ffde54a8a90fbc1c726f8a9fa2cd4a75a1ffa4b3f3a31e72f99759f6`.
+The receiver was rebuilt twice from pinned SDK v0.45 with reproducible ELF hash
+`bfbc62bdb04ed338ca20a19a0317317f29e1fc88f07d22478479d83a253d6b13`;
+its manifest names that exact commit and passed provenance verification.
+
+The pinned Debian 12/Python 3.11.14 Linux candidate build passed its full test
+gate with a C compiler present: **1,069 passed, 19 skipped, 396 subtests passed**.
+The skipped tests were fixture/platform cases, not missing C receiver coverage.
+The alternate Qt style gate passed **67 tests and 16 subtests**; mypy passed
+for Linux, Windows and macOS targets. The source/content audits, frozen smoke,
+extracted AppImage audit and clean-container X11 smoke passed. The local
+AppImage is `dist/linux-candidate-3d24353/Minecraft-Playden-Packager-v0.4.0b2-Linux-x86_64.AppImage`,
+SHA-256 `ebe267e6793d9c5a2db23f9897b8ea70270fae486f3d4766e26f8256054b3203`.
+It is a local validation artifact, not an official or published download.
+The three receiver tests that initially raced the receiver's post-transfer
+cleanup now wait for authenticated idle status before Stop; no receiver or
+application validation was relaxed.
+
+**Remaining before a public binary release:** the GitHub Actions Windows x64
+native ZIP build and Windows GUI/USB/path acceptance have not run in this
+session. The GitHub Actions Linux build and final pair report also remain to
+run against the same pushed commit. Inspect their checksums, bundled receiver,
+artwork and notices before publication. A clean Linux desktop host check is
+still needed for visible GUI/removable-drive behavior beyond container smoke.
+Physical USB0 and cancellation remain unverified; they are recorded gaps, not
+candidate-build blockers. Vanilla 1.0 remains Partial.
+
+The receiver links PS5 Payload SDK v0.45 startup code licensed GPL-3.0-or-later.
+The bundle now includes that license and a receiver notice. Before distributing
+the ELF publicly, the maintainer must confirm the corresponding-source offer
+and full compliance for the SDK, vendored receiver components, Qt/PySide and
+the AppImage runtime, plus rights to supplied artwork. This is a publication
+gate, not a reason to disable the provenance or integrity checks. The public
+version is still `0.4.0b2`; the maintainer must decide whether to retain it for
+this candidate or choose a new release version before publication.
+
+**To trigger candidate builds after this branch is pushed by the maintainer:**
+in GitHub Actions choose **Desktop release candidate (no publishing)**, select
+`feat/ps5-network-transfer` as the workflow branch, click **Run workflow**, and
+enter the exact 40-character SHA of that pushed branch tip as `source_sha`.
+The source gate requires the input SHA to match the workflow ref and approved
+source; it will not build an unreviewed or dirty source. Download the Receiver,
+Windows-x64, Linux-x86_64 and Verified-source-pair artifacts from that run and
+check `SHA256SUMS`, `build-metadata.json`, `content-audit.json`, `artifact.json`
+and `release-pair.json`. Do not publish until the remaining gates above pass.
