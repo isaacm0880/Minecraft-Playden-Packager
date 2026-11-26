@@ -35,7 +35,12 @@ The receiver includes Alain Mosnier’s SHA-256 implementation from
 [amosnier/sha-2](https://github.com/amosnier/sha-2), pinned to commit
 `565f65009bdd98267361b17d50cddd7c9beb3e6c`, under the 0BSD licence.
 The unmodified source and licence are in `ps5/receiver/vendor/`.
-The PS5 Payload SDK remains an external build dependency.
+The PS5 Payload SDK v0.45 is a pinned build dependency for the bundled receiver
+ELF; end users do not need it for direct loader deployment. Its upstream source
+is generally GPLv3-or-later except separately licensed files, and its startup
+code may be linked into the ELF. The binary candidate includes an SDK notice and
+GPLv3 text. Confirm the exact linked-code and corresponding-source obligations
+before distributing that ELF; the app's MIT license does not remove them.
 
 
 ## Receiver Manager cryptography
@@ -48,5 +53,10 @@ stack is shipped. Two local include adapters are identified in its manifest.
 
 GUI startup encryption uses the external `cryptography` Python package (Apache-2.0
 or BSD-3-Clause); frozen dependency licence collection retains its notices and
-those of its bundled crypto backend. The PS5 Payload SDK remains separately
-installed. Synthetic SRP vector provenance is in `tests/fixtures/pairing/README.md`.
+those of its bundled crypto backend. The PS5 Payload SDK is used only by the
+receiver build, not installed on the user's desktop. Synthetic SRP vector
+provenance is in `tests/fixtures/pairing/README.md`.
+
+The Linux AppImage also embeds the type-2 runtime, which contains code from
+musl, libfuse, squashfuse, zstd and zlib. Review its embedded runtime licence
+and source notices in the final artifact before release.

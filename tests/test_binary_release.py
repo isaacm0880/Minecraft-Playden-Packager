@@ -15,13 +15,13 @@ SOURCE = 'a' * 40
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def candidates(root):
+def candidates(root, version='0.1.0'):
     for key, platform, suffix, python in (
         ('windows', 'win32', 'Windows-x64.zip', '3.11.9'),
         ('linux', 'linux', 'Linux-x86_64.AppImage', '3.11.14')):
         directory = root / key
         directory.mkdir()
-        name = 'Minecraft-Playden-Packager-v0.1.0-' + suffix
+        name = f'Minecraft-Playden-Packager-v{version}-' + suffix
         artifact = directory / name
         data = b'synthetic executable, never executed'
         if key == 'windows':
@@ -34,7 +34,7 @@ def candidates(root):
         record = {**identity, 'filename': name, 'size': artifact.stat().st_size, 'sha256': digest,
                   'content_audit_passed': True, 'frozen_smoke_passed': True}
         metadata = {**identity, 'source_dirty': False, 'platform': platform, 'architecture': 'x86_64',
-                    'python': python, 'version': '0.1.0', 'source_files': {}, 'dependencies': {}, 'branding': {}}
+                    'python': python, 'version': version, 'source_files': {}, 'dependencies': {}, 'branding': {}}
         audit = {**identity, 'passed': True, 'symlinks': {},
                  'files': {'MinecraftPlaydenPackager.exe': hashlib.sha256(data).hexdigest()} if key == 'windows' else {}}
         for filename, value in (('artifact.json', record), ('build-metadata.json', metadata), ('content-audit.json', audit)):
@@ -85,17 +85,19 @@ def test_original_checksum_manifest_tampering_is_rejected(tmp_path, platform):
         verify(windows, linux, SOURCE)
 
 
-def test_pair_workflow_is_independent_of_optional_mac_jobs():
+def test_pair_workflow_has_only_the_two_official_binary_targets():
     text = (ROOT / '.github/workflows/desktop-build.yml').read_text()
     pair = text.split('  verify-pair:\n')[1]
     assert 'needs: [source, windows, linux]' in pair
     assert '--macos-' not in pair
     assert 'name: macOS-' not in pair
-    mac = text.split('  macos:\n')[1].split('  verify-pair:\n')[0]
-    assert "if: github.event_name == 'workflow_dispatch' && inputs.build_macos" in mac
-    assert 'continue-on-error: true' in mac
-    assert 'macos-15-intel' in mac and 'architecture: arm64' in mac
-    assert '--native-cocoa' in mac
+    assert '  macos:\n' not in text
+    assert 'build_macos:' not in text
+
+
+def test_current_beta_candidate_names_follow_the_build_metadata(tmp_path):
+    windows, linux = candidates(tmp_path, '0.4.0b2')
+    assert verify(windows, linux, SOURCE)['version'] == '0.4.0b2'
 
 
 def test_windows_linux_scanner_context_verifies_only_selected_artifacts(tmp_path):

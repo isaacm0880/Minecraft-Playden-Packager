@@ -17,6 +17,22 @@ PS5 acceptance testing has not been verified.
 provides only its automatic source ZIP and tar.gz archives. Existing v0.1.0
 application downloads remain the stable release and lack these beta features.
 
+The next release candidate is being prepared as a **Windows x64 portable ZIP**
+and **Linux x86_64 AppImage**. macOS remains source-build only; native Mac
+compatibility has not been physically verified. The candidate will include a
+manifest-verified receiver ELF that deploys through an already running PS5 ELF
+loader without a host PS5 SDK, `socat` or `plink.exe`.
+
+The maintainer physically confirmed automatic receiver deployment and
+authentication, internal-storage transfer and publication, temporary-directory
+cleanup, and authenticated shutdown with the receiver built from `b05c77d`.
+USB0 and transfer cancellation have not been physically retested; they are not
+claims of completed acceptance. These gaps do not block preparing the candidate.
+Vanilla 1.0 remains **partially compatible**: gameplay and controller input work,
+while its menu flashes and audio is inaudible. See [compatibility details](docs/COMPATIBILITY.md).
+See the [draft binary candidate notes](release/notes/next-binary-candidate.md)
+for the planned downloads and remaining limits.
+
 This beta adds metadata-driven Minecraft packaging, automatic native Fabric
 preparation, simpler build/transfer controls and automatic CLI receiver startup
 with `transfer-ps5 --start-receiver`. LAN transfers target internal import storage
@@ -37,6 +53,7 @@ See the [beta release notes](https://github.com/isaacm0880/Minecraft-Playden-Pac
 - Copies every successful queue output to USB, with progress, cancellation and checksum verification enabled by default.
 - Sends newly built or existing validated packages over paired LAN, using the current output folder name, progress, smoothed speed/ETA and cancellation; CLI `--name` is an explicit override.
 - Manages the receiver through explicit Start/Stop controls, encrypted automatic startup pairing or a six-digit PAKE code. CLI `--start-receiver` uses the same secure startup path. The PS5 ELF loader must already be running.
+- Includes an Advanced option to export the receiver ELF. Candidate binaries will bundle the verified ELF and its manifest; automatic deployment needs no host PS5 SDK, `socat` or `plink.exe`.
 
 It does **not** sign in, download a replacement Minecraft client, collect console
 logs or deploy a payload without an explicit GUI Start Receiver action or CLI `--start-receiver`. Public metadata, dependencies,

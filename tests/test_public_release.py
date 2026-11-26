@@ -34,6 +34,9 @@ class PublicReleaseTests(unittest.TestCase):
                     self.assertTrue((output / name).is_file(), name)
                 self.assertEqual((output / 'LICENSE').read_bytes(), (ROOT / 'LICENSE').read_bytes())
                 self.assertEqual((output / 'README-MACOS.md').exists(), macos)
+                for notice in ('SDK-RECEIVER-NOTICE.md', 'SDK-GPL-3.txt',
+                               'BearSSL-LICENSE.txt', 'sha-256-LICENSE.md'):
+                    self.assertTrue((output / 'receiver/notices' / notice).is_file(), notice)
                 for path in output.glob('*.md'):
                     for target in re.findall(r'\]\(([^)]+)\)', path.read_text(encoding="utf-8")):
                         if '://' not in target and not target.startswith('#'):
@@ -54,12 +57,12 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertNotIn('contents: write', workflow)
         self.assertIn("requested = candidate_source(", workflow)
         self.assertNotIn("  push:", workflow)
-        self.assertEqual(workflow.count('ref: ${{ needs.source.outputs.sha }}'), 5)
+        self.assertEqual(workflow.count('ref: ${{ needs.source.outputs.sha }}'), 4)
         self.assertIn('Receiver-${{ needs.source.outputs.sha }}', workflow)
-        for expected in ('windows-2022', 'macos-15-intel', 'architecture: arm64',
-                         'release.verify_pair', 'SHA256SUMS', 'release.public_audit',
-                         '--native-cocoa', 'QT_QPA_PLATFORM=xcb'):
+        for expected in ('windows-2022', 'release.verify_pair', 'SHA256SUMS',
+                         'release.public_audit', 'QT_QPA_PLATFORM=xcb'):
             self.assertIn(expected, workflow)
+        self.assertNotIn('  macos:\n', workflow)
 
     def test_synthetic_game_fixture_is_pinned(self):
         self.assertTrue(audit_paths(ROOT, [SYNTHETIC_CLIENT])['passed'])

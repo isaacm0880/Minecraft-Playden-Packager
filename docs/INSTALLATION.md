@@ -2,13 +2,15 @@
 
 ## Upcoming native release candidate
 
-The next candidate is being prepared as a Windows x64 portable ZIP, a Linux
-x86_64 AppImage and macOS ARM64/x86_64 `.app` bundles delivered in ZIP files.
-Each will contain the verified PS5 receiver ELF and manifest. With an already
+The next candidate is being prepared as a Windows x64 portable ZIP and a Linux
+x86_64 AppImage. macOS users build from source; no Mac binary is a candidate
+artifact. Both binaries will contain the verified PS5 receiver ELF and manifest. With an already
 running PS5 ELF loader, **Start Receiver** can deploy it without a local SDK,
-`socat`, or `plink.exe`. These candidate artifacts have not yet been built and
-accepted on every native host; use the published v0.1.0 binaries or the source
-checkout until they are available.
+`socat`, or `plink.exe`. Candidate artifacts have not yet passed both native
+builds; use the published v0.1.0 binaries or the source checkout until they are
+available. Physical PS5 testing confirmed automatic deployment,
+authentication, internal transfer/publication, temporary cleanup and shutdown
+for receiver source `b05c77d`. USB0 and cancellation remain physically untested.
 
 Automatic Fabric preparation requires a separate installed host-native full
 JDK 17+ with `jdk.compiler`. Set `JAVA_HOME`, put its `java` or `java.exe` on
@@ -99,8 +101,8 @@ features; run `--help` for their scope. They do not make unsupported loaders lau
 
 ## macOS: experimental source-only
 
-**Not yet verified on Apple Silicon or Intel Macs.** v0.1.0 has no supported macOS
-application ZIP. Source execution or a self-built app may fail; report the exact
+**Not yet verified on Apple Silicon or Intel Macs.** No official macOS binary is
+planned for the next candidate. Source execution or a self-built app may fail; report the exact
 macOS, CPU, Python and Qt versions with any bug. This does not change the package's
 Windows Java target or guarantee that a game/modpack works on PS5.
 
@@ -113,8 +115,8 @@ python3 -m venv .venv
 .venv/bin/python -m minecraft_playden gui
 ```
 
-For a self-built `.app`, use a **clean committed checkout**, native Python **3.11.9**
-matching your CPU, and a new output directory. The pinned release builder runs its
+For an optional self-built `.app`, use a **clean committed checkout**, native Python **3.11.9**
+matching your CPU, and a new output directory. The existing build tool runs its
 full tests, all type targets, privacy/content audits and frozen smoke tests:
 
 ```sh
@@ -130,8 +132,8 @@ The receiver candidate must first be built on Linux from the same approved
 source commit with `python -m release.receiver --output NEW_DIRECTORY`, then
 copied unchanged with its manifest to the Mac. The source approval gate must
 accept that reviewed commit before a binary candidate can be built.
-The output is an experimental local ZIP containing an ad-hoc signed app, not a
-notarized or supported release. Gatekeeper, Finder, Cocoa startup and external-drive
+The output is a local ZIP containing an app with the build tool's ad-hoc
+signature; it is not an official distribution. Gatekeeper, Finder, Cocoa startup and external-drive
 permissions remain unverified. Do not disable system security globally. A failed
 check is a blocker for that self-build, not a reason to bypass the builder's gates.
 

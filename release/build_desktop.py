@@ -91,7 +91,9 @@ def bundle_documentation(root: Path, destination: Path, macos: bool = False) -> 
     notices.mkdir()
     for source, name in (('ps5/receiver/vendor/LICENSE.md', 'sha-256-LICENSE.md'),
                          ('ps5/receiver/vendor/bearssl/LICENSE.txt', 'BearSSL-LICENSE.txt'),
-                         ('ps5/receiver/vendor/README.md', 'VENDORED-SOURCES.md')):
+                         ('ps5/receiver/vendor/README.md', 'VENDORED-SOURCES.md'),
+                         ('release/SDK-RECEIVER-NOTICE.md', 'SDK-RECEIVER-NOTICE.md'),
+                         ('release/licenses/GPL-3.txt', 'SDK-GPL-3.txt')):
         shutil.copyfile(root / source, notices / name)
     (destination / 'benchmarks').mkdir()
     for name in ('lan-loopback-2026-11-16.jsonl', 'lan-profile-loopback-2026-11-16.jsonl'):

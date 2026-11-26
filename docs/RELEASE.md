@@ -50,8 +50,9 @@ archives, metadata and checksums are preserved. Manual acceptance is not claimed
 Desktop candidate builds are manual-only to avoid rebuilding published binaries
 for documentation edits. The existing exact-source, test, type, privacy/audit,
 smoke and publication guards remain active when a candidate build is requested.
-Select the reviewed ref and supply its exact commit as `source_sha`. Optional
-experimental Mac builds remain opt-in, independent of the required binary pair.
+Select the reviewed ref and supply its exact commit as `source_sha`. The next
+candidate workflow produces Windows/Linux binaries only; Mac source-build
+tooling remains available outside that workflow.
 
 `Publish verified v0.1.0 assets (no rebuild)` runs a read-only artifact preflight
 on publication-infrastructure updates to the preparation branch. Only a push of
@@ -74,29 +75,28 @@ python -m release.build_desktop --source-sha EXACT_PUBLIC_COMMIT --output ../new
 
 Use a new output directory every time. Linux additionally requires the exact
 container image from `release/toolchain.json` and `release/linux-system-deps.sh`;
-Windows/macOS need matching native hosts. Do not cross-compile an archive and
+Windows needs a matching native host. Do not cross-compile an archive and
 claim it passed a native smoke test. Preserve failed attempts and existing archives.
 Build the receiver once on Linux, then use its unchanged ELF and manifest for
 every desktop target from that exact source commit. The source approval gate
 must be updated through review before these commands can produce a candidate.
 After a Linux container build, run the frozen executable under X11 with
 `xvfb-run -a env QT_QPA_PLATFORM=xcb PATH_TO_FROZEN_EXECUTABLE --smoke-test`.
-macOS also requires `python -m release.smoke PATH_TO_FROZEN_EXECUTABLE --native-cocoa`.
+Mac users who self-build can use the retained macOS build and Cocoa smoke tools;
+they are outside the official binary cohort.
 
 ## Candidate checks
 
 The required binary targets are Windows x64 portable ZIP and Linux x86_64
 AppImage, from the same exact source commit. The `verify-pair` job depends only on
-those two jobs and the source guard. macOS is experimental and source-only in
-v0.1.0: both native Mac build jobs remain opt-in via `build_macos` on manual
-dispatch. They retain their checks, use the same SHA and are non-blocking; optional
-Mac candidates are not v0.1.0 release assets. Normal source CI also runs on
+those two jobs and the source guard. There is no macOS binary job in the
+candidate workflow. Normal source CI also runs on
 Windows/Linux with all three mypy targets; optional native Mac source tests are
 available through `test_macos` on the Tests workflow.
 Pinned toolchains, complete pytest runs, three-platform type checks, content
 and credential audits, frozen application smoke tests and native GUI startup
 checks remain mandatory. Linux uses a Debian Bookworm baseline (glibc 2.36).
-Experimental self-built macOS candidates use ad-hoc signatures; they are not notarized.
+No Apple signing or notarization work is planned for the official cohort.
 
 Download each workflow artifact and the final verification artifact. Inspect
 `build-metadata.json`, `artifact.json`, `content-audit.json`, `release-pair.json`

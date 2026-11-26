@@ -141,10 +141,10 @@ def test_uncertain_receiver_ports_never_deploy(tmp_path, failure):
     launch.assert_not_called()
 
 
-def test_missing_sdk_is_actionable_before_launch(tmp_path):
+def test_missing_receiver_elf_is_actionable_before_launch(tmp_path):
     with patch('minecraft_playden.receiver_manager._connect', side_effect=ConnectionRefusedError()), \
          patch('minecraft_playden.receiver_manager.subprocess.Popen') as launch:
-        with pytest.raises(ReceiverError, match='SDK deployer was not found'):
+        with pytest.raises(ReceiverError, match='Receiver ELF was not found'):
             Deployment().start('127.0.0.1', tmp_path, tmp_path / 'missing.elf')
     launch.assert_not_called()
 

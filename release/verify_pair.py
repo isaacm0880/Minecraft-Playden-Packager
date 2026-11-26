@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 
 
 def verify(windows: Path, linux: Path, expected: str, macos_arm64: Path | None = None,
@@ -20,11 +21,13 @@ def verify(windows: Path, linux: Path, expected: str, macos_arm64: Path | None =
         record = json.loads((directory / 'artifact.json').read_text())
         metadata = json.loads((directory / 'build-metadata.json').read_text())
         audit = json.loads((directory / 'content-audit.json').read_text())
-        path = directory / record['filename']
-        if path.name != 'Minecraft-Playden-Packager-v0.1.0' + suffix or path.parent != directory:
-            raise ValueError('Unexpected release artifact name')
         if record['preview'] or metadata['source_dirty'] or metadata['preview']:
             raise ValueError('Dirty/preview artifacts cannot form a release candidate')
+        path = directory / record['filename']
+        version = metadata.get('version')
+        if (not isinstance(version, str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[a-z]+[0-9]+)?', version)
+                or path.name != f'Minecraft-Playden-Packager-v{version}' + suffix or path.parent != directory):
+            raise ValueError('Unexpected release artifact name')
         if metadata['platform'] != target or metadata['architecture'] != architecture or metadata['python'] != toolchain['python'][target]:
             raise ValueError(f'Unexpected platform or Python patch version: {target}')
         if not record['content_audit_passed'] or not record['frozen_smoke_passed'] or not audit['passed']:
@@ -48,14 +51,14 @@ def verify(windows: Path, linux: Path, expected: str, macos_arm64: Path | None =
         for key in ('source_tree_sha256', 'source_files', 'dependencies', 'version', 'branding'):
             if records[0][1][key] != metadata[key]:
                 raise ValueError(f'Cross-platform source or toolchain mismatch: {key}')
-    manual = ['Visible Windows startup, Explorer and physical USB workflow',
-              'Native KDE Wayland and another Linux desktop, with physical USB',
-              'Minecraft 26.3 package regression and PS5/Playden acceptance']
+    manual = ['Visible Windows startup and Explorer workflow',
+              'Native KDE Wayland and another Linux desktop startup',
+              'Physical USB0 and receiver cancellation remain unverified; not blockers for candidate preparation']
     if macos_arm64 is not None:
         manual.append('Optional experimental macOS: physical Apple Silicon and Intel Macs, Gatekeeper, Finder and USB')
-    return {'version': '0.1.0', 'source_commit': expected,
+    return {'version': records[0][1]['version'], 'source_commit': expected,
             'binary_platforms': [target + '-' + architecture for _, _, target, architecture in targets],
-            'macos_status': 'experimental; not verified for release; source-only in v0.1.0',
+            'macos_status': 'source-build only; physical compatibility not verified',
             'source_tree_sha256': records[0][1]['source_tree_sha256'],
             'python_versions': {(item[1]['platform'] + '-' + item[1]['architecture'] if item[1]['platform'] == 'darwin'
                                  else item[1]['platform']): item[1]['python'] for item in records},

@@ -28,7 +28,7 @@ The build command refuses dirty receiver source unless explicitly making a
 local `--allow-dirty-preview` artifact.
 
 The desktop workflow builds this receiver once after the source gate and passes
-the same artifact to Windows, Linux and both Mac jobs. Each desktop
+the same artifact to Windows and Linux. Each desktop
 builder verifies the manifest against its exact checkout before embedding the
 ELF and manifest. The content audit checks their hashes, and the frozen smoke
 checks the default ELF path and runtime checksum guard. A configured external
@@ -39,8 +39,11 @@ manually selected unmanifested ELF. The already-running PS5 ELF loader is
 always an external prerequisite. The GUI can export the unpatched ELF from
 its Advanced section for manual deployment.
 
-The ELF is source and toolchain bound, not yet console accepted. The pinned SDK
-archive and payload licensing/notice obligations need final distribution review.
+The ELF is source and toolchain bound. Automatic deployment, authentication,
+internal transfer/publication, temporary cleanup and authenticated shutdown were
+physically confirmed on PS5 with the receiver from `b05c77d`. USB0 and cancellation
+have not been physically retested; neither blocks candidate preparation. The pinned
+SDK archive and payload licensing/notice obligations need final distribution review.
 Do not substitute a same-version but different ELF; the management handshake
 alone does not establish exact receiver source identity.
 
@@ -50,11 +53,8 @@ the receiver's immutable-inventory top-level key allowlist lacked the new
 `legacy_java2d` marker. The receiver now accepts that marker only when it is
 bound to Vanilla 1.0 LaunchWrapper metadata and both Java2D argument files.
 The exact failed package passed the corrected host receiver's transfer, VERIFY,
-COMMIT and stage cleanup. A rebuilt ELF still needs the same focused PS5
-acceptance: stop an old authenticated receiver, deploy the new manifest-bound
-ELF through the running loader, transfer the retained package under a fresh
-import name, confirm publication and absence of `.pdlan-*` temporary stages,
-then stop the authenticated receiver. No Minecraft gameplay replay is needed.
+COMMIT and stage cleanup. The rebuilt ELF subsequently passed those focused PS5 checks. No Minecraft
+gameplay replay is required for the distribution candidate.
 
 ## Host JDK for automatic Fabric preparation
 
@@ -88,84 +88,28 @@ references for the later provisioning decision.
 - **Windows x64:** Use pinned Python 3.11.9, build/re-audit the portable ZIP,
   run frozen smoke and native GUI/USB/path-alias acceptance. Test direct loader
   deployment from the bundled receiver on Windows.
-- **macOS ARM64 and x86_64:** Jobs are required in the candidate workflow and
-  use numeric Apple bundle version fields. Run Cocoa/Finder, external-volume,
-  cancellation and Gatekeeper acceptance on both architectures. Decide whether
-  ad-hoc signing without Developer ID notarization is an acceptable experimental
-  distribution policy; do not advertise stable Mac binaries yet.
+- **macOS:** Source-build instructions and existing build tooling remain available.
+  No macOS binary is produced by the official candidate workflow, and physical
+  Mac compatibility is unverified. No Apple signing or notarization work is planned.
 - **All platforms:** Approve the source snapshot, review supplied-artwork rights
   and dependency/SDK notices, keep receiver source/ELF evidence, run the existing
-  full release gates only when the pipeline is ready, then record exact artifact
+  full release gates, then record exact artifact
   digests and clean-machine acceptance. The frozen program is GUI-only; a
   binary CLI promise needs a separate executable or an explicit source-CLI
   requirement.
 
-## Recorded Vanilla 1.0 physical check and optional follow-up
+## Recorded physical compatibility limits
 
-The maintainer has completed the first physical test: package generation and
-LAN transfer passed; gameplay/controller input work after two Java2D properties,
-but menu flashing and inaudible audio make compatibility Partial. The steps
-below are a reference for any focused receiver/audio follow-up, not a release
-gate or a request to replay working Minecraft versions. The original candidate
-requires the two manual properties; fresh 1.0 builds add them automatically.
+Vanilla 1.0 package generation and LAN publication passed. Gameplay and controller
+input work after the scoped Java2D workaround, but the main menu flashes and audio
+is inaudible; status remains Partial. World saving appeared to work, with reload
+unconfirmed. Menu rendering is a potential upstream Playden/Wine issue. Neither
+perfect Vanilla 1.0 compatibility nor another gameplay cycle is a condition for
+this distribution candidate. See [legacy launch evidence](LEGACY-LAUNCH.md).
 
-Use the existing validated local folder
-`dist/physical-vanilla-1.0-20261125/Vanilla-1.0/`. Keep a copy and choose a
-fresh remote import name. The current receiver candidate is in
-`dist/receiver-physical/` with its source-bound `receiver-manifest.json`. If the
-receiver source changes, rebuild from the new clean commit with
-`python -m release.receiver --output NEW_DIRECTORY` and use that new ELF and
-manifest. Do not use an older installed receiver with the same handshake.
-
-1. Record PS5 firmware, loader, Playden revision, receiver manifest/ELF SHA-256,
-   storage destination, and the desktop source commit. Confirm the PS5 ELF
-   loader is already running and USB0 is mounted if testing USB0.
-2. From the project checkout, run the commands below with a fresh import name.
-   The SDK deployer may keep its terminal open to forward receiver output; use
-   another terminal for the transfer. Enter the six-digit code from the PS5
-   notification at the hidden CLI prompt. Replace `PS5_IP` with its LAN IPv4:
-
-   ```sh
-   .venv/bin/python -m minecraft_playden validate dist/physical-vanilla-1.0-20261125/Vanilla-1.0
-   PS5_IP=192.168.1.50
-   PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk
-   "$PS5_PAYLOAD_SDK/bin/prospero-deploy" -h "$PS5_IP" -p 9021 dist/receiver-physical/minecraft_playden_receiver.elf
-   # In a second terminal, while the receiver is running:
-   PS5_IP=192.168.1.50
-   .venv/bin/python -m minecraft_playden transfer-ps5 dist/physical-vanilla-1.0-20261125/Vanilla-1.0 --host "$PS5_IP" --pair --destination internal --name Vanilla-1.0-release-check
-   ```
-
-   On Windows use the same GUI pairing/transfer controls; the shell commands
-   above assume a POSIX host. If using the GUI to start the receiver, select
-   `dist/receiver-physical/minecraft_playden_receiver.elf` in advanced options
-   and use its paired session to send the existing package.
-3. Send Vanilla 1.0 to a fresh internal import name. Confirm the success receipt,
-   final folder, SHA-256 verification and absence of the owned stage and empty
-   `/data/playden-packager-temp/` parent. Repeat one fresh-name transfer to
-   `usb0`; verify publication under `/mnt/usb0/playden/import/` and absence of
-   its owned stage/empty temporary parent. Leave other packages and files alone.
-   Cancel one disposable transfer before COMMIT and confirm its private stage is
-   removed and no final import appears. A lost COMMIT receipt requires inspecting
-   the final folder before any retry.
-
-   ```sh
-   .venv/bin/python -m minecraft_playden transfer-ps5 dist/physical-vanilla-1.0-20261125/Vanilla-1.0 --host "$PS5_IP" --pair --destination usb0 --name Vanilla-1.0-usb0-release-check
-   ```
-
-   Restart the receiver for a new six-digit code before a second one-shot CLI
-   pairing. For both destinations in one receiver session, use the GUI's
-   authenticated connection instead.
-4. Import the internal Vanilla 1.0 folder through Playden's folder flow.
-   Program should be `java/bin/java.exe`. For a fresh package built with this
-   update, choose **Use recipe** for `playden/recipe.json`. For the original
-   candidate, use manual arguments from `PLAYDEN.txt` or
-   `playden.java8-command` and add `-Dsun.java2d.d3d=false` and
-   `-Dsun.java2d.opengl=false` before the main class. Do not use
-   `@../../playden.args` for Java 8.
-5. For an optional focused audio check, confirm the imported game folder retains
-   `instances/default/minecraft/resources/sound3/` and the other indexed sound
-   directories. Capture post-S3-fallback sound registration or Wine audio errors
-   and the game's sound settings. If convenient, reload the saved disposable
-   world; the earlier report established only that saving appeared to work.
-   The menu flashing is a Playden/Wine developer follow-up, not a packager
-   release gate. Previously working versions need no retest.
+The receiver built from `b05c77d` passed automatic loader deployment, encrypted
+startup authentication, internal-storage transfer and publication, temporary
+folder cleanup, and authenticated shutdown on a physical PS5. USB0 and
+cancellation have not been physically retested. Their host regressions remain
+part of the full release suite; the physical gaps are recorded without marking
+them passed and do not block candidate preparation.

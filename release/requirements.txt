@@ -1,8 +1,10 @@
-# Reviewed desktop build toolchain; install into a NEW Python 3.11.9 (Windows) or 3.11.14 (Linux) environment.
+# Reviewed Windows/Linux candidate toolchain; use a NEW Python 3.11.9 (Windows)
+# or 3.11.14 (Linux) environment. A self-built Mac app uses native Python 3.11.9.
+# Fabric preparation uses an installed host JDK 17+ outside this Python environment.
 PyInstaller==6.22.3
 pyinstaller-hooks-contrib==2026.10
 PySide6==6.11.3
-Pillow==12.3.0
+Pillow==12.3.0  # Required for packaged artwork validation and frozen smoke.
 certifi==2026.10.23
 setuptools==84.2.1
 pytest==9.2.0

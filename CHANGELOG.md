@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- The candidate workflow builds only a Windows x64 portable ZIP and Linux
+  x86_64 AppImage from one approved source commit. macOS remains source-build
+  only and physically unverified.
+- Bundle the exact-source PS5 receiver ELF and integrity manifest. Direct loader
+  deployment requires no host PS5 SDK, `socat` or `plink.exe`.
+- Physical PS5 acceptance passed for automatic deployment, authentication,
+  internal transfer/publication, temporary cleanup and authenticated shutdown
+  with receiver source `b05c77d`. USB0 and cancellation have not been physically
+  retested.
+- Fabric preparation requires an installed host-native JDK 17+; standard
+  PrismLauncher managed-Java locations are checked. Pillow is pinned in the
+  desktop build environment.
+- Vanilla 1.0 remains partially compatible because menu flashing and inaudible
+  audio persist despite its scoped Java2D workaround.
+
 - Omit ZGC from automatic JVM defaults while preserving explicit JVM additions.
   Keep supported metadata defaults and gate compact object headers by Java version.
 - Verify the existing root `recipe.json` against Playden's new folder import
