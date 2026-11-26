@@ -208,3 +208,25 @@ Native Windows/Actions builds and the pair report still require a new workflow
 run on the final branch tip. The workflow input must be that new commit SHA,
 never the failed run's SHA. No candidate has been pushed or published from
 this repair session.
+
+## Windows receiver candidate checkpoint (2026-11-26)
+
+The physical Windows preview confirmed raw ELF upload, encrypted startup,
+receiver authentication, authenticated Stop and refusal on both receiver ports
+after shutdown. Application commit `1f67dea1781e61331553669a6f6ee94d780f45d9`
+contains those fixes. Commit `184cee3355fcb2333c4c4ad1611df9df130f935e`
+closes frozen-bundle verification on a missing or invalid manifest, ELF or
+source provenance. The reviewed application snapshot is approved by
+`8c2663f8c6a3b55a763af139a256eb328124ce6e`; `check_source` and the
+public source audit passed at that commit.
+
+Desktop candidate run `45877548925` passed source and receiver jobs. Linux's
+full test gate failed four assertions that still expected the prior receiver
+message or Stop-button behavior (1,086 passed, 20 skipped, 396 subtests passed).
+Windows and pair jobs were cancelled after the failure. No desktop candidate
+was accepted from that run. The follow-up edits update only those assertions:
+occupied ports still block deployment, an unpaired Stop click sends no shutdown
+request, and connection-refused errors retain the endpoint and cause. The
+native Windows targeted set passed 29 tests, with five C receiver cases skipped
+because no native C compiler is installed. The next exact-commit Actions run
+must exercise those cases and complete both desktop artifacts and pair checks.

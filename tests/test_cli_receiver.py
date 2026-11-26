@@ -115,7 +115,7 @@ def test_cli_deploys_real_encrypted_receiver_and_transfers_without_a_code_prompt
 def test_running_receiver_requires_authenticated_access_and_is_never_replaced(managed, tmp_path):
     with managed() as running, patch('minecraft_playden.receiver_manager.subprocess.Popen') as launch:
         deploy = Deployment()
-        with pytest.raises(ReceiverError, match='already listening'):
+        with pytest.raises(ReceiverError, match=rf'listening at 127\.0\.0\.1:{running.control_port}.*No service was replaced'):
             deploy.start('127.0.0.1', tmp_path / 'missing-sdk', tmp_path / 'missing.elf',
                          port=running.port, control_port=running.control_port)
         paired = deploy.start('127.0.0.1', tmp_path / 'missing-sdk', tmp_path / 'missing.elf',

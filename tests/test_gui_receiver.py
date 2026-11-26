@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication
 
 from minecraft_playden.desktop import ValidatedPackage
 from minecraft_playden.network_transfer import NetworkRequest, NetworkResult
-from minecraft_playden.receiver_manager import Deployment, PairedReceiver, ReceiverInfo, VERSION, ReceiverError, UnsupportedReceiver
+from minecraft_playden.receiver_manager import Deployment, PairedReceiver, ReceiverInfo, VERSION, ReceiverError, UnsupportedReceiver, receiver_status
 from test_gui_preferences import preferences
 from test_receiver_manager import managed, receiver_binary, wait_receiver_idle
 
@@ -60,7 +60,15 @@ def test_external_receiver_requires_pairing_before_send_or_stop_then_sends_exist
         pump_until(lambda: not manager.busy())
         assert manager.state == 'Unknown'
         assert 'unverified' in manager.version.text()
-        assert not manager.stop_button.isEnabled() and not window.copy_ps5_button.isEnabled()
+        assert manager.stop_button.isEnabled() and not window.copy_ps5_button.isEnabled()
+        with patch('minecraft_playden.gui_receiver.stop_receiver') as stop:
+            manager.stop_button.click()
+        stop.assert_not_called()
+        assert manager.state == 'Unknown'
+        assert 'requires this receiver session’s credential' in manager.error.text()
+        assert 'No process was terminated' in manager.error.text()
+        assert receiver_status(running.owner).session_id == running.owner.info.session_id
+        assert running.process.poll() is None
         manager.code.setText(running.code)
         manager.pair_button.click()
         pump_until(lambda: not manager.busy())
@@ -148,7 +156,8 @@ def test_unexpected_termination_is_detected_by_monitor_and_disables_stop(ui, man
         running.process.terminate(); running.process.wait(timeout=5)
         pump_until(lambda: manager.state == 'Unknown' and not manager.busy())
         assert not manager.stop_button.isEnabled() and not window.copy_ps5_button.isEnabled()
-        assert 'may have stopped' in manager.error.text()
+        assert f'{running.owner.host}:{running.control_port}' in manager.error.text()
+        assert 'ConnectionRefusedError' in manager.error.text()
 
 
 def test_missing_receiver_and_unsupported_versions_have_actionable_errors(ui):

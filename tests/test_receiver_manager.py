@@ -472,7 +472,7 @@ def test_start_refuses_existing_receiver_before_invoking_loader(managed, tmp_pat
         elf = tmp_path / 'receiver.elf'; elf.write_bytes(b'irrelevant; already-running check comes first')
         with patch('minecraft_playden.receiver_manager.shutil.which', return_value='/fake/socat'), \
              patch('minecraft_playden.receiver_manager.subprocess.Popen') as launch:
-            with pytest.raises(ReceiverError, match='already listening'):
+            with pytest.raises(ReceiverError, match=rf'listening at 127\.0\.0\.1:{running.control_port}.*No service was replaced'):
                 Deployment().start('127.0.0.1', sdk, elf, port=running.port, control_port=running.control_port)
             launch.assert_not_called()
         assert receiver_status(running.owner).version == VERSION
