@@ -7,14 +7,13 @@ Minecraft version needs another gameplay test.
 ## Source approval gate
 
 `release/provenance.py` compares every application file against the hash in
-`release/source-policy.json` before allowing even a dirty preview. That policy
-names the old `6fbc4d3` review. The intended process is to review the complete
-new application diff, tests, resource/license inventory and exact application
-hash; record the maintainer's approval; then update the policy to the approved
-hash and reviewed commit. Keep the dirty-source, exact-commit, content-audit,
-test and frozen-smoke gates active. The policy must not be changed just to make
-a build pass. A release candidate must use a clean final commit after that
-approval; a later application edit requires another review/hash update.
+`release/source-policy.json` before allowing even a dirty preview. The maintainer
+authorised approval of the reviewed source. The application changes from verified
+baseline `4584b3c` through `b8b85cb` were reviewed with targeted tests and the
+snapshot `44b4c9d5ffde54a8a90fbc1c726f8a9fa2cd4a75a1ffa4b3f3a31e72f99759f6`
+was recorded in the existing policy. Dirty-source, exact-commit, content-audit,
+test and frozen-smoke gates remain active. Any later application edit requires a
+new review and policy hash.
 
 ## Receiver build and bundling
 

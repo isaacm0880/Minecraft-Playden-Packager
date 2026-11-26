@@ -1,10 +1,6 @@
 {
   "schema": 1,
-  "reviewed_gui_snapshot": "6fbc4d346e52145a130f4d2b0adc34f5f941dd29",
-  "application_tree_sha256": "0b2f7500e9b1558b767ed89a22e8ee1619fd979053777d0514a723cb58acdc78",
-  "release_only_changes": {
-    "minecraft_playden/packaged_app.py": "Frozen smoke assertions updated for the approved GUI progress scale; normal application behavior unchanged.",
-    "minecraft_playden/gui_app.py": "Canonical output identity for USB results and cleanup bookkeeping across filesystem aliases.",
-    "minecraft_playden/cleanup.py": "Canonical verified-source receipts after strict no-traversal/no-link checks; deletion checks preserved."
-  }
+  "reviewed_gui_snapshot": "b8b85cbac0d09a1230a1dd647079afb3975d6d9c",
+  "application_tree_sha256": "44b4c9d5ffde54a8a90fbc1c726f8a9fa2cd4a75a1ffa4b3f3a31e72f99759f6",
+  "release_only_changes": {}
 }
